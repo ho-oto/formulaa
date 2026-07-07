@@ -1,0 +1,8 @@
+[package]
+name = "mascii"
+version = "0.1.0"
+edition = "2024"
+description = "LyX-like interactive TUI math editor rendering Unicode/ASCII-art formulas"
+
+[dependencies]
+ratatui = "0.29"
