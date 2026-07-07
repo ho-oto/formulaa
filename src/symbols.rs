@@ -36,8 +36,48 @@ pub const SYMBOLS: &[(&str, char)] = &[
     ("ell", 'ℓ'), ("Re", 'ℜ'), ("Im", 'ℑ'), ("aleph", 'ℵ'),
     ("angle", '∠'), ("perp", '⊥'), ("parallel", '∥'), ("prime", '′'),
     ("degree", '°'), ("cdots", '⋯'), ("ldots", '…'), ("dots", '…'),
+    ("vdots", '⋮'), ("ddots", '⋱'),
     ("langle", '⟨'), ("rangle", '⟩'),
 ];
+
+/// Accent marks: (command name, mark char, is_under, latex command).
+/// Mark chars are RESERVED — they never occur as atoms, and over-marks are
+/// disjoint from under-marks; this is what makes a two-character column
+/// (mark stacked on base) unambiguous for the parser.
+pub const ACCENTS: &[(&str, char, bool, &str)] = &[
+    ("hat", '^', false, "hat"),
+    ("tilde", '˜', false, "tilde"), // U+02DC, distinct from the atom '~'
+    ("bar", '¯', false, "bar"),
+    ("vec", '⇀', false, "vec"), // U+21C0, distinct from the atom '→'
+    ("dot", '˙', false, "dot"),
+    ("ddot", '¨', false, "ddot"),
+    ("check", 'ˇ', false, "check"),
+    ("breve", '˘', false, "breve"),
+    ("ring", '˚', false, "mathring"),
+    ("underline", '‗', true, "underline"), // U+2017
+];
+
+pub fn accent_by_name(name: &str) -> Option<(char, bool)> {
+    ACCENTS
+        .iter()
+        .find(|(n, ..)| *n == name)
+        .map(|&(_, c, under, _)| (c, under))
+}
+
+pub fn accent_info(mark: char) -> Option<(bool, &'static str)> {
+    ACCENTS
+        .iter()
+        .find(|&&(_, c, ..)| c == mark)
+        .map(|&(_, _, under, latex)| (under, latex))
+}
+
+pub fn is_over_mark(c: char) -> bool {
+    ACCENTS.iter().any(|&(_, m, under, _)| m == c && !under)
+}
+
+pub fn is_under_mark(c: char) -> bool {
+    ACCENTS.iter().any(|&(_, m, under, _)| m == c && under)
+}
 
 /// Big operators available as `\name` (typeset with under/over limits).
 pub const BIG_OPS: &[(&str, char)] = &[
@@ -47,12 +87,49 @@ pub const BIG_OPS: &[(&str, char)] = &[
     ("bigoplus", '⨁'), ("bigotimes", '⨂'), ("bigvee", '⋁'), ("bigwedge", '⋀'),
 ];
 
+/// Function/operator names rendered upright (Node::Func). Sorted so that
+/// longer names are matched first by the parser (greedy longest match).
+pub const FUNCS: &[&str] = &[
+    "arccos", "arcsin", "arctan", "arg", "cos", "cosh", "cot", "coth", "csc",
+    "deg", "det", "dim", "exp", "gcd", "hom", "inf", "ker", "lg", "lim",
+    "liminf", "limsup", "ln", "log", "max", "min", "mod", "sec", "sin",
+    "sinh", "sup", "tan", "tanh", "Pr",
+];
+
+pub fn is_func_name(name: &str) -> bool {
+    FUNCS.contains(&name)
+}
+
+/// Longest known function name that is a prefix of `s`.
+pub fn func_prefix(s: &str) -> Option<&'static str> {
+    FUNCS
+        .iter()
+        .filter(|f| s.starts_with(**f))
+        .max_by_key(|f| f.len())
+        .copied()
+}
+
+/// Lookup order: curated table first, then the large generated table
+/// (from https://github.com/ho-oto/mathematical-symbols).
 pub fn symbol_by_name(name: &str) -> Option<char> {
-    SYMBOLS.iter().find(|(n, _)| *n == name).map(|&(_, c)| c)
+    SYMBOLS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|&(_, c)| c)
+        .or_else(|| {
+            crate::symbols_ext::EXT_SYMBOLS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|&(_, c)| c)
+        })
 }
 
 pub fn bigop_by_name(name: &str) -> Option<char> {
     BIG_OPS.iter().find(|(n, _)| *n == name).map(|&(_, c)| c)
+}
+
+pub fn bigop_by_char(c: char) -> bool {
+    BIG_OPS.iter().any(|&(_, op)| op == c)
 }
 
 /// Reverse lookup for the LaTeX serializer: char -> command name.

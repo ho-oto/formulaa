@@ -1,5 +1,8 @@
 pub mod ast;
 pub mod editor;
 pub mod latex;
+pub mod parse;
 pub mod render;
 pub mod symbols;
+pub mod symbols_ext;
+pub mod typst;

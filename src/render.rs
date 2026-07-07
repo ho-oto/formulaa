@@ -1,12 +1,21 @@
 //! 2D layout engine: AST -> rectangular block of chars with a baseline.
-//! Prefers Unicode math glyphs (─ fraction bars, ⎛⎜⎝ scaled parens, inline
-//! superscript/subscript chars like x², math-italic letters).
+//!
+//! The cursor-free output is the *canonical AA form* (see docs/aa-spec.md):
+//! it is designed so that `parse.rs` can deterministically invert it back to
+//! the AST. Every layout rule here has a matching rule in the parser —
+//! change them in lockstep and keep the roundtrip tests green.
 
 use crate::ast::{Field, Node, Row};
 use crate::symbols::is_spaced_op;
 
 pub const CURSOR_CHAR: char = '▌';
+/// Placeholder for an empty mandatory slot, and explicit base of a script
+/// that starts a row (so `[Sup(x)]` is distinguishable from `[Sym(x)]`).
 pub const PLACEHOLDER: char = '⬚';
+/// Fraction bar. Distinct from '-' (rendered '−') and the big-op band.
+pub const FRAC_BAR: char = '─';
+/// Big-operator band: marks the horizontal extent of over/under limits.
+pub const OP_BAND: char = '┄';
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
@@ -40,6 +49,21 @@ impl Block {
 
     pub fn to_strings(&self) -> Vec<String> {
         self.lines.iter().map(|l| l.iter().collect()).collect()
+    }
+
+    pub fn to_text(&self) -> String {
+        self.to_strings()
+            .iter()
+            .map(|l| l.trim_end())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Char at the baseline row edge (None for scripts, which have no
+    /// baseline row of their own).
+    fn baseline_edge(&self, first: bool) -> Option<char> {
+        let line = self.lines.get(self.baseline)?;
+        if first { line.first() } else { line.last() }.copied()
     }
 }
 
@@ -85,12 +109,31 @@ fn center_pad(b: &Block, width: usize) -> Vec<Vec<char>> {
 }
 
 /// Math-italic mapping for rendered letters (LaTeX output keeps ASCII).
-fn italic_char(c: char) -> char {
+pub fn italic_char(c: char) -> char {
     match c {
         'h' => 'ℎ', // U+1D455 is unassigned; Unicode uses PLANCK CONSTANT
         'a'..='z' => char::from_u32(0x1D44E + (c as u32 - 'a' as u32)).unwrap(),
         'A'..='Z' => char::from_u32(0x1D434 + (c as u32 - 'A' as u32)).unwrap(),
         _ => c,
+    }
+}
+
+/// Inverse of the render-time character styling (used by the parser).
+pub fn unstyle_char(c: char) -> char {
+    match c {
+        'ℎ' => 'h',
+        '−' => '-',
+        '∗' => '*',
+        c => {
+            let u = c as u32;
+            if (0x1D44E..=0x1D467).contains(&u) {
+                char::from_u32('a' as u32 + (u - 0x1D44E)).unwrap()
+            } else if (0x1D434..=0x1D44D).contains(&u) {
+                char::from_u32('A' as u32 + (u - 0x1D434)).unwrap()
+            } else {
+                c
+            }
+        }
     }
 }
 
@@ -103,7 +146,7 @@ fn display_char(c: char, italic: bool) -> char {
     }
 }
 
-fn superscript_char(c: char) -> Option<char> {
+pub fn superscript_char(c: char) -> Option<char> {
     Some(match c {
         '0' => '⁰', '1' => '¹', '2' => '²', '3' => '³', '4' => '⁴',
         '5' => '⁵', '6' => '⁶', '7' => '⁷', '8' => '⁸', '9' => '⁹',
@@ -113,7 +156,7 @@ fn superscript_char(c: char) -> Option<char> {
     })
 }
 
-fn subscript_char(c: char) -> Option<char> {
+pub fn subscript_char(c: char) -> Option<char> {
     Some(match c {
         '0' => '₀', '1' => '₁', '2' => '₂', '3' => '₃', '4' => '₄',
         '5' => '₅', '6' => '₆', '7' => '₇', '8' => '₈', '9' => '₉',
@@ -124,6 +167,20 @@ fn subscript_char(c: char) -> Option<char> {
         'v' => 'ᵥ', 'x' => 'ₓ',
         _ => return None,
     })
+}
+
+pub fn unsuperscript_char(c: char) -> Option<char> {
+    "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿⁱ"
+        .chars()
+        .position(|x| x == c)
+        .map(|i| "0123456789+-=()ni".chars().nth(i).unwrap())
+}
+
+pub fn unsubscript_char(c: char) -> Option<char> {
+    "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ"
+        .chars()
+        .position(|x| x == c)
+        .map(|i| "0123456789+-=()aehijklmnoprstuvx".chars().nth(i).unwrap())
 }
 
 /// If every node in `row` is a plain char with an inline script equivalent,
@@ -140,8 +197,22 @@ fn inline_script(row: &Row, map: fn(char) -> Option<char>) -> Option<Vec<char>> 
         .collect()
 }
 
+#[derive(Clone, Copy)]
 pub struct RenderCtx {
     pub italic: bool,
+    /// Script style: no spacing around binary operators. Set inside
+    /// scripts, big-op limits and matrix cells; required for parseability.
+    pub compact: bool,
+}
+
+impl RenderCtx {
+    pub fn canonical() -> Self {
+        RenderCtx { italic: true, compact: false }
+    }
+
+    fn compact(self) -> Self {
+        RenderCtx { compact: true, ..self }
+    }
 }
 
 /// Cursor position relative to the row being rendered: the remaining path
@@ -178,12 +249,36 @@ pub fn render_row(
             },
             None => None,
         };
-        blocks.push(render_node(node, child_cursor, ctx));
+        let mut block = render_node(node, child_cursor, ctx);
+        // A script at the start of a row gets an explicit ⬚ base, so the
+        // picture differs from the row without the script wrapper.
+        if i == 0 && matches!(node, Node::Sup { .. } | Node::Sub { .. }) {
+            block = hcat(&[Block::from_chars(vec![PLACEHOLDER]), block]);
+        }
+        blocks.push(block);
     }
     if let Some(col) = cursor_col {
         blocks.insert(col, Block::from_chars(vec![CURSOR_CHAR]));
     }
-    hcat(&blocks)
+    // Two identical bar glyphs (── or ┄┄ from adjacent fractions/big-ops)
+    // would merge into one run; keep them apart with a one-column spacer.
+    // No blanket margins: any fully blank column inside a row must separate
+    // same-baseline siblings, or script-region segmentation breaks.
+    let mut spaced: Vec<Block> = Vec::with_capacity(blocks.len() * 2);
+    for block in blocks {
+        let touching_bars = match (
+            spaced.last().and_then(|b: &Block| b.baseline_edge(false)),
+            block.baseline_edge(true),
+        ) {
+            (Some(a), Some(b)) => a == b && (a == FRAC_BAR || a == OP_BAND),
+            _ => false,
+        };
+        if touching_bars {
+            spaced.push(Block::from_chars(vec![' ']));
+        }
+        spaced.push(block);
+    }
+    hcat(&spaced)
 }
 
 fn render_node(
@@ -202,12 +297,30 @@ fn render_node(
     match node {
         Node::Sym(c) => {
             let d = display_char(*c, ctx.italic);
-            if is_spaced_op(*c) {
+            if ctx.compact {
+                Block::from_chars(vec![d])
+            } else if is_spaced_op(*c) {
                 Block::from_chars(vec![' ', d, ' '])
             } else if *c == ',' {
                 Block::from_chars(vec![d, ' '])
             } else {
                 Block::from_chars(vec![d])
+            }
+        }
+
+        // Upright letters are reserved for function names (plain letters
+        // render math-italic), which is what makes them parseable.
+        Node::Func(name) => Block::from_chars(name.chars().collect()),
+
+        // Mark in the cell directly above (or below) the base. That cell is
+        // never used by anything else (scripts go up-right, limits live
+        // inside their band), so a one-cell probe parses it back.
+        Node::Accent { accent, base } => {
+            let b = display_char(*base, ctx.italic);
+            if crate::symbols::is_under_mark(*accent) {
+                Block { lines: vec![vec![b], vec![*accent]], baseline: 0 }
+            } else {
+                Block { lines: vec![vec![*accent], vec![b]], baseline: 1 }
             }
         }
 
@@ -217,18 +330,23 @@ fn render_node(
             let w = n.width().max(d.width()) + 2;
             let mut lines = center_pad(&n, w);
             let baseline = lines.len();
-            lines.push(vec!['─'; w]);
+            lines.push(vec![FRAC_BAR; w]);
             lines.extend(center_pad(&d, w));
             Block { lines, baseline }
         }
 
-        Node::Sqrt { arg } => {
+        Node::Sqrt { arg, index } => {
             let a = render_row(arg, cur(Field::SqrtArg), true, ctx);
             let h = a.height();
             let w = a.width();
-            // Overline row on top, radical sign hugging the bottom-left:
+            // Overline row on top, radical stem hugging the left:
             //  ___
             // √x+1
+            let radical = match index {
+                3 => '∛',
+                4 => '∜',
+                _ => '√',
+            };
             let mut lines = Vec::with_capacity(h + 1);
             let mut top = vec![' '; w + 1];
             for c in top.iter_mut().skip(1) {
@@ -236,7 +354,7 @@ fn render_node(
             }
             lines.push(top);
             for (r, line) in a.lines.iter().enumerate() {
-                let head = if r == h - 1 { '√' } else { '│' };
+                let head = if r == h - 1 { radical } else { '│' };
                 let mut row = Vec::with_capacity(w + 1);
                 row.push(head);
                 row.extend_from_slice(line);
@@ -251,7 +369,7 @@ fn render_node(
                     return Block::from_chars(chars);
                 }
             }
-            let a = render_row(arg, cur(Field::SupArg), true, ctx);
+            let a = render_row(arg, cur(Field::SupArg), true, &ctx.compact());
             let h = a.height();
             Block { lines: a.lines, baseline: h }
         }
@@ -262,30 +380,28 @@ fn render_node(
                     return Block::from_chars(chars);
                 }
             }
-            let a = render_row(arg, cur(Field::SubArg), true, ctx);
+            let a = render_row(arg, cur(Field::SubArg), true, &ctx.compact());
             let mut lines = vec![vec![' '; a.width()]];
             lines.extend(a.lines);
             Block { lines, baseline: 0 }
         }
 
         Node::BigOp { op, lower, upper } => {
-            let u = render_row(upper, cur(Field::OpUpper), false, ctx);
-            let l = render_row(lower, cur(Field::OpLower), false, ctx);
-            let w = u.width().max(l.width()).max(1);
-            let op_block = Block::from_chars(vec![*op]);
+            let u = render_row(upper, cur(Field::OpUpper), false, &ctx.compact());
+            let l = render_row(lower, cur(Field::OpLower), false, &ctx.compact());
+            if u.is_empty() && l.is_empty() && cursor.is_none() {
+                // No limits: a bare operator character.
+                return Block::from_chars(vec![*op]);
+            }
+            // Band marks the horizontal extent of the limits; this is what
+            // makes over/under limits unambiguous (see docs/aa-spec.md).
+            let w = u.width().max(l.width()).max(1) + 2;
+            let mut band = vec![OP_BAND; w];
+            band[(w - 1) / 2] = *op;
             let mut lines = center_pad(&u, w);
             let baseline = lines.len();
-            lines.extend(center_pad(&op_block, w));
+            lines.push(band);
             lines.extend(center_pad(&l, w));
-            // One space of margin on each side for readability.
-            let lines = lines
-                .into_iter()
-                .map(|mut row| {
-                    row.insert(0, ' ');
-                    row.push(' ');
-                    row
-                })
-                .collect();
             Block { lines, baseline }
         }
 
@@ -311,7 +427,87 @@ fn render_node(
             }
             Block { lines, baseline: a.baseline }
         }
+
+        Node::Matrix { rows, cols, cells } => {
+            render_matrix(*rows, *cols, cells, cursor, ctx)
+        }
     }
+}
+
+fn render_matrix(
+    rows: usize,
+    cols: usize,
+    cells: &[Row],
+    cursor: Option<(Field, CursorRef)>,
+    ctx: &RenderCtx,
+) -> Block {
+    let cctx = ctx.compact();
+    let blocks: Vec<Block> = cells
+        .iter()
+        .enumerate()
+        .map(|(i, cell)| {
+            let cur = match cursor {
+                Some((Field::Cell(ci), c)) if ci == i => Some(c),
+                _ => None,
+            };
+            render_row(cell, cur, true, &cctx)
+        })
+        .collect();
+
+    let col_w: Vec<usize> = (0..cols)
+        .map(|j| (0..rows).map(|i| blocks[i * cols + j].width()).max().unwrap_or(1))
+        .collect();
+
+    // Each grid row: cells centered in their column, baseline-aligned,
+    // separated by exactly two blank columns (the column-separator rule).
+    let gap = Block { lines: vec![vec![' ', ' ']], baseline: 0 };
+    let mut body: Vec<Vec<char>> = Vec::new();
+    for i in 0..rows {
+        let mut parts: Vec<Block> = Vec::new();
+        for j in 0..cols {
+            if j > 0 {
+                parts.push(gap.clone());
+            }
+            let b = &blocks[i * cols + j];
+            let centered = Block { lines: center_pad(b, col_w[j]), baseline: b.baseline };
+            parts.push(centered);
+        }
+        let row_block = hcat(&parts);
+        if i > 0 {
+            // Exactly one blank line separates grid rows (row-separator rule).
+            body.push(vec![' '; row_block.width()]);
+        }
+        body.extend(row_block.lines);
+    }
+    let w = body.iter().map(|l| l.len()).max().unwrap_or(0);
+    for l in &mut body {
+        l.resize(w, ' ');
+    }
+
+    let h = body.len().max(1);
+    if h == 1 {
+        let mut row = vec!['['];
+        row.extend(body.into_iter().next().unwrap_or_default());
+        row.push(']');
+        return Block { lines: vec![row], baseline: 0 };
+    }
+    let mut lines = Vec::with_capacity(h);
+    for (r, line) in body.into_iter().enumerate() {
+        let (lc, rc) = if r == 0 {
+            ('⎡', '⎤')
+        } else if r == h - 1 {
+            ('⎣', '⎦')
+        } else {
+            ('⎢', '⎥')
+        };
+        let mut row = Vec::with_capacity(w + 2);
+        row.push(lc);
+        row.extend(line);
+        row.push(rc);
+        lines.push(row);
+    }
+    // Matches the parser: baseline of a matrix is its vertical center.
+    Block { lines, baseline: (h - 1) / 2 }
 }
 
 #[cfg(test)]
@@ -323,13 +519,18 @@ mod tests {
     }
 
     fn plain(root: &Row) -> Vec<String> {
-        render_row(root, None, false, &RenderCtx { italic: false }).to_strings()
+        let ctx = RenderCtx { italic: false, compact: false };
+        render_row(root, None, false, &ctx)
+            .to_strings()
+            .iter()
+            .map(|l| l.trim_end().to_string())
+            .collect()
     }
 
     #[test]
     fn fraction_renders_with_bar() {
         let root = vec![Node::Frac { num: sym_row("1"), den: sym_row("x+1") }];
-        assert_eq!(plain(&root), vec!["   1   ", "───────", " x + 1 "]);
+        assert_eq!(plain(&root), vec!["   1", "───────", " x + 1"]);
     }
 
     #[test]
@@ -339,20 +540,52 @@ mod tests {
     }
 
     #[test]
-    fn bigop_with_limits() {
+    fn bigop_band_marks_limit_extent() {
         let root = vec![Node::BigOp {
             op: '∑',
             lower: sym_row("i=0"),
             upper: sym_row("n"),
         }];
-        let lines = plain(&root);
-        assert_eq!(lines, vec!["   n   ", "   ∑   ", " i = 0 "]);
+        assert_eq!(plain(&root), vec!["  n", "┄┄∑┄┄", " i=0"]);
+    }
+
+    #[test]
+    fn bigop_without_limits_is_bare() {
+        let root = vec![Node::BigOp { op: '∫', lower: vec![], upper: vec![] }];
+        assert_eq!(plain(&root), vec!["∫"]);
     }
 
     #[test]
     fn sqrt_single_line() {
-        let root = vec![Node::Sqrt { arg: sym_row("2") }];
+        let root = vec![Node::Sqrt { arg: sym_row("2"), index: 2 }];
         assert_eq!(plain(&root), vec![" _", "√2"]);
+    }
+
+    #[test]
+    fn leading_script_gets_explicit_base() {
+        let root = vec![Node::Sup { arg: sym_row("2") }];
+        assert_eq!(plain(&root), vec!["⬚²"]);
+    }
+
+    #[test]
+    fn matrix_2x2() {
+        let root = vec![Node::Matrix {
+            rows: 2,
+            cols: 2,
+            cells: vec![sym_row("a"), sym_row("b"), sym_row("c"), sym_row("d")],
+        }];
+        assert_eq!(plain(&root), vec!["⎡a  b⎤", "⎢    ⎥", "⎣c  d⎦"]);
+    }
+
+    #[test]
+    fn func_renders_upright() {
+        let root = vec![
+            Node::Func("sin".into()),
+            Node::Sym('x'),
+        ];
+        let ctx = RenderCtx::canonical();
+        let b = render_row(&root, None, false, &ctx);
+        assert_eq!(b.to_text(), "sin𝑥");
     }
 
     #[test]
@@ -365,6 +598,6 @@ mod tests {
         let lines = plain(&root);
         assert_eq!(lines.len(), 3);
         // 'a' sits on the fraction-bar row.
-        assert!(lines[1].starts_with("a + "));
+        assert!(lines[1].starts_with("a +"));
     }
 }

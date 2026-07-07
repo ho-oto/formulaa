@@ -3,7 +3,9 @@
 //! the same model LyX uses for math insets.
 
 use crate::ast::{row_at, row_at_mut, Field, Node, Row};
-use crate::symbols::{bigop_by_name, symbol_by_name};
+use crate::symbols::{
+    accent_by_name, bigop_by_char, bigop_by_name, is_func_name, symbol_by_name,
+};
 
 pub struct Editor {
     pub root: Row,
@@ -107,14 +109,29 @@ impl Editor {
         }
     }
 
-    /// Up/Down switch between vertically stacked fields (num/den, limits).
+    /// Up/Down switch between vertically stacked fields (num/den, limits,
+    /// matrix rows).
     pub fn vertical(&mut self, up: bool) {
         if let Some(&(i, f)) = self.path.last() {
+            let parent_path = &self.path[..self.path.len() - 1];
+            let node = &row_at(&self.root, parent_path)[i];
             let target = match (f, up) {
                 (Field::FracNum, false) => Some(Field::FracDen),
                 (Field::FracDen, true) => Some(Field::FracNum),
                 (Field::OpLower, true) => Some(Field::OpUpper),
                 (Field::OpUpper, false) => Some(Field::OpLower),
+                (Field::Cell(c), up) => match node {
+                    Node::Matrix { cols, cells, .. } => {
+                        if up && c >= *cols {
+                            Some(Field::Cell(c - cols))
+                        } else if !up && c + cols < cells.len() {
+                            Some(Field::Cell(c + cols))
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                },
                 _ => None,
             };
             if let Some(t) = target {
@@ -203,6 +220,37 @@ impl Editor {
         }
     }
 
+    /// `]` leaves the innermost matrix if we are inside one.
+    pub fn close_bracket(&mut self) {
+        let inside = self
+            .path
+            .iter()
+            .rposition(|&(_, f)| matches!(f, Field::Cell(_)));
+        match inside {
+            Some(k) => {
+                let (i, _) = self.path[k];
+                self.path.truncate(k);
+                self.col = i + 1;
+            }
+            None => self.message = "not inside a matrix ([ ] are reserved; use \\matrix)".into(),
+        }
+    }
+
+    /// Wrap the atom just before the cursor with an accent mark.
+    fn apply_accent(&mut self, mark: char) {
+        if self.col == 0 {
+            self.message = "accent needs a base character before the cursor".into();
+            return;
+        }
+        let col = self.col;
+        let row = self.cur_row_mut();
+        match &row[col - 1] {
+            Node::Sym(c) => row[col - 1] = Node::Accent { accent: mark, base: *c },
+            Node::Accent { .. } => self.message = "stacked accents are not supported".into(),
+            _ => self.message = "accents apply to a single character".into(),
+        }
+    }
+
     /// Execute a `\command` from the minibuffer.
     pub fn execute(&mut self, cmd: &str) {
         if cmd.is_empty() {
@@ -210,7 +258,14 @@ impl Editor {
         }
         match cmd {
             "frac" => self.insert_and_enter(Node::Frac { num: vec![], den: vec![] }),
-            "sqrt" => self.insert_and_enter(Node::Sqrt { arg: vec![] }),
+            "sqrt" => self.insert_and_enter(Node::Sqrt { arg: vec![], index: 2 }),
+            "cbrt" | "sqrt3" => self.insert_and_enter(Node::Sqrt { arg: vec![], index: 3 }),
+            "qdrt" | "sqrt4" => self.insert_and_enter(Node::Sqrt { arg: vec![], index: 4 }),
+            "matrix" => self.insert_and_enter(Node::Matrix {
+                rows: 2,
+                cols: 2,
+                cells: vec![vec![], vec![], vec![], vec![]],
+            }),
             _ => {
                 if let Some(op) = bigop_by_name(cmd) {
                     self.insert_and_enter(Node::BigOp {
@@ -218,8 +273,22 @@ impl Editor {
                         lower: vec![],
                         upper: vec![],
                     });
+                } else if is_func_name(cmd) {
+                    let col = self.col;
+                    self.cur_row_mut().insert(col, Node::Func(cmd.to_string()));
+                    self.col += 1;
+                } else if let Some((mark, _)) = accent_by_name(cmd) {
+                    self.apply_accent(mark);
                 } else if let Some(c) = symbol_by_name(cmd) {
-                    self.insert_sym(c);
+                    if bigop_by_char(c) {
+                        self.insert_and_enter(Node::BigOp {
+                            op: c,
+                            lower: vec![],
+                            upper: vec![],
+                        });
+                    } else {
+                        self.insert_sym(c);
+                    }
                 } else {
                     self.message = format!("unknown command: \\{}", cmd);
                 }

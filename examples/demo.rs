@@ -12,7 +12,7 @@ fn syms(s: &str) -> Row {
 fn show(title: &str, row: &Row) {
     println!("== {} ==", title);
     println!("LaTeX: {}", latex::row_to_latex(row));
-    let block = render_row(row, None, false, &RenderCtx { italic: true });
+    let block = render_row(row, None, false, &RenderCtx::canonical());
     for line in block.to_strings() {
         println!("  {}", line);
     }
@@ -34,7 +34,7 @@ fn main() {
         Node::Sym('d'),
         Node::Sym('x'),
         Node::Sym('='),
-        Node::Sqrt { arg: vec![Node::Sym('π')] },
+        Node::Sqrt { arg: vec![Node::Sym('π')], index: 2 },
     ];
     show("Gaussian integral", &gaussian);
 
@@ -48,6 +48,7 @@ fn main() {
                 Node::Sym('b'),
                 Node::Sym('±'),
                 Node::Sqrt {
+                    index: 2,
                     arg: vec![
                         Node::Sym('b'),
                         Node::Sup { arg: syms("2") },

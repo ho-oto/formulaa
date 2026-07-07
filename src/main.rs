@@ -7,13 +7,30 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block as UiBlock, Borders, Paragraph};
 use ratatui::Frame;
 
-use mascii::{ast, editor::Editor, latex};
 use mascii::render::{render_row, RenderCtx, CURSOR_CHAR};
+use mascii::{ast, editor::Editor, latex, parse, typst};
 
-const HELP: &str = "\\cmd  ^ sup  _ sub  ( ) paren  Space exit inset  ←→↑↓ move  ⌫ delete  ^S save  ^Q quit  F2 italic";
+const HELP: &str = "\\cmd  ^ sup  _ sub  ( ) paren  ] exit matrix  Space exit inset  ←→↑↓ move  ⌫ delete  ^S save  ^Q quit  F2 italic";
+
+const USAGE: &str = "\
+usage: mascii [SAVE_PATH]          interactive TUI editor (default: formula.tex)
+       mascii aa2tex   [FILE]     AA formula (file or stdin) -> LaTeX
+       mascii aa2typst [FILE]     AA formula (file or stdin) -> Typst
+       mascii fmt      [FILE]     AA formula -> canonical AA (normalize)";
 
 fn main() -> std::io::Result<()> {
-    let save_path = std::env::args().nth(1).unwrap_or_else(|| "formula.tex".into());
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        Some("aa2tex") | Some("aa2typst") | Some("fmt") => {
+            return convert(&args[0].clone(), args.get(1).map(String::as_str));
+        }
+        Some("-h") | Some("--help") => {
+            println!("{}", USAGE);
+            return Ok(());
+        }
+        _ => {}
+    }
+    let save_path = args.first().cloned().unwrap_or_else(|| "formula.tex".into());
     let mut terminal = ratatui::init();
     let mut ed = Editor::new();
     ed.message = format!("mascii — LyX-like math editor (saves to {})", save_path);
@@ -35,6 +52,30 @@ fn main() -> std::io::Result<()> {
 
     ratatui::restore();
     result
+}
+
+/// aa2tex / aa2typst / fmt: read AA text (file or stdin), write to stdout.
+fn convert(mode: &str, file: Option<&str>) -> std::io::Result<()> {
+    let text = match file {
+        Some(path) => fs::read_to_string(path)?,
+        None => std::io::read_to_string(std::io::stdin())?,
+    };
+    let row = match parse::parse(&text) {
+        Ok(row) => row,
+        Err(e) => {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
+    };
+    match mode {
+        "aa2tex" => println!("{}", latex::row_to_latex(&row)),
+        "aa2typst" => println!("{}", typst::row_to_typst(&row)),
+        _ => {
+            let block = render_row(&row, None, false, &RenderCtx::canonical());
+            println!("{}", block.to_text());
+        }
+    }
+    Ok(())
 }
 
 /// Returns true when the app should quit.
@@ -60,7 +101,9 @@ fn handle_key(
                 let cmd = ed.minibuffer.take().unwrap();
                 ed.execute(&cmd);
             }
-            KeyCode::Char(c) if c.is_ascii_alphanumeric() => {
+            // Graphic chars (not just alphanumerics): the extended symbol
+            // table has names like "->", "+-", "oo".
+            KeyCode::Char(c) if c.is_ascii_graphic() => {
                 ed.minibuffer.as_mut().unwrap().push(c);
             }
             _ => {}
@@ -99,6 +142,10 @@ fn handle_key(
         KeyCode::Char('_') => ed.insert_and_enter(ast::Node::Sub { arg: vec![] }),
         KeyCode::Char('(') => ed.insert_and_enter(ast::Node::Paren { inner: vec![] }),
         KeyCode::Char(')') => ed.close_paren(),
+        KeyCode::Char('[') => {
+            ed.message = "[ ] are reserved for matrices; insert one with \\matrix".into()
+        }
+        KeyCode::Char(']') => ed.close_bracket(),
         KeyCode::Char(' ') => ed.exit_inset(),
         KeyCode::Char(c) if c.is_ascii_graphic() => ed.insert_sym(c),
         _ => {}
@@ -162,7 +209,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) {
     let inner = border.inner(area);
     f.render_widget(border, area);
 
-    let ctx = RenderCtx { italic: ed.italic };
+    let ctx = RenderCtx { italic: ed.italic, compact: false };
     let block = render_row(&ed.root, Some((&ed.path, ed.col)), false, &ctx);
     let lines = block.to_strings();
 
