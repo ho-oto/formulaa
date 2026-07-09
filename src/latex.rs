@@ -59,6 +59,8 @@ fn node_to_latex(node: &Node) -> String {
         Node::Paren { inner } => {
             format!("\\left({}\\right)", row_to_latex(inner))
         }
+        // Requires \usepackage{cancel}.
+        Node::Cancel { arg } => format!("\\cancel{}", braced(arg)),
         Node::Matrix { cols, cells, .. } => {
             let body = cells
                 .chunks(*cols)

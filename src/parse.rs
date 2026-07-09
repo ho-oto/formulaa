@@ -52,11 +52,17 @@ pub type RegionSpan = ((usize, usize, usize, usize), usize);
 
 pub struct Grid {
     g: Vec<Vec<char>>,
+    /// Cells carrying a combining long solidus (U+0338) = \cancel strike.
+    cancel: Vec<Vec<bool>>,
 }
 
 impl Grid {
     fn at(&self, r: usize, c: usize) -> char {
         self.g[r][c]
+    }
+
+    fn cancelled(&self, r: usize, c: usize) -> bool {
+        self.cancel[r][c]
     }
 }
 
@@ -195,12 +201,14 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
 
 /// Parse a region. `baseline` may be passed down when the caller already
 /// knows it (paren/sqrt interiors share the caller's baseline row).
+#[allow(clippy::too_many_arguments)]
 fn parse_region(
     g: &Grid,
     rect: Rect,
     baseline: Option<usize>,
     depth: usize,
     trace: &mut Vec<RegionSpan>,
+    in_cancel: bool,
 ) -> Result<Row> {
     let rect = match trim(g, rect) {
         Some(r) => r,
@@ -215,20 +223,80 @@ fn parse_region(
     let mut out: Row = Vec::new();
     let mut col = rect.l;
     while col <= rect.r {
+        // Struck-through block. The extent follows the canonical "maximal
+        // cancel" form: runs of flagged baseline cells, extended across
+        // blank-baseline stretches only when everything there is struck
+        // too (a partially struck script belongs to a sibling, and its own
+        // Cancel is found when the script argument is parsed).
+        if !in_cancel && g.cancelled(bl, col) {
+            let fully_struck = |l: usize, r: usize| {
+                (l..=r).all(|c| {
+                    rect.rows().all(|row| g.at(row, c) == ' ' || g.cancelled(row, c))
+                })
+            };
+            let mut end = col;
+            loop {
+                while end < rect.r && g.cancelled(bl, end + 1) {
+                    end += 1;
+                }
+                // Next baseline content after the blank-baseline stretch.
+                let mut j = end + 1;
+                while j <= rect.r && g.at(bl, j) == ' ' {
+                    j += 1;
+                }
+                // Struck baseline continues past a fully struck stretch
+                // (spaced operators or struck scripts inside the argument).
+                if j <= rect.r && g.cancelled(bl, j) && fully_struck(end + 1, j - 1) {
+                    end = j;
+                    continue;
+                }
+                // Otherwise absorb trailing fully struck script segments.
+                let mut c = end + 1;
+                let mut extended = false;
+                loop {
+                    while c < j.min(rect.r + 1) && col_blank(g, rect, c) {
+                        c += 1;
+                    }
+                    if c >= j || c > rect.r {
+                        break;
+                    }
+                    let s0 = c;
+                    let mut s1 = c;
+                    while s1 + 1 < j && !col_blank(g, rect, s1 + 1) {
+                        s1 += 1;
+                    }
+                    if fully_struck(s0, s1) {
+                        end = s1;
+                        extended = true;
+                        c = s1 + 1;
+                    } else {
+                        break;
+                    }
+                }
+                if !extended {
+                    break;
+                }
+            }
+            let inner = Rect { l: col, r: end, ..rect };
+            let arg = parse_region(g, inner, Some(bl), depth + 1, trace, true)?;
+            out.push(Node::Cancel { arg });
+            col = end + 1;
+            continue;
+        }
         let ch = g.at(bl, col);
         match ch {
             ' ' => {
                 let run_end = scan_while(g, bl, col, rect.r, |c| c == ' ');
-                parse_script_run(g, rect, bl, col, run_end, depth, trace, &mut out)?;
+                parse_script_run(g, rect, bl, col, run_end, depth, trace, in_cancel, &mut out)?;
                 col = run_end + 1;
             }
             _ if ch == FRAC_BAR => {
                 let run_end = scan_while(g, bl, col, rect.r, |c| c == FRAC_BAR);
                 let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end };
                 let num = region_above(span, bl)
-                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace))?;
+                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
                 let den = region_below(span, bl)
-                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace))?;
+                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
                 out.push(Node::Frac { num, den });
                 col = run_end + 1;
             }
@@ -249,9 +317,9 @@ fn parse_region(
                 }
                 let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end };
                 let upper = region_above(span, bl)
-                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace))?;
+                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
                 let lower = region_below(span, bl)
-                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace))?;
+                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
                 out.push(Node::BigOp { op, lower, upper });
                 col = run_end + 1;
             }
@@ -259,7 +327,7 @@ fn parse_region(
                 let close = match_on_row(g, bl, col, rect.r, '(', ')')?;
                 let inner = Rect { t: bl, b: bl, l: col + 1, r: close.wrapping_sub(1) };
                 let inner_row = if close > col + 1 {
-                    parse_region(g, inner, Some(bl), depth + 1, trace)?
+                    parse_region(g, inner, Some(bl), depth + 1, trace, in_cancel)?
                 } else {
                     vec![]
                 };
@@ -275,7 +343,7 @@ fn parse_region(
                 let (top, bot) = vertical_extent(g, rect, col, bl, &['⎛', '⎜', '⎝']);
                 let close = match_on_row(g, top, col, rect.r, '⎛', '⎞')?;
                 let inner = Rect { t: top, b: bot, l: col + 1, r: close - 1 };
-                out.push(Node::Paren { inner: parse_region(g, inner, Some(bl), depth + 1, trace)? });
+                out.push(Node::Paren { inner: parse_region(g, inner, Some(bl), depth + 1, trace, in_cancel)? });
                 col = close + 1;
             }
             '⎡' | '⎢' | '⎣' | '[' => {
@@ -287,7 +355,7 @@ fn parse_region(
                 let (open, close_ch) = if ch == '[' { ('[', ']') } else { ('⎡', '⎤') };
                 let close = match_on_row(g, top, col, rect.r, open, close_ch)?;
                 let inner = Rect { t: top, b: bot, l: col + 1, r: close - 1 };
-                out.push(parse_matrix(g, inner, depth + 1, trace)?);
+                out.push(parse_matrix(g, inner, depth + 1, trace, in_cancel)?);
                 col = close + 1;
             }
             '│' | '√' | '∛' | '∜' => {
@@ -310,12 +378,13 @@ fn parse_region(
                 let index = radical_index(g.at(bot, col)).unwrap();
                 let w = scan_while(g, top - 1, col + 1, rect.r, |c| c == '_') - col;
                 let inner = Rect { t: top, b: bot, l: col + 1, r: col + w };
-                out.push(Node::Sqrt { arg: parse_region(g, inner, Some(bl), depth + 1, trace)?, index });
+                out.push(Node::Sqrt { arg: parse_region(g, inner, Some(bl), depth + 1, trace, in_cancel)?, index });
                 col += w + 1;
             }
             _ if ch == PLACEHOLDER => col += 1,
             _ if unsuperscript_char(ch).is_some() => {
-                let run_end = scan_while(g, bl, col, rect.r, |c| unsuperscript_char(c).is_some());
+                let run_end =
+                    scan_while_same_flag(g, bl, col, rect.r, |c| unsuperscript_char(c).is_some());
                 let arg = (col..=run_end)
                     .map(|c| Node::Sym(unsuperscript_char(g.at(bl, c)).unwrap()))
                     .collect();
@@ -323,7 +392,8 @@ fn parse_region(
                 col = run_end + 1;
             }
             _ if unsubscript_char(ch).is_some() => {
-                let run_end = scan_while(g, bl, col, rect.r, |c| unsubscript_char(c).is_some());
+                let run_end =
+                    scan_while_same_flag(g, bl, col, rect.r, |c| unsubscript_char(c).is_some());
                 let arg = (col..=run_end)
                     .map(|c| Node::Sym(unsubscript_char(g.at(bl, c)).unwrap()))
                     .collect();
@@ -333,7 +403,8 @@ fn parse_region(
             _ if ch.is_ascii_alphabetic() => {
                 // Upright ASCII letters: function names (canonical), with
                 // leftover letters accepted as plain atoms (lenient input).
-                let run_end = scan_while(g, bl, col, rect.r, |c| c.is_ascii_alphabetic());
+                let run_end =
+                    scan_while_same_flag(g, bl, col, rect.r, |c| c.is_ascii_alphabetic());
                 let word: String = (col..=run_end).map(|c| g.at(bl, c)).collect();
                 let mut rest = word.as_str();
                 while !rest.is_empty() {
@@ -381,6 +452,23 @@ fn scan_while(g: &Grid, row: usize, from: usize, max: usize, pred: impl Fn(char)
     c
 }
 
+/// Like `scan_while`, but the run must also keep the cancel flag of its
+/// first cell (a struck token never merges with an unstruck neighbour).
+fn scan_while_same_flag(
+    g: &Grid,
+    row: usize,
+    from: usize,
+    max: usize,
+    pred: impl Fn(char) -> bool,
+) -> usize {
+    let flag = g.cancelled(row, from);
+    let mut c = from;
+    while c < max && pred(g.at(row, c + 1)) && g.cancelled(row, c + 1) == flag {
+        c += 1;
+    }
+    c
+}
+
 fn region_above(span: Rect, bl: usize) -> Option<Rect> {
     (bl > span.t).then(|| Rect { b: bl - 1, ..span })
 }
@@ -403,19 +491,30 @@ fn parse_script_run(
     to: usize,
     depth: usize,
     trace: &mut Vec<RegionSpan>,
+    in_cancel: bool,
     out: &mut Row,
 ) -> Result<()> {
     let mut parts: Vec<(usize, bool, Rect)> = Vec::new();
     let run_span = Rect { t: rect.t, b: rect.b, l: from, r: to };
-    for (side_rect, is_sup) in [
-        (region_above(run_span, bl), true),
-        (region_below(run_span, bl), false),
+    for (side_rect, opposite, is_sup) in [
+        (region_above(run_span, bl), region_below(run_span, bl), true),
+        (region_below(run_span, bl), region_above(run_span, bl), false),
     ] {
         let Some(side) = side_rect else { continue };
         let protected = protected_cols(g, side, None);
+        // A segment boundary is a blank column that belongs to an
+        // opposite-side script. Columns blank on BOTH sides are internal
+        // spacers/padding of a single script argument and must not split
+        // it: in normal form two same-side scripts are always separated
+        // by an opposite-side one (adjacent same-side scripts merge).
         let occupied: Vec<bool> = side
             .cols()
-            .map(|c| !col_blank(g, side, c) || protected[c - from])
+            .map(|c| {
+                let boundary = col_blank(g, side, c)
+                    && opposite.is_some_and(|o| !col_blank(g, o, c))
+                    && !protected[c - from];
+                !boundary
+            })
             .collect();
         let mut i = 0;
         while i < occupied.len() {
@@ -435,7 +534,7 @@ fn parse_script_run(
     }
     parts.sort_by_key(|&(l, _, _)| l);
     for (_, is_sup, r) in parts {
-        let arg = parse_region(g, r, None, depth + 1, trace)?;
+        let arg = parse_region(g, r, None, depth + 1, trace, in_cancel)?;
         out.push(if is_sup { Node::Sup { arg } } else { Node::Sub { arg } });
     }
     Ok(())
@@ -475,7 +574,7 @@ fn vertical_extent(g: &Grid, rect: Rect, col: usize, bl: usize, chars: &[char]) 
 /// Split the interior of a matrix into cells.
 /// Row separators: fully blank rows. Column separators: runs of >= 2 fully
 /// blank, unprotected columns (see `protected_cols`).
-fn parse_matrix(g: &Grid, inner: Rect, depth: usize, trace: &mut Vec<RegionSpan>) -> Result<Node> {
+fn parse_matrix(g: &Grid, inner: Rect, depth: usize, trace: &mut Vec<RegionSpan>, in_cancel: bool) -> Result<Node> {
     let inner = match trim(g, inner) {
         Some(r) => r,
         None => return err("empty matrix", inner.t, inner.l),
@@ -532,7 +631,7 @@ fn parse_matrix(g: &Grid, inner: Rect, depth: usize, trace: &mut Vec<RegionSpan>
     let mut cells = Vec::with_capacity(rows * cols);
     for &(rt, rb) in &row_segs {
         for &(cl, cr) in &col_segs {
-            cells.push(parse_region(g, Rect { t: rt, b: rb, l: cl, r: cr }, None, depth, trace)?);
+            cells.push(parse_region(g, Rect { t: rt, b: rb, l: cl, r: cr }, None, depth, trace, in_cancel)?);
         }
     }
     Ok(Node::Matrix { rows, cols, cells })
@@ -546,23 +645,44 @@ pub fn parse(text: &str) -> Result<Row> {
 /// Like `parse`, but also return every structural region's rectangle and
 /// nesting depth (for the TUI structure view).
 pub fn parse_with_regions(text: &str) -> Result<(Row, Vec<RegionSpan>)> {
-    let lines: Vec<Vec<char>> = text
-        .lines()
-        .map(|l| l.trim_end().replace('\t', " ").chars().collect())
-        .collect();
+    // Fold combining long solidus overlays (\cancel strikes) into a
+    // parallel flag grid so they do not occupy cells of their own.
+    let mut lines: Vec<Vec<char>> = Vec::new();
+    let mut flags: Vec<Vec<bool>> = Vec::new();
+    for raw in text.lines() {
+        let mut line = Vec::new();
+        let mut flag = Vec::new();
+        for c in raw.trim_end().chars() {
+            match c {
+                '\u{338}' | '\u{336}' => {
+                    if let Some(f) = flag.last_mut() {
+                        *f = true;
+                    }
+                }
+                '\t' => {
+                    line.push(' ');
+                    flag.push(false);
+                }
+                c => {
+                    line.push(c);
+                    flag.push(false);
+                }
+            }
+        }
+        lines.push(line);
+        flags.push(flag);
+    }
     if lines.iter().all(|l| l.is_empty()) {
         return Ok((vec![], vec![]));
     }
     let width = lines.iter().map(|l| l.len()).max().unwrap();
-    let mut g = Grid {
-        g: lines
-            .into_iter()
-            .map(|mut l| {
-                l.resize(width, ' ');
-                l
-            })
-            .collect(),
-    };
+    for l in &mut lines {
+        l.resize(width, ' ');
+    }
+    for f in &mut flags {
+        f.resize(width, false);
+    }
+    let mut g = Grid { g: lines, cancel: flags };
     // Optional explicit baseline marker (hand-written input aid).
     let mut baseline = None;
     let markers: Vec<(usize, usize)> = g
@@ -590,7 +710,7 @@ pub fn parse_with_regions(text: &str) -> Result<(Row, Vec<RegionSpan>)> {
         // Normalize: a script arg that mixes padded structures with atoms
         // parses as adjacent script chunks; merging them restores the
         // canonical single node (render is only defined on normal forms).
-        Some(rect) => parse_region(&g, rect, baseline, 0, &mut trace)
+        Some(rect) => parse_region(&g, rect, baseline, 0, &mut trace, false)
             .map(|row| (crate::ast::normalize(&row), trace)),
         None => Ok((vec![], trace)),
     }

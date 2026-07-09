@@ -69,6 +69,7 @@ fn node_to_typst(node: &Node) -> String {
             s
         }
         Node::Paren { inner } => format!("({})", row_to_typst(inner)),
+        Node::Cancel { arg } => format!("cancel({})", row_to_typst(arg)),
         Node::Matrix { cols, cells, .. } => {
             let body = cells
                 .chunks(*cols)

@@ -66,6 +66,10 @@ fn mat(rows: usize, cols: usize, cells: Vec<Row>) -> Node {
     Node::Matrix { rows, cols, cells }
 }
 
+fn cancel(arg: Row) -> Node {
+    Node::Cancel { arg }
+}
+
 fn cat(parts: &[Row]) -> Row {
     parts.concat()
 }
@@ -351,6 +355,34 @@ fn nested_matrices() {
     roundtrip("nested-matrices", &row);
 }
 
+/// Cancellation: (x̸ y̸ / y̸ z̸) style strikes, including a struck fraction.
+#[test]
+fn cancel_strikes() {
+    // x·y/y = x with the y's cancelled
+    let row = cat(&[
+        n(frac(
+            cat(&[s("x"), n(cancel(s("y")))]),
+            n(cancel(s("y"))),
+        )),
+        s("="),
+        s("x"),
+    ]);
+    roundtrip("cancel-simple", &row);
+    // cancel over a whole fraction, next to an uncancelled sibling
+    let row = cat(&[
+        n(cancel(cat(&[n(frac(s("a+b"), s("c"))), s("d")]))),
+        s("+"),
+        s("e"),
+    ]);
+    roundtrip("cancel-frac", &row);
+    // cancel inside a superscript
+    let row = cat(&[
+        s("e"),
+        n(sup(cat(&[s("x"), n(cancel(s("2α")))]))),
+    ]);
+    roundtrip("cancel-in-sup", &row);
+}
+
 /// Continued fraction (deep vertical nesting).
 #[test]
 fn continued_fraction() {
@@ -443,7 +475,7 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
         };
     }
     let d = depth - 1;
-    match rng.below(8) {
+    match rng.below(9) {
         0 => Node::Frac { num: gen_row(rng, d, 3), den: gen_row(rng, d, 3) },
         1 => Node::Sqrt { arg: gen_row(rng, d, 3), index: [2, 2, 3, 4][rng.below(4)] },
         2 => Node::Sup { arg: gen_row(rng, d, 2) },
@@ -454,6 +486,7 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             upper: gen_row(rng, d, 2),
         },
         5 => Node::Paren { inner: gen_row(rng, d, 3) },
+        7 => Node::Cancel { arg: gen_row(rng, d, 3) },
         6 => Node::Matrix {
             rows: 2,
             cols: 2,

@@ -24,15 +24,22 @@ pub struct Block {
     /// Index of the baseline row. May equal `height()` for blocks that sit
     /// entirely above the baseline (superscripts) — never index with it.
     pub baseline: usize,
+    /// Cells struck through by \cancel, as (row, col). Emitted as a
+    /// combining long solidus (U+0338) after the cell char in text output.
+    pub cancel: Vec<(usize, usize)>,
 }
 
 impl Block {
+    pub fn new(lines: Vec<Vec<char>>, baseline: usize) -> Self {
+        Block { lines, baseline, cancel: vec![] }
+    }
+
     pub fn empty() -> Self {
-        Block { lines: vec![], baseline: 0 }
+        Block::new(vec![], 0)
     }
 
     pub fn from_chars(chars: Vec<char>) -> Self {
-        Block { lines: vec![chars], baseline: 0 }
+        Block::new(vec![chars], 0)
     }
 
     pub fn width(&self) -> usize {
@@ -48,7 +55,22 @@ impl Block {
     }
 
     pub fn to_strings(&self) -> Vec<String> {
-        self.lines.iter().map(|l| l.iter().collect()).collect()
+        let flagged: std::collections::HashSet<(usize, usize)> =
+            self.cancel.iter().copied().collect();
+        self.lines
+            .iter()
+            .enumerate()
+            .map(|(r, l)| {
+                let mut out = String::with_capacity(l.len() * 2);
+                for (c, &ch) in l.iter().enumerate() {
+                    out.push(ch);
+                    if flagged.contains(&(r, c)) {
+                        out.push('\u{338}');
+                    }
+                }
+                out
+            })
+            .collect()
     }
 
     pub fn to_text(&self) -> String {
@@ -82,6 +104,7 @@ fn hcat(blocks: &[Block]) -> Block {
     let height = above + below;
     let width: usize = blocks.iter().map(|b| b.width()).sum();
     let mut grid = vec![vec![' '; width]; height];
+    let mut cancel = Vec::new();
     let mut x = 0;
     for b in blocks {
         let y0 = above - b.baseline;
@@ -90,9 +113,16 @@ fn hcat(blocks: &[Block]) -> Block {
                 grid[y0 + dy][x + dx] = c;
             }
         }
+        cancel.extend(b.cancel.iter().map(|&(r, c)| (y0 + r, x + c)));
         x += b.width();
     }
-    Block { lines: grid, baseline: above }
+    Block { lines: grid, baseline: above, cancel }
+}
+
+/// Cancel coords of a child centered into `width` at vertical offset.
+fn centered_cancel(b: &Block, width: usize, row_off: usize) -> impl Iterator<Item = (usize, usize)> + '_ {
+    let left = (width - b.width()) / 2;
+    b.cancel.iter().map(move |&(r, c)| (r + row_off, c + left))
 }
 
 /// Pad every line of `b` to `width`, centered.
@@ -274,7 +304,16 @@ pub fn render_row(
         };
     }
 
-    let mut blocks: Vec<Block> = Vec::with_capacity(row.len() + 1);
+    // Per-block info driving the spacer rules below.
+    #[derive(Clone, Copy, Default)]
+    struct Info {
+        script: bool,
+        script_2d: bool,
+        banded_op: bool,
+        cancel: bool,
+    }
+
+    let mut blocks: Vec<(Block, Info)> = Vec::with_capacity(row.len() + 1);
     for (i, node) in row.iter().enumerate() {
         let child_cursor = match cursor {
             Some((path, col)) => match path.first() {
@@ -283,34 +322,81 @@ pub fn render_row(
             },
             None => None,
         };
+        let info = Info {
+            script: matches!(node, Node::Sup { .. } | Node::Sub { .. }),
+            script_2d: match node {
+                Node::Sup { arg } => {
+                    child_cursor.is_some()
+                        || ctx.is_compat()
+                        || inline_script(arg, superscript_char).is_none()
+                }
+                Node::Sub { arg } => {
+                    child_cursor.is_some()
+                        || ctx.is_compat()
+                        || inline_script(arg, subscript_char).is_none()
+                }
+                _ => false,
+            },
+            banded_op: match node {
+                Node::BigOp { lower, upper, .. } => {
+                    ctx.is_compat() || !lower.is_empty() || !upper.is_empty()
+                }
+                _ => false,
+            },
+            cancel: matches!(node, Node::Cancel { .. }),
+        };
         let mut block = render_node(node, child_cursor, ctx);
         // A script at the start of a row gets an explicit ⬚ base, so the
         // picture differs from the row without the script wrapper.
-        if i == 0 && matches!(node, Node::Sup { .. } | Node::Sub { .. }) {
+        if i == 0 && info.script {
             block = hcat(&[Block::from_chars(vec![ctx.placeholder()]), block]);
         }
-        blocks.push(block);
+        blocks.push((block, info));
     }
     if let Some(col) = cursor_col {
-        blocks.insert(col, Block::from_chars(vec![CURSOR_CHAR]));
+        blocks.insert(col, (Block::from_chars(vec![CURSOR_CHAR]), Info::default()));
     }
-    // Two identical bar glyphs (── or ┄┄ from adjacent fractions/big-ops)
-    // would merge into one run; keep them apart with a one-column spacer.
-    // No blanket margins: any fully blank column inside a row must separate
-    // same-baseline siblings, or script-region segmentation breaks.
+
+    // Single-column spacers between siblings. Parse-safe because a fully
+    // blank column always separates same-baseline siblings (normalize
+    // re-merges any script segments the blank column splits). Inserted:
+    //  - between two identical bar glyphs (── / ┄┄ would merge into one run)
+    //  - after a 2D script, unless another script follows (keeps x^a_b
+    //    together but detaches the script block from the next base)
+    //  - on both sides of a big operator with limits (band readability)
     let mut spaced: Vec<Block> = Vec::with_capacity(blocks.len() * 2);
-    for block in blocks {
-        let touching_bars = match (
-            spaced.last().and_then(|b: &Block| b.baseline_edge(false)),
-            block.baseline_edge(true),
-        ) {
-            (Some(a), Some(b)) => a == b && (a == FRAC_BAR || a == OP_BAND),
+    let mut prev: Option<Info> = None;
+    for (block, info) in blocks {
+        let need = match (prev, &spaced.last()) {
+            (Some(p), Some(last)) => {
+                let bars = match (last.baseline_edge(false), block.baseline_edge(true)) {
+                    (Some(a), Some(b)) => a == b && (a == FRAC_BAR || a == OP_BAND),
+                    _ => false,
+                };
+                // A cancel whose baseline edge is blank (e.g. it ends in a
+                // radical overline over a trailing space) must not touch
+                // the next block, or the parser's strike-extent scan would
+                // fuse the ragged edge with the neighbour's columns.
+                let ragged_cancel =
+                    p.cancel && last.baseline_edge(false) == Some(' ');
+                bars || (p.script_2d && !info.script)
+                    || p.banded_op
+                    || info.banded_op
+                    || ragged_cancel
+            }
             _ => false,
         };
-        if touching_bars {
+        // A 2D script right after a cancel needs a baseline anchor, or the
+        // parser would fuse it with raised content inside the strike; the
+        // reserved ⬚ (skipped by the parser) provides one at every level.
+        let anchor = matches!(prev, Some(p) if p.cancel) && info.script_2d;
+        if anchor {
+            spaced.push(Block::from_chars(vec![ctx.placeholder()]));
+        } else if need {
             spaced.push(Block::from_chars(vec![' ']));
         }
         spaced.push(block);
+        prev = Some(info);
     }
     hcat(&spaced)
 }
@@ -361,9 +447,9 @@ fn render_node(
                 *accent
             };
             if crate::symbols::is_under_mark(*accent) {
-                Block { lines: vec![vec![b], vec![mark]], baseline: 0 }
+                Block::new(vec![vec![b], vec![mark]], 0)
             } else {
-                Block { lines: vec![vec![mark], vec![b]], baseline: 1 }
+                Block::new(vec![vec![mark], vec![b]], 1)
             }
         }
 
@@ -375,7 +461,10 @@ fn render_node(
             let baseline = lines.len();
             lines.push(vec![FRAC_BAR; w]);
             lines.extend(center_pad(&d, w));
-            Block { lines, baseline }
+            let cancel = centered_cancel(&n, w, 0)
+                .chain(centered_cancel(&d, w, baseline + 1))
+                .collect();
+            Block { lines, baseline, cancel }
         }
 
         Node::Sqrt { arg, index } => {
@@ -405,7 +494,8 @@ fn render_node(
                     row.extend_from_slice(line);
                     lines.push(row);
                 }
-                let mut block = Block { lines, baseline: a.baseline + 1 };
+                let cancel = a.cancel.iter().map(|&(r, c)| (r + 1, c + 2)).collect();
+                let mut block = Block { lines, baseline: a.baseline + 1, cancel };
                 if *index != 2 {
                     let digit = char::from_digit(*index as u32, 10).unwrap();
                     block = hcat(&[Block::from_chars(vec![digit]), block]);
@@ -433,7 +523,8 @@ fn render_node(
                 row.extend_from_slice(line);
                 lines.push(row);
             }
-            Block { lines, baseline: a.baseline + 1 }
+            let cancel = a.cancel.iter().map(|&(r, c)| (r + 1, c + 1)).collect();
+            Block { lines, baseline: a.baseline + 1, cancel }
         }
 
         Node::Sup { arg } => {
@@ -444,7 +535,7 @@ fn render_node(
             }
             let a = render_row(arg, cur(Field::SupArg), true, &ctx.compact());
             let h = a.height();
-            Block { lines: a.lines, baseline: h }
+            Block { lines: a.lines, baseline: h, cancel: a.cancel }
         }
 
         Node::Sub { arg } => {
@@ -456,7 +547,8 @@ fn render_node(
             let a = render_row(arg, cur(Field::SubArg), true, &ctx.compact());
             let mut lines = vec![vec![' '; a.width()]];
             lines.extend(a.lines);
-            Block { lines, baseline: 0 }
+            let cancel = a.cancel.iter().map(|&(r, c)| (r + 1, c)).collect();
+            Block { lines, baseline: 0, cancel }
         }
 
         Node::BigOp { op, lower, upper } => {
@@ -470,8 +562,12 @@ fn render_node(
                 let mut lines = center_pad(&u, w);
                 let baseline = lines.len() + art.baseline;
                 lines.extend(center_pad(&art, w));
+                let l_off = lines.len();
                 lines.extend(center_pad(&l, w));
-                return Block { lines, baseline };
+                let cancel = centered_cancel(&u, w, 0)
+                    .chain(centered_cancel(&l, w, l_off))
+                    .collect();
+                return Block { lines, baseline, cancel };
             }
             if u.is_empty() && l.is_empty() && cursor.is_none() {
                 // No limits: a bare operator character.
@@ -486,7 +582,10 @@ fn render_node(
             let baseline = lines.len();
             lines.push(band);
             lines.extend(center_pad(&l, w));
-            Block { lines, baseline }
+            let cancel = centered_cancel(&u, w, 0)
+                .chain(centered_cancel(&l, w, baseline + 1))
+                .collect();
+            Block { lines, baseline, cancel }
         }
 
         Node::Paren { inner } => {
@@ -508,7 +607,34 @@ fn render_node(
                 row.push(rc);
                 lines.push(row);
             }
-            Block { lines, baseline: a.baseline }
+            let cancel = a.cancel.iter().map(|&(r, c)| (r, c + 1)).collect();
+            Block { lines, baseline: a.baseline, cancel }
+        }
+
+        Node::Cancel { arg } => {
+            let a = render_row(arg, cur(Field::CancelArg), true, ctx);
+            if ctx.is_compat() {
+                // Display-only diagonal strike (combining overlays are as
+                // unreliable as the math glyphs in limited fonts).
+                let mut a = a;
+                let (h, w) = (a.height(), a.width());
+                for i in 0..h {
+                    let r = h - 1 - i;
+                    let c = if h == 1 { w / 2 } else { i * (w - 1) / (h - 1) };
+                    a.lines[r][c] = '/';
+                }
+                return a;
+            }
+            // Strike every non-blank cell with the combining overlay.
+            let mut cancel: Vec<(usize, usize)> = Vec::new();
+            for (r, line) in a.lines.iter().enumerate() {
+                for (c, &ch) in line.iter().enumerate() {
+                    if ch != ' ' {
+                        cancel.push((r, c));
+                    }
+                }
+            }
+            Block { lines: a.lines, baseline: a.baseline, cancel }
         }
 
         Node::Matrix { rows, cols, cells } => {
@@ -526,10 +652,7 @@ fn compat_op_art(op: char) -> Block {
         '∮' => (&["╭", "O", "╯"], 1),
         _ => return Block::from_chars(vec![op]),
     };
-    Block {
-        lines: rows.iter().map(|r| r.chars().collect()).collect(),
-        baseline,
-    }
+    Block::new(rows.iter().map(|r| r.chars().collect()).collect(), baseline)
 }
 
 fn render_matrix(
@@ -558,8 +681,9 @@ fn render_matrix(
 
     // Each grid row: cells centered in their column, baseline-aligned,
     // separated by exactly two blank columns (the column-separator rule).
-    let gap = Block { lines: vec![vec![' ', ' ']], baseline: 0 };
+    let gap = Block::new(vec![vec![' ', ' ']], 0);
     let mut body: Vec<Vec<char>> = Vec::new();
+    let mut cancel: Vec<(usize, usize)> = Vec::new();
     for i in 0..rows {
         let mut parts: Vec<Block> = Vec::new();
         for j in 0..cols {
@@ -567,7 +691,11 @@ fn render_matrix(
                 parts.push(gap.clone());
             }
             let b = &blocks[i * cols + j];
-            let centered = Block { lines: center_pad(b, col_w[j]), baseline: b.baseline };
+            let centered = Block {
+                lines: center_pad(b, col_w[j]),
+                baseline: b.baseline,
+                cancel: centered_cancel(b, col_w[j], 0).collect(),
+            };
             parts.push(centered);
         }
         let row_block = hcat(&parts);
@@ -575,6 +703,8 @@ fn render_matrix(
             // Exactly one blank line separates grid rows (row-separator rule).
             body.push(vec![' '; row_block.width()]);
         }
+        let row_off = body.len();
+        cancel.extend(row_block.cancel.iter().map(|&(r, c)| (r + row_off, c)));
         body.extend(row_block.lines);
     }
     let w = body.iter().map(|l| l.len()).max().unwrap_or(0);
@@ -582,12 +712,14 @@ fn render_matrix(
         l.resize(w, ' ');
     }
 
+    // Bracket columns shift content one column right.
+    let cancel: Vec<(usize, usize)> = cancel.into_iter().map(|(r, c)| (r, c + 1)).collect();
     let h = body.len().max(1);
     if h == 1 {
         let mut row = vec!['['];
         row.extend(body.into_iter().next().unwrap_or_default());
         row.push(']');
-        return Block { lines: vec![row], baseline: 0 };
+        return Block { lines: vec![row], baseline: 0, cancel };
     }
     let compat = ctx.is_compat();
     let mut lines = Vec::with_capacity(h);
@@ -604,7 +736,7 @@ fn render_matrix(
         lines.push(row);
     }
     // Matches the parser: baseline of a matrix is its vertical center.
-    Block { lines, baseline: (h - 1) / 2 }
+    Block { lines, baseline: (h - 1) / 2, cancel }
 }
 
 #[cfg(test)]

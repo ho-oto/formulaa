@@ -25,6 +25,9 @@ pub enum Node {
     BigOp { op: char, lower: Row, upper: Row },
     /// Auto-scaling round brackets.
     Paren { inner: Row },
+    /// Struck-through content (\cancel): every cell of the rendered
+    /// argument carries a combining long solidus overlay (U+0338).
+    Cancel { arg: Row },
     /// rows×cols matrix, cells stored row-major.
     Matrix { rows: usize, cols: usize, cells: Vec<Row> },
 }
@@ -40,6 +43,7 @@ pub enum Field {
     OpLower,
     OpUpper,
     ParenInner,
+    CancelArg,
     /// Row-major cell index of a Matrix.
     Cell(usize),
 }
@@ -55,6 +59,7 @@ impl Node {
             Node::Sub { .. } => vec![Field::SubArg],
             Node::BigOp { .. } => vec![Field::OpLower, Field::OpUpper],
             Node::Paren { .. } => vec![Field::ParenInner],
+            Node::Cancel { .. } => vec![Field::CancelArg],
             Node::Matrix { cells, .. } => (0..cells.len()).map(Field::Cell).collect(),
         }
     }
@@ -69,6 +74,7 @@ impl Node {
             (Node::BigOp { lower, .. }, Field::OpLower) => lower,
             (Node::BigOp { upper, .. }, Field::OpUpper) => upper,
             (Node::Paren { inner }, Field::ParenInner) => inner,
+            (Node::Cancel { arg }, Field::CancelArg) => arg,
             (Node::Matrix { cells, .. }, Field::Cell(i)) => &cells[i],
             _ => panic!("field {:?} does not belong to node {:?}", f, self),
         }
@@ -84,6 +90,7 @@ impl Node {
             (Node::BigOp { lower, .. }, Field::OpLower) => lower,
             (Node::BigOp { upper, .. }, Field::OpUpper) => upper,
             (Node::Paren { inner }, Field::ParenInner) => inner,
+            (Node::Cancel { arg }, Field::CancelArg) => arg,
             (Node::Matrix { cells, .. }, Field::Cell(i)) => &mut cells[i],
             (node, f) => panic!("field {:?} does not belong to node {:?}", f, node),
         }
@@ -119,6 +126,15 @@ pub fn normalize(row: &Row) -> Row {
     let mut out: Row = Vec::with_capacity(row.len());
     for node in row {
         let node = normalize_node(node);
+        // Empty scripts/cancels do not exist in normal form: their lone ⬚
+        // placeholder fuses with neighbouring script blocks in the picture,
+        // so the renderer must never produce one.
+        match &node {
+            Node::Sup { arg } | Node::Sub { arg } | Node::Cancel { arg } if arg.is_empty() => {
+                continue;
+            }
+            _ => {}
+        }
         match (out.last_mut(), &node) {
             // Re-normalize after merging: the concatenation can create new
             // same-kind adjacencies inside the argument (idempotence).
@@ -130,7 +146,60 @@ pub fn normalize(row: &Row) -> Row {
                 a.extend(b.clone());
                 *a = normalize(a);
             }
+            // Adjacent struck-through blocks are one picture.
+            (Some(Node::Cancel { arg: a }), Node::Cancel { arg: b }) => {
+                a.extend(b.clone());
+                *a = normalize(a);
+            }
+            // "Maximal cancel": a fully struck script right after a cancel
+            // is the same picture as the script living inside it.
+            (Some(Node::Cancel { arg: a }), Node::Sup { arg: b })
+                if matches!(b[..], [Node::Cancel { .. }]) =>
+            {
+                let Node::Cancel { arg: inner } = &b[0] else { unreachable!() };
+                a.push(Node::Sup { arg: inner.clone() });
+                *a = normalize(a);
+            }
+            (Some(Node::Cancel { arg: a }), Node::Sub { arg: b })
+                if matches!(b[..], [Node::Cancel { .. }]) =>
+            {
+                let Node::Cancel { arg: inner } = &b[0] else { unreachable!() };
+                a.push(Node::Sub { arg: inner.clone() });
+                *a = normalize(a);
+            }
             _ => out.push(node),
+        }
+    }
+    out
+}
+
+/// Remove every Cancel wrapper in the subtree, splicing its contents.
+fn strip_cancels(row: &Row) -> Row {
+    let mut out: Row = Vec::new();
+    for n in row {
+        match n {
+            Node::Cancel { arg } => out.extend(strip_cancels(arg)),
+            Node::Sym(_) | Node::Func(_) | Node::Accent { .. } => out.push(n.clone()),
+            Node::Frac { num, den } => out.push(Node::Frac {
+                num: strip_cancels(num),
+                den: strip_cancels(den),
+            }),
+            Node::Sqrt { arg, index } => {
+                out.push(Node::Sqrt { arg: strip_cancels(arg), index: *index })
+            }
+            Node::Sup { arg } => out.push(Node::Sup { arg: strip_cancels(arg) }),
+            Node::Sub { arg } => out.push(Node::Sub { arg: strip_cancels(arg) }),
+            Node::BigOp { op, lower, upper } => out.push(Node::BigOp {
+                op: *op,
+                lower: strip_cancels(lower),
+                upper: strip_cancels(upper),
+            }),
+            Node::Paren { inner } => out.push(Node::Paren { inner: strip_cancels(inner) }),
+            Node::Matrix { rows, cols, cells } => out.push(Node::Matrix {
+                rows: *rows,
+                cols: *cols,
+                cells: cells.iter().map(strip_cancels).collect(),
+            }),
         }
     }
     out
@@ -154,6 +223,12 @@ fn normalize_node(node: &Node) -> Node {
             upper: normalize(upper),
         },
         Node::Paren { inner } => Node::Paren { inner: normalize(inner) },
+        Node::Cancel { arg } => {
+            // A cancel strikes every cell of its subtree, so any Cancel
+            // nested anywhere inside it (even deep in a fraction) is the
+            // same picture; dissolve them all.
+            Node::Cancel { arg: normalize(&strip_cancels(&normalize(arg))) }
+        }
         Node::Matrix { rows, cols, cells } => Node::Matrix {
             rows: *rows,
             cols: *cols,

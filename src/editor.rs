@@ -374,6 +374,7 @@ impl Editor {
             "sqrt" => self.insert_and_enter(Node::Sqrt { arg: vec![], index: 2 }),
             "cbrt" | "sqrt3" => self.insert_and_enter(Node::Sqrt { arg: vec![], index: 3 }),
             "qdrt" | "sqrt4" => self.insert_and_enter(Node::Sqrt { arg: vec![], index: 4 }),
+            "cancel" => self.insert_and_enter(Node::Cancel { arg: vec![] }),
             "matrix" => self.insert_and_enter(Node::Matrix {
                 rows: 2,
                 cols: 2,
