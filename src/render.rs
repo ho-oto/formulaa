@@ -160,6 +160,11 @@ pub fn unstyle_char(c: char) -> char {
                 char::from_u32('a' as u32 + (u - 0x1D44E)).unwrap()
             } else if (0x1D434..=0x1D44D).contains(&u) {
                 char::from_u32('A' as u32 + (u - 0x1D434)).unwrap()
+            } else if (0x1D6FC..=0x1D714).contains(&u) {
+                // Lenient input: math-italic Greek small letters -> plain.
+                char::from_u32(0x3B1 + (u - 0x1D6FC)).unwrap()
+            } else if (0x1D6E2..=0x1D6FA).contains(&u) {
+                char::from_u32(0x391 + (u - 0x1D6E2)).unwrap()
             } else {
                 c
             }
