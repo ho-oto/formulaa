@@ -26,6 +26,9 @@ pub struct Editor {
     pub highlight: bool,
     /// Structure view: paint every block's background by nesting depth (F5).
     pub structure: bool,
+    /// Selection anchor column in the current row (Shift+←/→). The selected
+    /// node range is between the anchor and the cursor column.
+    pub select_anchor: Option<usize>,
 }
 
 /// Label keys for jump mode, most reachable first.
@@ -39,6 +42,9 @@ pub const JUMP_CHAR_BASE: u32 = 0xE000;
 pub const HL_OPEN_BASE: u32 = 0xE0E0;
 pub const HL_CLOSE_BASE: u32 = 0xE0E8;
 pub const HL_LEVELS: usize = 3;
+/// Selection range markers (displayed as ⟦ ⟧).
+pub const SEL_OPEN: char = '\u{E0F0}';
+pub const SEL_CLOSE: char = '\u{E0F1}';
 
 impl Default for Editor {
     fn default() -> Self {
@@ -59,6 +65,7 @@ impl Editor {
             jump: None,
             highlight: false,
             structure: false,
+            select_anchor: None,
         }
     }
 
@@ -278,6 +285,57 @@ impl Editor {
         }
     }
 
+    // ----- selection (Shift+←/→ over sibling nodes) -----
+
+    pub fn select_move(&mut self, right: bool) {
+        if self.select_anchor.is_none() {
+            self.select_anchor = Some(self.col);
+        }
+        if right {
+            self.col = (self.col + 1).min(self.cur_row().len());
+        } else {
+            self.col = self.col.saturating_sub(1);
+        }
+        if self.select_anchor == Some(self.col) {
+            self.select_anchor = None;
+        }
+    }
+
+    /// Selected node index range [lo, hi) in the current row.
+    pub fn selection(&self) -> Option<(usize, usize)> {
+        let a = self.select_anchor?;
+        if a == self.col {
+            return None;
+        }
+        Some((a.min(self.col), a.max(self.col)))
+    }
+
+    /// Remove and return the selected nodes, leaving the cursor at the gap.
+    pub fn take_selection(&mut self) -> Option<Row> {
+        let (lo, hi) = self.selection()?;
+        self.select_anchor = None;
+        self.col = lo;
+        Some(self.cur_row_mut().drain(lo..hi).collect())
+    }
+
+    pub fn delete_selection(&mut self) -> bool {
+        self.take_selection().is_some()
+    }
+
+    /// Replace the selection with `build(selection)`, cursor after the node.
+    pub fn wrap_selection(&mut self, build: impl FnOnce(Row) -> Node) -> bool {
+        match self.take_selection() {
+            Some(content) => {
+                let node = build(content);
+                let col = self.col;
+                self.cur_row_mut().insert(col, node);
+                self.col += 1;
+                true
+            }
+            None => false,
+        }
+    }
+
     // ----- jump mode (EasyMotion-style) -----
 
     /// All cursor positions in the document, in document order (a row's
@@ -346,6 +404,19 @@ impl Editor {
             return (root, None);
         }
         let mut path = self.path.clone();
+        let mut col = self.col;
+        if let Some((lo, hi)) = self.selection() {
+            let row = row_at_mut(&mut root, &path);
+            row.insert(hi, Node::Sym(SEL_CLOSE));
+            row.insert(lo, Node::Sym(SEL_OPEN));
+            col = if col >= hi {
+                col + 2
+            } else if col > lo {
+                col + 1
+            } else {
+                col
+            };
+        }
         if self.highlight && !path.is_empty() {
             let n = path.len();
             // Outermost shown level first, so deeper lookups see the
@@ -361,7 +432,7 @@ impl Editor {
                 path[d].0 += 1;
             }
         }
-        (root, Some((path, self.col)))
+        (root, Some((path, col)))
     }
 
     /// Execute a `\command` from the minibuffer.
@@ -369,8 +440,30 @@ impl Editor {
         if cmd.is_empty() {
             return;
         }
+        // With an active selection, structure commands wrap it (LyX-like).
         match cmd {
-            "frac" => self.insert_and_enter(Node::Frac { num: vec![], den: vec![] }),
+            "frac" => {
+                // Selection becomes the numerator; cursor moves to the
+                // denominator.
+                if let Some(content) = self.take_selection() {
+                    let col = self.col;
+                    self.cur_row_mut()
+                        .insert(col, Node::Frac { num: content, den: vec![] });
+                    self.path.push((col, Field::FracDen));
+                    self.col = 0;
+                } else {
+                    self.insert_and_enter(Node::Frac { num: vec![], den: vec![] });
+                }
+                return;
+            }
+            "sqrt" if self.wrap_selection(|c| Node::Sqrt { arg: c, index: 2 }) => return,
+            "cbrt" | "sqrt3" if self.wrap_selection(|c| Node::Sqrt { arg: c, index: 3 }) => {
+                return
+            }
+            "cancel" if self.wrap_selection(|c| Node::Cancel { arg: c }) => return,
+            _ => {}
+        }
+        match cmd {
             "sqrt" => self.insert_and_enter(Node::Sqrt { arg: vec![], index: 2 }),
             "cbrt" | "sqrt3" => self.insert_and_enter(Node::Sqrt { arg: vec![], index: 3 }),
             "qdrt" | "sqrt4" => self.insert_and_enter(Node::Sqrt { arg: vec![], index: 4 }),
@@ -510,6 +603,46 @@ mod tests {
         let open0 = char::from_u32(HL_OPEN_BASE).unwrap();
         assert_eq!(num[0], Node::Sym(open0));
         assert!(matches!(num[1], Node::Sqrt { .. }));
+    }
+
+    #[test]
+    fn selection_wrap_and_delete() {
+        let mut ed = Editor::new();
+        for c in "abc".chars() {
+            ed.insert_sym(c);
+        }
+        // Select b, c (cursor at end, extend left twice).
+        ed.select_move(false);
+        ed.select_move(false);
+        assert_eq!(ed.selection(), Some((1, 3)));
+        ed.execute("cancel");
+        assert_eq!(
+            ed.root,
+            vec![
+                Node::Sym('a'),
+                Node::Cancel { arg: vec![Node::Sym('b'), Node::Sym('c')] }
+            ]
+        );
+        assert_eq!(ed.col, 2);
+
+        // Select the cancel node and delete it.
+        ed.select_move(false);
+        assert!(ed.delete_selection());
+        assert_eq!(ed.root, vec![Node::Sym('a')]);
+
+        // Selection into a fraction numerator.
+        ed.insert_sym('b');
+        ed.select_move(false);
+        ed.select_move(false);
+        ed.execute("frac");
+        ed.insert_sym('2');
+        assert_eq!(
+            ed.root,
+            vec![Node::Frac {
+                num: vec![Node::Sym('a'), Node::Sym('b')],
+                den: vec![Node::Sym('2')],
+            }]
+        );
     }
 
     #[test]

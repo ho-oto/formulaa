@@ -10,11 +10,12 @@ use ratatui::Frame;
 use mascii::render::{render_row, GlyphSet, RenderCtx, CURSOR_CHAR};
 use mascii::parse::RegionSpan;
 use mascii::editor::{
-    Editor, HL_CLOSE_BASE, HL_LEVELS, HL_OPEN_BASE, JUMP_CHAR_BASE, JUMP_LABELS,
+    Editor, HL_CLOSE_BASE, HL_LEVELS, HL_OPEN_BASE, JUMP_CHAR_BASE, JUMP_LABELS, SEL_CLOSE,
+    SEL_OPEN,
 };
 use mascii::{ast, latex, parse, typst};
 
-const HELP: &str = "\\cmd  ^/_ scripts  ( ) [ ] insets  Space exit  ←→↑↓ move  ^G jump  F4 blocks  F5 structure  F2 italic  F3 compat  ^S save  ^Q quit";
+const HELP: &str = "\\cmd  ^/_ ( ) insets  Space exit  ←→↑↓ move  ⇧←→ select(wrap: \\cancel ^ _ ( \\frac)  ^G jump  F4/F5 blocks  F2/F3 view  ^S save  ^Q quit";
 
 const USAGE: &str = "\
 usage: mascii [SAVE_PATH]          interactive TUI editor (default: formula.tex)
@@ -151,29 +152,67 @@ fn handle_key(
 
     ed.message.clear();
     match code {
-        KeyCode::Left => ed.left(),
-        KeyCode::Right => ed.right(),
-        KeyCode::Up => ed.vertical(true),
-        KeyCode::Down => ed.vertical(false),
+        KeyCode::Left if mods.contains(KeyModifiers::SHIFT) => ed.select_move(false),
+        KeyCode::Right if mods.contains(KeyModifiers::SHIFT) => ed.select_move(true),
+        KeyCode::Left => {
+            ed.select_anchor = None;
+            ed.left();
+        }
+        KeyCode::Right => {
+            ed.select_anchor = None;
+            ed.right();
+        }
+        KeyCode::Up => {
+            ed.select_anchor = None;
+            ed.vertical(true);
+        }
+        KeyCode::Down => {
+            ed.select_anchor = None;
+            ed.vertical(false);
+        }
+        KeyCode::Esc => ed.select_anchor = None,
         KeyCode::Home => ed.home(),
         KeyCode::End => ed.end(),
-        KeyCode::Backspace => ed.backspace(),
-        KeyCode::Delete => ed.delete(),
+        KeyCode::Backspace => {
+            if !ed.delete_selection() {
+                ed.backspace();
+            }
+        }
+        KeyCode::Delete => {
+            if !ed.delete_selection() {
+                ed.delete();
+            }
+        }
         KeyCode::F(2) => ed.italic = !ed.italic,
         KeyCode::F(3) => ed.compat = !ed.compat,
         KeyCode::F(4) => ed.highlight = !ed.highlight,
         KeyCode::F(5) => ed.structure = !ed.structure,
         KeyCode::Char('\\') => ed.minibuffer = Some(String::new()),
-        KeyCode::Char('^') => ed.insert_and_enter(ast::Node::Sup { arg: vec![] }),
-        KeyCode::Char('_') => ed.insert_and_enter(ast::Node::Sub { arg: vec![] }),
-        KeyCode::Char('(') => ed.insert_and_enter(ast::Node::Paren { inner: vec![] }),
+        KeyCode::Char('^') => {
+            if !ed.wrap_selection(|c| ast::Node::Sup { arg: c }) {
+                ed.insert_and_enter(ast::Node::Sup { arg: vec![] });
+            }
+        }
+        KeyCode::Char('_') => {
+            if !ed.wrap_selection(|c| ast::Node::Sub { arg: c }) {
+                ed.insert_and_enter(ast::Node::Sub { arg: vec![] });
+            }
+        }
+        KeyCode::Char('(') => {
+            if !ed.wrap_selection(|c| ast::Node::Paren { inner: c }) {
+                ed.insert_and_enter(ast::Node::Paren { inner: vec![] });
+            }
+        }
         KeyCode::Char(')') => ed.close_paren(),
         KeyCode::Char('[') => {
             ed.message = "[ ] are reserved for matrices; insert one with \\matrix".into()
         }
         KeyCode::Char(']') => ed.close_bracket(),
         KeyCode::Char(' ') => ed.exit_inset(),
-        KeyCode::Char(c) if c.is_ascii_graphic() => ed.insert_sym(c),
+        KeyCode::Char(c) if c.is_ascii_graphic() => {
+            ed.select_anchor = None;
+            ed.insert_sym(c);
+        }
         _ => {}
     }
     false
@@ -310,6 +349,16 @@ fn decorate_line(line: &str) -> Vec<Span<'static>> {
                 .unwrap();
             flush(&mut buf, &mut spans);
             spans.push(Span::styled(label.to_string(), label_style));
+        } else if c == SEL_OPEN || c == SEL_CLOSE {
+            let glyph = if c == SEL_OPEN { '⟦' } else { '⟧' };
+            flush(&mut buf, &mut spans);
+            spans.push(Span::styled(
+                glyph.to_string(),
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ));
         } else if (HL_OPEN_BASE..HL_OPEN_BASE + HL_LEVELS as u32).contains(&u)
             || (HL_CLOSE_BASE..HL_CLOSE_BASE + HL_LEVELS as u32).contains(&u)
         {
