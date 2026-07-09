@@ -45,6 +45,11 @@ fn err<T>(msg: impl Into<String>, r: usize, c: usize) -> Result<T> {
     Err(ParseError { msg: msg.into(), at: (r, c) })
 }
 
+/// A structural region discovered during parsing: (top, bottom, left,
+/// right) grid rows/cols (inclusive) and its nesting depth. Used by the
+/// TUI structure view to paint blocks by depth.
+pub type RegionSpan = ((usize, usize, usize, usize), usize);
+
 pub struct Grid {
     g: Vec<Vec<char>>,
 }
@@ -190,11 +195,18 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
 
 /// Parse a region. `baseline` may be passed down when the caller already
 /// knows it (paren/sqrt interiors share the caller's baseline row).
-fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
+fn parse_region(
+    g: &Grid,
+    rect: Rect,
+    baseline: Option<usize>,
+    depth: usize,
+    trace: &mut Vec<RegionSpan>,
+) -> Result<Row> {
     let rect = match trim(g, rect) {
         Some(r) => r,
         None => return Ok(vec![]),
     };
+    trace.push(((rect.t, rect.b, rect.l, rect.r), depth));
     let bl = match baseline {
         Some(b) => b,
         None => find_baseline(g, rect)?,
@@ -207,14 +219,16 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
         match ch {
             ' ' => {
                 let run_end = scan_while(g, bl, col, rect.r, |c| c == ' ');
-                parse_script_run(g, rect, bl, col, run_end, &mut out)?;
+                parse_script_run(g, rect, bl, col, run_end, depth, trace, &mut out)?;
                 col = run_end + 1;
             }
             _ if ch == FRAC_BAR => {
                 let run_end = scan_while(g, bl, col, rect.r, |c| c == FRAC_BAR);
                 let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end };
-                let num = region_above(span, bl).map_or(Ok(vec![]), |r| parse_region(g, r, None))?;
-                let den = region_below(span, bl).map_or(Ok(vec![]), |r| parse_region(g, r, None))?;
+                let num = region_above(span, bl)
+                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace))?;
+                let den = region_below(span, bl)
+                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace))?;
                 out.push(Node::Frac { num, den });
                 col = run_end + 1;
             }
@@ -234,8 +248,10 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                     return err("big-op band must extend past its operator", bl, col);
                 }
                 let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end };
-                let upper = region_above(span, bl).map_or(Ok(vec![]), |r| parse_region(g, r, None))?;
-                let lower = region_below(span, bl).map_or(Ok(vec![]), |r| parse_region(g, r, None))?;
+                let upper = region_above(span, bl)
+                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace))?;
+                let lower = region_below(span, bl)
+                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace))?;
                 out.push(Node::BigOp { op, lower, upper });
                 col = run_end + 1;
             }
@@ -243,7 +259,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                 let close = match_on_row(g, bl, col, rect.r, '(', ')')?;
                 let inner = Rect { t: bl, b: bl, l: col + 1, r: close.wrapping_sub(1) };
                 let inner_row = if close > col + 1 {
-                    parse_region(g, inner, Some(bl))?
+                    parse_region(g, inner, Some(bl), depth + 1, trace)?
                 } else {
                     vec![]
                 };
@@ -259,7 +275,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                 let (top, bot) = vertical_extent(g, rect, col, bl, &['⎛', '⎜', '⎝']);
                 let close = match_on_row(g, top, col, rect.r, '⎛', '⎞')?;
                 let inner = Rect { t: top, b: bot, l: col + 1, r: close - 1 };
-                out.push(Node::Paren { inner: parse_region(g, inner, Some(bl))? });
+                out.push(Node::Paren { inner: parse_region(g, inner, Some(bl), depth + 1, trace)? });
                 col = close + 1;
             }
             '⎡' | '⎢' | '⎣' | '[' => {
@@ -271,7 +287,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                 let (open, close_ch) = if ch == '[' { ('[', ']') } else { ('⎡', '⎤') };
                 let close = match_on_row(g, top, col, rect.r, open, close_ch)?;
                 let inner = Rect { t: top, b: bot, l: col + 1, r: close - 1 };
-                out.push(parse_matrix(g, inner)?);
+                out.push(parse_matrix(g, inner, depth + 1, trace)?);
                 col = close + 1;
             }
             '│' | '√' | '∛' | '∜' => {
@@ -294,7 +310,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                 let index = radical_index(g.at(bot, col)).unwrap();
                 let w = scan_while(g, top - 1, col + 1, rect.r, |c| c == '_') - col;
                 let inner = Rect { t: top, b: bot, l: col + 1, r: col + w };
-                out.push(Node::Sqrt { arg: parse_region(g, inner, Some(bl))?, index });
+                out.push(Node::Sqrt { arg: parse_region(g, inner, Some(bl), depth + 1, trace)?, index });
                 col += w + 1;
             }
             _ if ch == PLACEHOLDER => col += 1,
@@ -378,12 +394,15 @@ fn region_below(span: Rect, bl: usize) -> Option<Rect> {
 /// independently into column runs (bracket-protected gaps bridge a run, so
 /// a matrix inside a script stays whole), then all script blocks are
 /// emitted ordered by their leftmost column.
+#[allow(clippy::too_many_arguments)]
 fn parse_script_run(
     g: &Grid,
     rect: Rect,
     bl: usize,
     from: usize,
     to: usize,
+    depth: usize,
+    trace: &mut Vec<RegionSpan>,
     out: &mut Row,
 ) -> Result<()> {
     let mut parts: Vec<(usize, bool, Rect)> = Vec::new();
@@ -416,7 +435,7 @@ fn parse_script_run(
     }
     parts.sort_by_key(|&(l, _, _)| l);
     for (_, is_sup, r) in parts {
-        let arg = parse_region(g, r, None)?;
+        let arg = parse_region(g, r, None, depth + 1, trace)?;
         out.push(if is_sup { Node::Sup { arg } } else { Node::Sub { arg } });
     }
     Ok(())
@@ -456,7 +475,7 @@ fn vertical_extent(g: &Grid, rect: Rect, col: usize, bl: usize, chars: &[char]) 
 /// Split the interior of a matrix into cells.
 /// Row separators: fully blank rows. Column separators: runs of >= 2 fully
 /// blank, unprotected columns (see `protected_cols`).
-fn parse_matrix(g: &Grid, inner: Rect) -> Result<Node> {
+fn parse_matrix(g: &Grid, inner: Rect, depth: usize, trace: &mut Vec<RegionSpan>) -> Result<Node> {
     let inner = match trim(g, inner) {
         Some(r) => r,
         None => return err("empty matrix", inner.t, inner.l),
@@ -513,7 +532,7 @@ fn parse_matrix(g: &Grid, inner: Rect) -> Result<Node> {
     let mut cells = Vec::with_capacity(rows * cols);
     for &(rt, rb) in &row_segs {
         for &(cl, cr) in &col_segs {
-            cells.push(parse_region(g, Rect { t: rt, b: rb, l: cl, r: cr }, None)?);
+            cells.push(parse_region(g, Rect { t: rt, b: rb, l: cl, r: cr }, None, depth, trace)?);
         }
     }
     Ok(Node::Matrix { rows, cols, cells })
@@ -521,12 +540,18 @@ fn parse_matrix(g: &Grid, inner: Rect) -> Result<Node> {
 
 /// Parse a formula from its AA text form.
 pub fn parse(text: &str) -> Result<Row> {
+    parse_with_regions(text).map(|(row, _)| row)
+}
+
+/// Like `parse`, but also return every structural region's rectangle and
+/// nesting depth (for the TUI structure view).
+pub fn parse_with_regions(text: &str) -> Result<(Row, Vec<RegionSpan>)> {
     let lines: Vec<Vec<char>> = text
         .lines()
         .map(|l| l.trim_end().replace('\t', " ").chars().collect())
         .collect();
     if lines.iter().all(|l| l.is_empty()) {
-        return Ok(vec![]);
+        return Ok((vec![], vec![]));
     }
     let width = lines.iter().map(|l| l.len()).max().unwrap();
     let mut g = Grid {
@@ -560,12 +585,14 @@ pub fn parse(text: &str) -> Result<Row> {
         _ => return err("multiple ▶ baseline markers", markers[1].0, markers[1].1),
     }
     let rect = Rect { t: 0, b: g.g.len() - 1, l: 0, r: width - 1 };
+    let mut trace = Vec::new();
     match trim(&g, rect) {
         // Normalize: a script arg that mixes padded structures with atoms
         // parses as adjacent script chunks; merging them restores the
         // canonical single node (render is only defined on normal forms).
-        Some(rect) => parse_region(&g, rect, baseline).map(|row| crate::ast::normalize(&row)),
-        None => Ok(vec![]),
+        Some(rect) => parse_region(&g, rect, baseline, 0, &mut trace)
+            .map(|row| (crate::ast::normalize(&row), trace)),
+        None => Ok((vec![], trace)),
     }
 }
 

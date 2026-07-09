@@ -38,6 +38,7 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
 | `src/symbols_ext.rs` | **生成物**(ho-oto/mathematical-symbols 由来、4000+)。手編集しない |
 | `src/main.rs` | TUI(ratatui)+ CLI サブコマンド |
 | `tests/roundtrip.rs` | 実式コーパス + ランダムプロパティテスト |
+| `tools/merge_math_font.py` | JuliaMono から不足数式グリフを補う合成フォント生成(fontTools) |
 
 ## 設計文書
 
@@ -56,3 +57,8 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
 - `Sqrt` は `index: u8`(2/3/4 = √∛∜)を持つ。`Node::Accent` の base は
   1 文字(Row ではない)。
 - ratatui のイベントは `KeyEventKind::Press` のみ処理(Windows の重複対策)。
+- `GlyphSet::Compat`(F3)は表示専用。正準形式のレイアウトを変えないこと。
+- ジャンプ(Ctrl+G)・ブロック強調(F4)は私用領域文字のマーカー原子を
+  表示用クローン AST に挿入する方式(editor.rs `decorated`)。U+E000–E0FF は
+  表示マーカー予約。構造ビュー(F5)は正準描画を `parse_with_regions` に
+  通して矩形+深さを回収し背景色を塗る(main.rs `draw_structure`)。

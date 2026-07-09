@@ -3,6 +3,9 @@
 //! the same model LyX uses for math insets.
 
 use crate::ast::{row_at, row_at_mut, Field, Node, Row};
+
+/// A cursor position: path into nested rows plus a column.
+pub type CursorPos = (Vec<(usize, Field)>, usize);
 use crate::symbols::{
     accent_by_name, bigop_by_char, bigop_by_name, is_func_name, symbol_by_name,
 };
@@ -15,7 +18,27 @@ pub struct Editor {
     pub minibuffer: Option<String>,
     pub message: String,
     pub italic: bool,
+    /// Display-only compat glyph mode (F3); see render::GlyphSet.
+    pub compat: bool,
+    /// EasyMotion-style jump: Some(targets) while waiting for a label key.
+    pub jump: Option<Vec<CursorPos>>,
+    /// Highlight the enclosing blocks of the cursor (F4).
+    pub highlight: bool,
+    /// Structure view: paint every block's background by nesting depth (F5).
+    pub structure: bool,
 }
+
+/// Label keys for jump mode, most reachable first.
+pub const JUMP_LABELS: &str =
+    "asdfghjklqwertyuiopzxcvbnmASDFGHJKLQWERTYUIOPZXCVBNM0123456789";
+/// Private-use chars used as display-time markers (never in a real AST):
+/// jump label placeholders …
+pub const JUMP_CHAR_BASE: u32 = 0xE000;
+/// … and per-level open/close markers around the cursor's enclosing blocks
+/// (level 0 = innermost).
+pub const HL_OPEN_BASE: u32 = 0xE0E0;
+pub const HL_CLOSE_BASE: u32 = 0xE0E8;
+pub const HL_LEVELS: usize = 3;
 
 impl Default for Editor {
     fn default() -> Self {
@@ -32,6 +55,10 @@ impl Editor {
             minibuffer: None,
             message: String::new(),
             italic: true,
+            compat: false,
+            jump: None,
+            highlight: false,
+            structure: false,
         }
     }
 
@@ -251,6 +278,92 @@ impl Editor {
         }
     }
 
+    // ----- jump mode (EasyMotion-style) -----
+
+    /// All cursor positions in the document, in document order (a row's
+    /// columns first, then its children), excluding the current position.
+    pub fn jump_targets(&self) -> Vec<CursorPos> {
+        fn walk(row: &Row, path: &mut Vec<(usize, Field)>, out: &mut Vec<CursorPos>) {
+            for col in 0..=row.len() {
+                out.push((path.clone(), col));
+            }
+            for (i, node) in row.iter().enumerate() {
+                for f in node.fields() {
+                    path.push((i, f));
+                    walk(node.field(f), path, out);
+                    path.pop();
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&self.root, &mut Vec::new(), &mut out);
+        out.retain(|(p, c)| !(p == &self.path && *c == self.col));
+        out
+    }
+
+    pub fn start_jump(&mut self) {
+        let mut targets = self.jump_targets();
+        if targets.is_empty() {
+            self.message = "no jump targets".into();
+            return;
+        }
+        let max = JUMP_LABELS.chars().count();
+        if targets.len() > max {
+            targets.truncate(max);
+            self.message = "jump: press a label key (some targets unlabeled)".into();
+        } else {
+            self.message = "jump: press a label key (Esc cancels)".into();
+        }
+        self.jump = Some(targets);
+    }
+
+    pub fn jump_to(&mut self, label: char) {
+        if let Some(targets) = self.jump.take() {
+            if let Some(idx) = JUMP_LABELS.chars().position(|c| c == label) {
+                if let Some((p, c)) = targets.get(idx) {
+                    self.path = p.clone();
+                    self.col = *c;
+                }
+            }
+            self.message.clear();
+        }
+    }
+
+    // ----- display decoration (jump labels / block highlight) -----
+
+    /// A copy of the AST with display markers inserted, plus the cursor
+    /// adjusted for the insertions (None while jump mode hides it).
+    /// Markers are private-use `Sym`s that the TUI turns into colored
+    /// labels / brackets; they never appear in a real document.
+    pub fn decorated(&self) -> (Row, Option<CursorPos>) {
+        let mut root = self.root.clone();
+        if let Some(targets) = &self.jump {
+            // Reverse document order keeps not-yet-inserted positions valid.
+            for (idx, (p, c)) in targets.iter().enumerate().rev() {
+                let mark = char::from_u32(JUMP_CHAR_BASE + idx as u32).unwrap();
+                row_at_mut(&mut root, p).insert(*c, Node::Sym(mark));
+            }
+            return (root, None);
+        }
+        let mut path = self.path.clone();
+        if self.highlight && !path.is_empty() {
+            let n = path.len();
+            // Outermost shown level first, so deeper lookups see the
+            // already-adjusted indices.
+            for d in n.saturating_sub(HL_LEVELS)..n {
+                let level = (n - 1 - d) as u32;
+                let open = char::from_u32(HL_OPEN_BASE + level).unwrap();
+                let close = char::from_u32(HL_CLOSE_BASE + level).unwrap();
+                let i = path[d].0;
+                let row = row_at_mut(&mut root, &path[..d]);
+                row.insert(i + 1, Node::Sym(close));
+                row.insert(i, Node::Sym(open));
+                path[d].0 += 1;
+            }
+        }
+        (root, Some((path, self.col)))
+    }
+
     /// Execute a `\command` from the minibuffer.
     pub fn execute(&mut self, cmd: &str) {
         if cmd.is_empty() {
@@ -345,6 +458,57 @@ mod tests {
         ed.backspace();
         assert!(ed.root.is_empty());
         assert_eq!(ed.col, 0);
+    }
+
+    #[test]
+    fn jump_targets_and_jump() {
+        let mut ed = Editor::new();
+        // x + 1/2 with cursor at the end of the top row
+        ed.insert_sym('x');
+        ed.insert_sym('+');
+        ed.execute("frac");
+        ed.insert_sym('1');
+        ed.vertical(false);
+        ed.insert_sym('2');
+        ed.exit_inset();
+        // top row: cols 0..=3 minus current (3) = 3; num row: 0..=1; den: 0..=1
+        let targets = ed.jump_targets();
+        assert_eq!(targets.len(), 3 + 2 + 2);
+        ed.start_jump();
+        assert!(ed.jump.is_some());
+        // Third label ('d') is top-row col 2 (before the fraction).
+        ed.jump_to('d');
+        assert!(ed.jump.is_none());
+        assert!(ed.path.is_empty());
+        assert_eq!(ed.col, 2);
+        // First label ('a') would be col 0.
+        ed.start_jump();
+        ed.jump_to('a');
+        assert_eq!((ed.path.len(), ed.col), (0, 0));
+    }
+
+    #[test]
+    fn decorated_highlight_wraps_ancestors() {
+        let mut ed = Editor::new();
+        ed.execute("frac");
+        ed.execute("sqrt"); // cursor inside sqrt inside frac numerator
+        ed.insert_sym('x');
+        ed.highlight = true;
+        let (root, cursor) = ed.decorated();
+        let (path, col) = cursor.unwrap();
+        // Markers shift both ancestor indices by one.
+        assert_eq!(path[0].0, 1, "frac shifted by its open marker");
+        assert_eq!(path[1].0, 1, "sqrt shifted by its open marker");
+        assert_eq!(col, 1);
+        // Top row: open(level1), frac, close(level1)
+        let open1 = char::from_u32(HL_OPEN_BASE + 1).unwrap();
+        assert_eq!(root[0], Node::Sym(open1));
+        assert!(matches!(root[1], Node::Frac { .. }));
+        // Inside the numerator: open(level0), sqrt, close(level0)
+        let num = root[1].field(Field::FracNum);
+        let open0 = char::from_u32(HL_OPEN_BASE).unwrap();
+        assert_eq!(num[0], Node::Sym(open0));
+        assert!(matches!(num[1], Node::Sqrt { .. }));
     }
 
     #[test]
