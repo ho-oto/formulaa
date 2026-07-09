@@ -5,10 +5,20 @@ use crate::ast::{Node, Row};
 use crate::symbols::accent_info;
 
 pub fn row_to_typst(row: &Row) -> String {
-    row.iter()
-        .map(node_to_typst)
-        .collect::<Vec<_>>()
-        .join(" ")
+    // Adjacent digits form one number token ("27", not "2 7").
+    let mut parts: Vec<String> = Vec::new();
+    let mut prev_digit = false;
+    for node in row {
+        let digit = matches!(node, Node::Sym(c) if c.is_ascii_digit() || *c == '.');
+        let s = node_to_typst(node);
+        if digit && prev_digit {
+            parts.last_mut().unwrap().push_str(&s);
+        } else {
+            parts.push(s);
+        }
+        prev_digit = digit;
+    }
+    parts.join(" ")
 }
 
 /// Group as a parenthesized argument when the row is not a single token.
