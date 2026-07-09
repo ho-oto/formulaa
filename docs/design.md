@@ -146,6 +146,9 @@
 - [ ] エディタの undo/redo、コピー/ペースト(AA 形式でクリップボードへ)
 
 ### 中期
+- [x] WASM バインディング(`wasm/`)+ VSCode/Obsidian 拡張プロトタイプ
+      (`editors/`, docs/editors.md)。次段: Obsidian CodeMirror6 ウィジェットで
+      Live Preview 内インライン構造編集
 - [ ] LaTeX パーサ(LaTeX → AST → AA。往復の第2経路)
 - [ ] MathML 出力(`<math>` ツリーは AST とほぼ同型)
 - [ ] AsciiMath 風の1行入力構文(`sum_(i=1)^n 1/i^2` → AST)

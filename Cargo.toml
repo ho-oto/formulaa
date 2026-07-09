@@ -1,8 +1,21 @@
+[workspace]
+members = [".", "wasm"]
+
 [package]
 name = "mascii"
 version = "0.1.0"
 edition = "2024"
 description = "LyX-like interactive TUI math editor rendering Unicode/ASCII-art formulas"
 
+[features]
+default = ["tui"]
+# The TUI binary; the library (AST/render/parse/editor) has no TUI deps,
+# so wasm builds use default-features = false.
+tui = ["dep:ratatui"]
+
 [dependencies]
-ratatui = "0.29"
+ratatui = { version = "0.29", optional = true }
+
+[[bin]]
+name = "mascii"
+required-features = ["tui"]

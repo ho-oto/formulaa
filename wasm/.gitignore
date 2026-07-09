@@ -1,0 +1,6 @@
+/target
+wasm/pkg
+wasm/pkg-node
+node_modules
+editors/vscode/media/pkg
+editors/obsidian/pkg-node

@@ -82,6 +82,19 @@ Unicode 数式記号は多くの等幅フォントで欠けていたり等幅で
        -j JuliaMono-Regular.ttf -o Menlo-Math.ttf
    ```
 
+## エディタ統合(VSCode / Obsidian / Zed)
+
+Rust コアを WASM 化(`wasm/`)し、Markdown の ```math フェンス内の
+AA 数式を構造エディタで編集する拡張のプロトタイプを `editors/` に用意:
+
+- **VSCode**: `Ctrl+Alt+M` でカーソル位置の数式を webview エディタで開き、
+  `Ctrl+Enter` で書き戻し。選択 AA の LaTeX/Typst 変換コマンドも。
+- **Obsidian**: コマンド「Edit mascii formula at cursor」でモーダル編集。
+- **Zed**: 拡張 UI API 未提供のため CLI タスク連携(選択→aa2tex 等)。
+
+ビルド手順と「数式部分だけその場で構造編集」への段階的ロードマップは
+`docs/editors.md` 参照。
+
 ## 設計
 
 内部表現は TeX 文字列ではなく**数式 AST**。構造編集・AA 描画・LaTeX/Typst

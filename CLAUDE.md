@@ -6,6 +6,7 @@ LyX 風 TUI 数式エディタ + AA⇄AST 相互変換ツール。Rust / ratatui
 
 ```sh
 cargo test                      # 全テスト(ユニット + ラウンドトリップ)
+cargo check -p mascii-wasm --target wasm32-unknown-unknown  # wasm 側
 cargo clippy --all-targets     # 警告ゼロを維持
 cargo run                      # TUI エディタ
 cargo run --example demo       # レンダリングのサンプル出力(TUI なし)
@@ -39,6 +40,10 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
 | `src/main.rs` | TUI(ratatui)+ CLI サブコマンド |
 | `tests/roundtrip.rs` | 実式コーパス + ランダムプロパティテスト |
 | `tools/merge_math_font.py` | JuliaMono から不足数式グリフを補う合成フォント生成(fontTools) |
+| `wasm/` | wasm-bindgen バインディング(変換 API + キー駆動 `MasciiEditor`) |
+| `editors/` | VSCode / Obsidian / Zed 統合(docs/editors.md 参照) |
+| `SKILL.md` | AI が AA を直接読み書きするためのガイド |
+| `docs/examples.md` | コーパス対照表(examples/catalog.rs で再生成) |
 
 ## 設計文書
 
@@ -56,6 +61,8 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
   カーソルなし描画のみ。
 - `Sqrt` は `index: u8`(2/3/4 = √∛∜)を持つ。`Node::Accent` の base は
   1 文字(Row ではない)。
+- ratatui は feature "tui"(bin 専用)。ライブラリ本体に TUI 依存を
+  持ち込まない(wasm ビルドが壊れる)。
 - ratatui のイベントは `KeyEventKind::Press` のみ処理(Windows の重複対策)。
 - `GlyphSet::Compat`(F3)は表示専用。正準形式のレイアウトを変えないこと。
 - ジャンプ(Ctrl+G)・ブロック強調(F4)は私用領域文字のマーカー原子を
