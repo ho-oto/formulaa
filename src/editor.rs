@@ -18,13 +18,13 @@ pub struct Editor {
     pub minibuffer: Option<String>,
     pub message: String,
     pub italic: bool,
-    /// Display-only compat glyph mode (F3); see render::GlyphSet.
+    /// Display-only compat glyph mode (Ctrl+P); see render::GlyphSet.
     pub compat: bool,
     /// EasyMotion-style jump: Some(targets) while waiting for a label key.
     pub jump: Option<Vec<CursorPos>>,
-    /// Highlight the enclosing blocks of the cursor (F4).
+    /// Highlight the enclosing blocks of the cursor (Ctrl+B).
     pub highlight: bool,
-    /// Structure view: paint every block's background by nesting depth (F5).
+    /// Structure view: paint every block's background by nesting depth (Ctrl+O).
     pub structure: bool,
     /// Selection anchor column in the current row (Shift+←/→). The selected
     /// node range is between the anchor and the cursor column.

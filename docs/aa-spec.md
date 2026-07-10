@@ -133,7 +133,7 @@ render(parse(aa)) == aa                        -- 正準 AA
 
 ## 6.5 互換表示モード(この仕様の対象外)
 
-`GlyphSet::Compat`(F3 / `mascii fmt --compat`)は、Unicode 数式グリフの
+`GlyphSet::Compat`(Ctrl+P / `mascii fmt --compat`)は、Unicode 数式グリフの
 幅が揃わないフォント向けの **表示専用** 出力である。ASCII 英字(イタリック化
 なし)・box-drawing 構造グリフ・2Dスクリプトのみを使い、極限バンドを持たない
 ため本仕様の可逆性保証の対象外。交換・保存には常に正準形式を使うこと。
@@ -153,4 +153,4 @@ render(parse(aa)) == aa                        -- 正準 AA
   (`│` が根号の茎と衝突するため、専用グリフの導入が必要)。
 - アクセントの重ね掛け(`\hat{\dot{x}}`)は非対応。
 - `Func` は辞書名のみ(任意の `\operatorname` は往復不可)。
-- イタリック OFF 表示(F2)は閲覧用であり、正準形式はイタリック固定。
+- イタリック OFF 表示(Ctrl+T)は閲覧用であり、正準形式はイタリック固定。

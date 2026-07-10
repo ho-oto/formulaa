@@ -15,7 +15,7 @@ use mascii::editor::{
 };
 use mascii::{ast, latex, parse, typst};
 
-const HELP: &str = "\\cmd  ^/_ ( ) insets  Space exit  ←→↑↓ move  ⇧←→ select(wrap: \\cancel ^ _ ( \\frac)  ^G jump  F4/F5 blocks  F2/F3 view  ^S save  ^Q quit";
+const HELP: &str = "\\cmd  ^/_ ( ) insets  Space exit  ←→↑↓ move  ⇧←→ select  ^G jump  ^B blocks  ^O structure  ^T italic  ^P compat  ^S save  ^Q quit";
 
 const USAGE: &str = "\
 usage: mascii [SAVE_PATH]          interactive TUI editor (default: formula.tex)
@@ -138,6 +138,10 @@ fn handle_key(
         match code {
             KeyCode::Char('q') | KeyCode::Char('c') => return true,
             KeyCode::Char('g') => ed.start_jump(),
+            KeyCode::Char('t') => ed.italic = !ed.italic,
+            KeyCode::Char('p') => ed.compat = !ed.compat,
+            KeyCode::Char('b') => ed.highlight = !ed.highlight,
+            KeyCode::Char('o') => ed.structure = !ed.structure,
             KeyCode::Char('s') => {
                 let tex = latex::row_to_latex(&ed.root);
                 match fs::write(save_path, format!("{}\n", tex)) {
@@ -183,6 +187,7 @@ fn handle_key(
                 ed.delete();
             }
         }
+        // F-keys kept as aliases (often captured by the terminal/OS).
         KeyCode::F(2) => ed.italic = !ed.italic,
         KeyCode::F(3) => ed.compat = !ed.compat,
         KeyCode::F(4) => ed.highlight = !ed.highlight,
