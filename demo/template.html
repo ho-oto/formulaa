@@ -1,0 +1,291 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mascii — 数式AAエディタ</title>
+<style>
+  @font-face {
+    font-family: "JuliaMono";
+    src: url(data:font/woff2;base64,{{FONT_B64}}) format("woff2");
+    font-weight: 100 900;
+  }
+  :root {
+    --bg: #14161f;
+    --panel: #1c1f2b;
+    --panel-edge: #303548;
+    --ink: #e8e6f0;
+    --muted: #8b8fa8;
+    --accent: #7fd7c4;
+    --amber: #e8c268;
+    --magenta: #d78fd7;
+  }
+  html, body { background: var(--bg); }
+  body {
+    font-family: "JuliaMono", ui-monospace, monospace;
+    color: var(--ink);
+    margin: 0;
+    padding: 2.5rem 1.25rem 4rem;
+    line-height: 1.55;
+  }
+  .wrap { max-width: 60rem; margin: 0 auto; display: flex; flex-direction: column; gap: 1.4rem; }
+
+  header h1 {
+    font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; margin: 0;
+  }
+  header h1 .tld { color: var(--accent); }
+  header p { color: var(--muted); margin: 0.4rem 0 0; max-width: 46rem; font-size: 0.85rem; }
+
+  .label {
+    color: var(--muted); font-size: 0.68rem; text-transform: uppercase;
+    letter-spacing: 0.14em; margin: 0 0 0.4rem;
+  }
+
+  /* --- editor pane, framed like a TUI --- */
+  .pane {
+    background: var(--panel);
+    border: 1px solid var(--panel-edge);
+    border-radius: 3px;
+  }
+  .pane-title {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.4rem 0.9rem;
+    border-bottom: 1px solid var(--panel-edge);
+    color: var(--muted); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase;
+  }
+  #screen {
+    margin: 0; padding: 1.1rem 1.2rem 1.3rem;
+    min-height: 9.5rem;
+    font-size: 1.28rem; line-height: 1.25;
+    white-space: pre; overflow-x: auto;
+    outline: none; cursor: text;
+  }
+  #screen:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 0 0 3px 3px; }
+  .cursor { color: var(--accent); animation: blink 1.1s step-start infinite; }
+  @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
+  @keyframes blink { 50% { opacity: 0.15; } }
+  .sel { color: var(--magenta); font-weight: 700; }
+  .statusline {
+    display: flex; gap: 1.5rem; padding: 0.45rem 1.2rem;
+    border-top: 1px solid var(--panel-edge);
+    font-size: 0.82rem; min-height: 1.4rem; align-items: baseline;
+  }
+  #minibuffer { color: var(--amber); white-space: pre; }
+  #message { color: var(--accent); }
+  #hint { color: var(--muted); margin-left: auto; text-align: right; }
+
+  /* --- outputs --- */
+  .out {
+    display: grid; grid-template-columns: 5.5rem 1fr auto;
+    gap: 0.6rem; align-items: baseline;
+    padding: 0.5rem 0.9rem;
+    background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 3px;
+    font-size: 0.85rem;
+  }
+  .out + .out { margin-top: 0.5rem; }
+  .out b { color: var(--muted); font-weight: 400; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.12em; }
+  .out code { overflow-x: auto; white-space: pre; display: block; }
+  button {
+    font: inherit; font-size: 0.75rem;
+    color: var(--ink); background: transparent;
+    border: 1px solid var(--panel-edge); border-radius: 3px;
+    padding: 0.2rem 0.7rem; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .examples { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .row2 { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+  .toggle { color: var(--muted); font-size: 0.8rem; display: flex; gap: 0.45rem; align-items: center; }
+  .toggle input { accent-color: var(--accent); }
+
+  /* --- load-AA drawer --- */
+  details { border: 1px solid var(--panel-edge); border-radius: 3px; background: var(--panel); }
+  details summary {
+    cursor: pointer; padding: 0.45rem 0.9rem; color: var(--muted); font-size: 0.8rem;
+    list-style: none;
+  }
+  details summary::before { content: "▸ "; color: var(--accent); }
+  details[open] summary::before { content: "▾ "; }
+  details .drawer { padding: 0 0.9rem 0.9rem; display: flex; flex-direction: column; gap: 0.6rem; }
+  textarea {
+    font: inherit; font-size: 0.95rem; line-height: 1.25;
+    background: var(--bg); color: var(--ink);
+    border: 1px solid var(--panel-edge); border-radius: 3px;
+    min-height: 7rem; padding: 0.6rem; white-space: pre; resize: vertical;
+  }
+  textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+  #loaderr { color: var(--amber); font-size: 0.8rem; min-height: 1.1rem; }
+
+  /* --- key reference --- */
+  table { border-collapse: collapse; font-size: 0.82rem; width: 100%; }
+  td { padding: 0.28rem 0.9rem 0.28rem 0; vertical-align: top; }
+  td:first-child { color: var(--accent); white-space: nowrap; width: 11rem; }
+  tr + tr td { border-top: 1px solid #262a3a; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 0 2.5rem; }
+
+  footer { color: var(--muted); font-size: 0.75rem; }
+  footer a { color: var(--accent); }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>mascii<span class="tld">.demo</span> — 構造エディタで書く数式AA</h1>
+    <p>アスキーアート数式と数式ASTの一対一変換。下の画面をクリックして、
+       LyX 風のキー操作でそのまま入力できます。すべての編集ロジックは
+       Rust → WebAssembly、表示は JuliaMono。</p>
+  </header>
+
+  <section>
+    <div class="pane">
+      <div class="pane-title">
+        <span>editor</span>
+        <label class="toggle"><input type="checkbox" id="compat">互換グリフ(box-drawing)</label>
+      </div>
+      <pre id="screen" tabindex="0" aria-label="数式エディタ"></pre>
+      <div class="statusline">
+        <span id="minibuffer"></span>
+        <span id="message"></span>
+        <span id="hint">クリックして入力</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="label">例を読み込む</p>
+    <div class="examples" id="examples"></div>
+  </section>
+
+  <section>
+    <p class="label">出力(編集に追随)</p>
+    <div class="out"><b>AA</b><code id="out-aa"></code><button data-copy="out-aa">copy</button></div>
+    <div class="out"><b>LaTeX</b><code id="out-latex"></code><button data-copy="out-latex">copy</button></div>
+    <div class="out"><b>Typst</b><code id="out-typst"></code><button data-copy="out-typst">copy</button></div>
+  </section>
+
+  <details>
+    <summary>手書きAAを貼り付けて読み込む(寛容パース: ASCIIの x+1 なども可)</summary>
+    <div class="drawer">
+      <textarea id="aain" spellcheck="false" aria-label="AA入力"></textarea>
+      <div class="row2">
+        <button id="loadbtn">エディタに読み込む</button>
+        <span id="loaderr"></span>
+      </div>
+    </div>
+  </details>
+
+  <section>
+    <p class="label">キー操作(LyX 風)</p>
+    <div class="cols">
+      <table>
+        <tr><td>a‑z 0‑9 + = &lt; …</td><td>原子を挿入(表示は数学イタリック体)</td></tr>
+        <tr><td>\frac ␣ / \sqrt ␣</td><td>分数・根号(\cbrt で ∛)</td></tr>
+        <tr><td>\sum \int \oint …</td><td>極限つき大型演算子(↑で上限へ)</td></tr>
+        <tr><td>\alpha \bbR \-&gt; \oo</td><td>記号 4000+(ミニバッファで名前入力)</td></tr>
+        <tr><td>^ / _</td><td>上付き / 下付き(可能なら x² と表示)</td></tr>
+        <tr><td>( )&nbsp;&nbsp;]</td><td>自動サイズ括弧 / 行列(\matrix)から出る</td></tr>
+      </table>
+      <table>
+        <tr><td>Space</td><td>いまの構造(分数など)から抜ける</td></tr>
+        <tr><td>← → ↑ ↓</td><td>構造の中を通り抜けて移動</td></tr>
+        <tr><td>Shift+← →</td><td>ブロック選択 → \cancel ^ _ ( \frac で包む</td></tr>
+        <tr><td>\hat \vec \bar \dot</td><td>直前の1文字にアクセント</td></tr>
+        <tr><td>\cancel</td><td>打ち消し線(選択があれば選択に適用)</td></tr>
+        <tr><td>Backspace</td><td>削除(構造は中身から / 選択は一括)</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    エディタ・レンダラ・パーサは
+    <a href="https://github.com/cormullion/juliamono" rel="noreferrer">JuliaMono</a>
+    のグリフ幅を前提にした Rust 実装(mascii)。AA は正準形式で、
+    パーサに再入力すれば同じ AST に戻ります(往復性はランダム3万ケースで検証)。
+  </footer>
+</div>
+
+<script type="module">
+{{GLUE}}
+
+const WASM_B64 = "{{WASM_B64}}";
+const EXAMPLES = {{EXAMPLES_JSON}};
+
+function b64bytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+await __wbg_init({ module_or_path: b64bytes(WASM_B64) });
+const ed = new MasciiEditor();
+
+const $ = (id) => document.getElementById(id);
+const screen = $("screen");
+
+function esc(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function render() {
+  let html = esc(ed.screen());
+  html = html.replace("▌", '<span class="cursor">▌</span>');
+  html = html.replace(/⟦/g, '<span class="sel">⟦</span>').replace(/⟧/g, '<span class="sel">⟧</span>');
+  screen.innerHTML = html || '<span class="cursor">▌</span>';
+  const mb = ed.minibuffer();
+  $("minibuffer").textContent = mb === undefined || mb === null ? "" : "\\" + mb + "▌";
+  $("message").textContent = ed.message();
+  $("out-aa").textContent = ed.aa();
+  $("out-latex").textContent = ed.latex();
+  $("out-typst").textContent = ed.typst();
+}
+
+const PASS = new Set(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Backspace",
+                      "Delete","Home","End","Enter","Escape"," "]);
+screen.addEventListener("keydown", (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return; // keep browser shortcuts
+  if (!PASS.has(e.key) && e.key.length !== 1) return;
+  ed.key(e.key, e.shiftKey);
+  render();
+  e.preventDefault();
+});
+screen.addEventListener("focus", () => { $("hint").textContent = "入力中"; });
+screen.addEventListener("blur", () => { $("hint").textContent = "クリックして入力"; });
+
+$("compat").addEventListener("change", (e) => { ed.set_compat(e.target.checked); render(); });
+
+const exBox = $("examples");
+for (const [name, aa] of Object.entries(EXAMPLES)) {
+  const b = document.createElement("button");
+  b.textContent = name;
+  b.addEventListener("click", () => {
+    try { ed.load(aa); } catch (err) { $("message").textContent = String(err); }
+    render();
+    screen.focus();
+  });
+  exBox.appendChild(b);
+}
+
+$("loadbtn").addEventListener("click", () => {
+  try {
+    ed.load($("aain").value);
+    $("loaderr").textContent = "";
+    render();
+    screen.focus();
+  } catch (err) {
+    $("loaderr").textContent = String(err && err.message ? err.message : err);
+  }
+});
+
+for (const btn of document.querySelectorAll("button[data-copy]")) {
+  btn.addEventListener("click", async () => {
+    const text = $(btn.dataset.copy).textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.textContent = "copied";
+    } catch {
+      btn.textContent = "copy不可";
+    }
+    setTimeout(() => { btn.textContent = "copy"; }, 1200);
+  });
+}
+
+render();
+</script>
