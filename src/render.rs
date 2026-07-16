@@ -557,8 +557,12 @@ fn render_node(
         }
 
         Node::BigOp { op, lower, upper } => {
-            let u = render_row(upper, cur(Field::OpUpper), false, &ctx.compact());
-            let l = render_row(lower, cur(Field::OpLower), false, &ctx.compact());
+            // Empty limits vanish in canonical output, but while the cursor
+            // is inside this operator both slots must stay visible (⬚) so
+            // they can be navigated to.
+            let editing = cursor.is_some();
+            let u = render_row(upper, cur(Field::OpUpper), editing, &ctx.compact());
+            let l = render_row(lower, cur(Field::OpLower), editing, &ctx.compact());
             if ctx.is_compat() {
                 // Multi-row box-drawing art with limits stacked over/under
                 // (display only: without the band this layout is ambiguous).
@@ -850,6 +854,20 @@ mod tests {
             );
         }
         assert!(text.contains('╭') && text.contains('┌') && text.contains("\\/"));
+    }
+
+    #[test]
+    fn bigop_shows_placeholders_while_editing() {
+        // Cursor in the (empty) lower limit: both slots must be visible.
+        let root = vec![Node::BigOp { op: '∑', lower: vec![], upper: vec![] }];
+        let path = [(0, Field::OpLower)];
+        let b = render_row(&root, Some((&path, 0)), false, &RenderCtx::canonical());
+        let text = b.to_text();
+        assert!(text.contains(CURSOR_CHAR), "cursor visible:\n{}", text);
+        assert!(text.contains(PLACEHOLDER), "empty upper slot visible:\n{}", text);
+        // Cursor elsewhere: canonical bare operator, no placeholders.
+        let plain = render_row(&root, None, false, &RenderCtx::canonical()).to_text();
+        assert_eq!(plain, "∑");
     }
 
     #[test]
