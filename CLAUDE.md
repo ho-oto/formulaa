@@ -64,7 +64,6 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
 - ratatui は feature "tui"(bin 専用)。ライブラリ本体に TUI 依存を
   持ち込まない(wasm ビルドが壊れる)。
 - ratatui のイベントは `KeyEventKind::Press` のみ処理(Windows の重複対策)。
-- `GlyphSet::Compat`(Ctrl+P)は表示専用。正準形式のレイアウトを変えないこと。
 - ジャンプ(Ctrl+G)・ブロック強調(Ctrl+B)は私用領域文字のマーカー原子を
   表示用クローン AST に挿入する方式(editor.rs `decorated`)。U+E000–E0FF は
   表示マーカー予約。構造ビュー(Ctrl+O)は正準描画を `parse_with_regions` に

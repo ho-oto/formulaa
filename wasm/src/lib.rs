@@ -10,7 +10,7 @@ use mascii::ast::normalize;
 use mascii::editor::{Editor, SEL_CLOSE, SEL_OPEN};
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
-use mascii::render::{render_row, GlyphSet, RenderCtx};
+use mascii::render::{render_row, RenderCtx};
 use mascii::typst::row_to_typst;
 use wasm_bindgen::prelude::*;
 
@@ -30,12 +30,11 @@ pub fn aa_to_typst(text: &str) -> Result<String, JsError> {
     Ok(row_to_typst(&parse_or_err(text)?))
 }
 
-/// AA text -> canonical (or compat, display-only) AA.
+/// AA text -> canonical AA.
 #[wasm_bindgen]
-pub fn aa_format(text: &str, compat: bool) -> Result<String, JsError> {
+pub fn aa_format(text: &str) -> Result<String, JsError> {
     let row = parse_or_err(text)?;
-    let ctx = if compat { RenderCtx::compat() } else { RenderCtx::canonical() };
-    Ok(render_row(&row, None, false, &ctx).to_text())
+    Ok(render_row(&row, None, false, &RenderCtx::canonical()).to_text())
 }
 
 /// Quick validity check (empty string on success, message on error).
@@ -75,11 +74,7 @@ impl MasciiEditor {
     pub fn screen(&self) -> String {
         let (root, cursor) = self.ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
-        let ctx = RenderCtx {
-            italic: self.ed.italic && !self.ed.compat,
-            compact: false,
-            glyphs: if self.ed.compat { GlyphSet::Compat } else { GlyphSet::Unicode },
-        };
+        let ctx = RenderCtx { italic: self.ed.italic, compact: false };
         let text = render_row(&root, cursor_ref, false, &ctx).to_text();
         text.chars()
             .map(|c| match c {
@@ -111,10 +106,6 @@ impl MasciiEditor {
     /// Current minibuffer content, or null when closed.
     pub fn minibuffer(&self) -> Option<String> {
         self.ed.minibuffer.clone()
-    }
-
-    pub fn set_compat(&mut self, on: bool) {
-        self.ed.compat = on;
     }
 
     /// Handle one key. `key` uses KeyboardEvent.key names for specials

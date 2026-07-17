@@ -24,7 +24,6 @@ cargo run -- out.tex            # 保存先を指定
 mascii aa2tex   formula.txt     # AA → LaTeX
 mascii aa2typst formula.txt     # AA → Typst
 mascii fmt      formula.txt     # AA → 正準AA(手書きAAの正規化・整形)
-mascii fmt --compat formula.txt # AA → 互換AA(box-drawing/ASCII、表示専用)
 
 cargo run --example demo        # レンダリングのサンプルを表示
 ```
@@ -49,7 +48,6 @@ cargo run --example demo        # レンダリングのサンプルを表示
 | `Ctrl+G` | ジャンプモード(EasyMotion 風): 全編集位置にラベルを表示し、ラベルキーで移動 |
 | `Ctrl+B` | ブロック強調: カーソルを含む構造とその親・祖父を色付き ⟨ ⟩ で表示 |
 | `Ctrl+O` | 構造ビュー: 全ブロックの入れ子構造を深さ別の背景色で一気に表示 |
-| `Ctrl+P` | 互換表示(box-drawing/ASCII 中心。Unicode 数式グリフが崩れる端末向け) |
 | `Ctrl+S` | LaTeX を保存 / `Ctrl+T` イタリック表示切替 / `Ctrl+Q` 終了(F2–F5 も別名として残置) |
 
 ## コマンド(抜粋)
@@ -66,15 +64,10 @@ cargo run --example demo        # レンダリングのサンプルを表示
 ## フォントについて
 
 Unicode 数式記号は多くの等幅フォントで欠けていたり等幅でなかったりします。
-対策は2つ:
-
-1. **互換表示モード**(`Ctrl+P` / `fmt --compat`): 構造グリフを box-drawing と
-   ASCII 中心に落とし、数学イタリック体・インライン上付きを使わない
-   tex2utf 風の出力。表示専用(正準形式と違いパースは保証されない)。
-2. **合成フォント**: [JuliaMono](https://juliamono.netlify.app/) は数式記号の
-   カバレッジが非常に広い等幅フォント。`tools/merge_math_font.py` で、任意の
-   等幅フォントの不足グリフを JuliaMono から補い、送り幅をベースフォントの
-   セル幅に正確に揃えた合成フォントを生成できます:
+対策は**合成フォント**: [JuliaMono](https://juliamono.netlify.app/) は数式記号の
+カバレッジが非常に広い等幅フォント。`tools/merge_math_font.py` で、任意の
+等幅フォントの不足グリフを JuliaMono から補い、送り幅をベースフォントの
+セル幅に正確に揃えた合成フォントを生成できます:
 
    ```sh
    pip install fonttools

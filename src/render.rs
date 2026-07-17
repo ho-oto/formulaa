@@ -173,14 +173,6 @@ pub fn unstyle_char(c: char) -> char {
 }
 
 fn display_char(c: char, ctx: &RenderCtx) -> char {
-    if ctx.is_compat() {
-        // ASCII stays ASCII (math-italic letters are not monospaced in
-        // most fonts); a few symbols get safer equivalents.
-        return match c {
-            '⋅' => '·',
-            c => c,
-        };
-    }
     match c {
         '-' => '−',
         '*' => '∗',
@@ -240,47 +232,25 @@ fn inline_script(row: &Row, map: fn(char) -> Option<char>) -> Option<Vec<char>> 
         .collect()
 }
 
-/// Which glyph repertoire the renderer may use.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum GlyphSet {
-    /// Canonical form: math italics, inline scripts, ⎛⎡ brackets, ∑√ …
-    /// This is the parseable interchange format.
-    Unicode,
-    /// Display-only fallback for fonts/terminals where Unicode math glyphs
-    /// are missing or not monospaced: ASCII letters (no math italics; the
-    /// upright-Func distinction is lost, so this form is NOT parseable),
-    /// no inline scripts, box-drawing structural glyphs (tex2utf style).
-    Compat,
-}
-
 #[derive(Clone, Copy)]
 pub struct RenderCtx {
     pub italic: bool,
     /// Script style: no spacing around binary operators. Set inside
     /// scripts, big-op limits and matrix cells; required for parseability.
     pub compact: bool,
-    pub glyphs: GlyphSet,
 }
 
 impl RenderCtx {
     pub fn canonical() -> Self {
-        RenderCtx { italic: true, compact: false, glyphs: GlyphSet::Unicode }
-    }
-
-    pub fn compat() -> Self {
-        RenderCtx { italic: false, compact: false, glyphs: GlyphSet::Compat }
+        RenderCtx { italic: true, compact: false }
     }
 
     fn compact(self) -> Self {
         RenderCtx { compact: true, ..self }
     }
 
-    fn is_compat(&self) -> bool {
-        self.glyphs == GlyphSet::Compat
-    }
-
     fn placeholder(&self) -> char {
-        if self.is_compat() { '□' } else { PLACEHOLDER }
+        PLACEHOLDER
     }
 }
 
@@ -331,21 +301,15 @@ pub fn render_row(
             script: matches!(node, Node::Sup { .. } | Node::Sub { .. }),
             script_2d: match node {
                 Node::Sup { arg } => {
-                    child_cursor.is_some()
-                        || ctx.is_compat()
-                        || inline_script(arg, superscript_char).is_none()
+                    child_cursor.is_some() || inline_script(arg, superscript_char).is_none()
                 }
                 Node::Sub { arg } => {
-                    child_cursor.is_some()
-                        || ctx.is_compat()
-                        || inline_script(arg, subscript_char).is_none()
+                    child_cursor.is_some() || inline_script(arg, subscript_char).is_none()
                 }
                 _ => false,
             },
             banded_op: match node {
-                Node::BigOp { lower, upper, .. } => {
-                    ctx.is_compat() || !lower.is_empty() || !upper.is_empty()
-                }
+                Node::BigOp { lower, upper, .. } => !lower.is_empty() || !upper.is_empty(),
                 _ => false,
             },
             cancel: matches!(node, Node::Cancel { .. }),
@@ -442,15 +406,7 @@ fn render_node(
         // inside their band), so a one-cell probe parses it back.
         Node::Accent { accent, base } => {
             let b = display_char(*base, ctx);
-            let mark = if ctx.is_compat() {
-                match *accent {
-                    '⇀' => '→',
-                    '˜' => '~',
-                    m => m,
-                }
-            } else {
-                *accent
-            };
+            let mark = *accent;
             if crate::symbols::is_under_mark(*accent) {
                 Block::new(vec![vec![b], vec![mark]], 0)
             } else {
@@ -476,37 +432,6 @@ fn render_node(
             let a = render_row(arg, cur(Field::SqrtArg), true, ctx);
             let h = a.height();
             let w = a.width();
-            if ctx.is_compat() {
-                // tex2utf style:   ___        ____
-                //                 \/ 2       |  1
-                //                            \|  2   (index shown as prefix digit)
-                let mut lines = Vec::with_capacity(h + 1);
-                let mut top = vec![' '; w + 2];
-                for c in top.iter_mut().skip(2) {
-                    *c = '_';
-                }
-                lines.push(top);
-                for (r, line) in a.lines.iter().enumerate() {
-                    let head = if h == 1 {
-                        ['\\', '/']
-                    } else if r == h - 1 {
-                        ['\\', '│']
-                    } else {
-                        [' ', '│']
-                    };
-                    let mut row = Vec::with_capacity(w + 2);
-                    row.extend(head);
-                    row.extend_from_slice(line);
-                    lines.push(row);
-                }
-                let cancel = a.cancel.iter().map(|&(r, c)| (r + 1, c + 2)).collect();
-                let mut block = Block { lines, baseline: a.baseline + 1, cancel };
-                if *index != 2 {
-                    let digit = char::from_digit(*index as u32, 10).unwrap();
-                    block = hcat(&[Block::from_chars(vec![digit]), block]);
-                }
-                return block;
-            }
             // Overline row on top, radical stem hugging the left:
             //  ___
             // √x+1
@@ -533,7 +458,7 @@ fn render_node(
         }
 
         Node::Sup { arg } => {
-            if cursor.is_none() && !ctx.is_compat() {
+            if cursor.is_none() {
                 if let Some(chars) = inline_script(arg, superscript_char) {
                     return Block::from_chars(chars);
                 }
@@ -544,7 +469,7 @@ fn render_node(
         }
 
         Node::Sub { arg } => {
-            if cursor.is_none() && !ctx.is_compat() {
+            if cursor.is_none() {
                 if let Some(chars) = inline_script(arg, subscript_char) {
                     return Block::from_chars(chars);
                 }
@@ -563,21 +488,6 @@ fn render_node(
             let editing = cursor.is_some();
             let u = render_row(upper, cur(Field::OpUpper), editing, &ctx.compact());
             let l = render_row(lower, cur(Field::OpLower), editing, &ctx.compact());
-            if ctx.is_compat() {
-                // Multi-row box-drawing art with limits stacked over/under
-                // (display only: without the band this layout is ambiguous).
-                let art = compat_op_art(*op);
-                let w = art.width().max(u.width()).max(l.width());
-                let mut lines = center_pad(&u, w);
-                let baseline = lines.len() + art.baseline;
-                lines.extend(center_pad(&art, w));
-                let l_off = lines.len();
-                lines.extend(center_pad(&l, w));
-                let cancel = centered_cancel(&u, w, 0)
-                    .chain(centered_cancel(&l, w, l_off))
-                    .collect();
-                return Block { lines, baseline, cancel };
-            }
             if u.is_empty() && l.is_empty() && cursor.is_none() {
                 // No limits: a bare operator character.
                 return Block::from_chars(vec![*op]);
@@ -602,14 +512,15 @@ fn render_node(
             let h = a.height().max(1);
             let mut lines = Vec::with_capacity(h);
             for (r, line) in a.lines.iter().enumerate() {
-                let compat = ctx.is_compat();
                 let (lc, rc) = if h == 1 {
                     ('(', ')')
                 } else if r == 0 {
-                    if compat { ('╭', '╮') } else { ('⎛', '⎞') }
+                    ('⎛', '⎞')
                 } else if r == h - 1 {
-                    if compat { ('╰', '╯') } else { ('⎝', '⎠') }
-                } else if compat { ('│', '│') } else { ('⎜', '⎟') };
+                    ('⎝', '⎠')
+                } else {
+                    ('⎜', '⎟')
+                };
                 let mut row = Vec::with_capacity(a.width() + 2);
                 row.push(lc);
                 row.extend_from_slice(line);
@@ -622,18 +533,6 @@ fn render_node(
 
         Node::Cancel { arg } => {
             let a = render_row(arg, cur(Field::CancelArg), true, ctx);
-            if ctx.is_compat() {
-                // Display-only diagonal strike (combining overlays are as
-                // unreliable as the math glyphs in limited fonts).
-                let mut a = a;
-                let (h, w) = (a.height(), a.width());
-                for i in 0..h {
-                    let r = h - 1 - i;
-                    let c = if h == 1 { w / 2 } else { i * (w - 1) / (h - 1) };
-                    a.lines[r][c] = '/';
-                }
-                return a;
-            }
             // Strike every non-blank cell with the combining overlay.
             let mut cancel: Vec<(usize, usize)> = Vec::new();
             for (r, line) in a.lines.iter().enumerate() {
@@ -650,18 +549,6 @@ fn render_node(
             render_matrix(*rows, *cols, cells, cursor, ctx)
         }
     }
-}
-
-/// Box-drawing/ASCII art for big operators in compat mode.
-fn compat_op_art(op: char) -> Block {
-    let (rows, baseline): (&[&str], usize) = match op {
-        '∑' => (&["__", "> ", "‾‾"], 1),
-        '∏' => (&["___", "│ │", "│ │"], 1),
-        '∫' | '∬' => (&["╭", "│", "╯"], 1),
-        '∮' => (&["╭", "O", "╯"], 1),
-        _ => return Block::from_chars(vec![op]),
-    };
-    Block::new(rows.iter().map(|r| r.chars().collect()).collect(), baseline)
 }
 
 fn render_matrix(
@@ -730,14 +617,15 @@ fn render_matrix(
         row.push(']');
         return Block { lines: vec![row], baseline: 0, cancel };
     }
-    let compat = ctx.is_compat();
     let mut lines = Vec::with_capacity(h);
     for (r, line) in body.into_iter().enumerate() {
         let (lc, rc) = if r == 0 {
-            if compat { ('┌', '┐') } else { ('⎡', '⎤') }
+            ('⎡', '⎤')
         } else if r == h - 1 {
-            if compat { ('└', '┘') } else { ('⎣', '⎦') }
-        } else if compat { ('│', '│') } else { ('⎢', '⎥') };
+            ('⎣', '⎦')
+        } else {
+            ('⎢', '⎥')
+        };
         let mut row = Vec::with_capacity(w + 2);
         row.push(lc);
         row.extend(line);
@@ -827,36 +715,6 @@ mod tests {
     }
 
     #[test]
-    fn compat_mode_uses_limited_charset() {
-        let root = vec![
-            Node::BigOp { op: '∑', lower: sym_row("n=1"), upper: sym_row("∞") },
-            Node::Frac {
-                num: sym_row("1"),
-                den: vec![Node::Sym('n'), Node::Sup { arg: sym_row("2") }],
-            },
-            Node::Paren { inner: vec![Node::Frac { num: sym_row("x"), den: sym_row("2") }] },
-            Node::Matrix {
-                rows: 2,
-                cols: 2,
-                cells: vec![sym_row("a"), sym_row("b"), sym_row("c"), sym_row("d")],
-            },
-            Node::Sqrt { arg: sym_row("2"), index: 2 },
-        ];
-        let text = render_row(&root, None, false, &RenderCtx::compat()).to_text();
-        // Structure must use only ASCII / box-drawing / a few safe glyphs;
-        // no ⎛⎡√∑², no math italics. User symbols (∞) pass through.
-        for c in text.chars() {
-            assert!(
-                c.is_ascii() || "─│┌┐└┘╭╮╰╯‾·□→∞\n".contains(c),
-                "unexpected char {:?} in compat output:\n{}",
-                c,
-                text
-            );
-        }
-        assert!(text.contains('╭') && text.contains('┌') && text.contains("\\/"));
-    }
-
-    #[test]
     fn bigop_shows_placeholders_while_editing() {
         // Cursor in the (empty) lower limit: both slots must be visible.
         let root = vec![Node::BigOp { op: '∑', lower: vec![], upper: vec![] }];
@@ -868,13 +726,6 @@ mod tests {
         // Cursor elsewhere: canonical bare operator, no placeholders.
         let plain = render_row(&root, None, false, &RenderCtx::canonical()).to_text();
         assert_eq!(plain, "∑");
-    }
-
-    #[test]
-    fn compat_bigop_art() {
-        let root = vec![Node::BigOp { op: '∫', lower: sym_row("0"), upper: sym_row("1") }];
-        let text = render_row(&root, None, false, &RenderCtx::compat()).to_text();
-        assert_eq!(text, "1\n╭\n│\n╯\n0");
     }
 
     #[test]

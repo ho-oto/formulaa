@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block as UiBlock, Borders, Paragraph};
 use ratatui::Frame;
 
-use mascii::render::{render_row, GlyphSet, RenderCtx, CURSOR_CHAR};
+use mascii::render::{render_row, RenderCtx, CURSOR_CHAR};
 use mascii::parse::RegionSpan;
 use mascii::editor::{
     Editor, HL_CLOSE_BASE, HL_LEVELS, HL_OPEN_BASE, JUMP_CHAR_BASE, JUMP_LABELS, SEL_CLOSE,
@@ -15,24 +15,21 @@ use mascii::editor::{
 };
 use mascii::{ast, latex, parse, typst};
 
-const HELP: &str = "\\cmd  ^/_ ( ) insets  Space exit  ←→↑↓ move  ⇧←→ select  ^G jump  ^B blocks  ^O structure  ^T italic  ^P compat  ^S save  ^Q quit";
+const HELP: &str = "\\cmd  ^/_ ( ) insets  Space exit  ←→↑↓ move  ⇧←→ select  ^G jump  ^B blocks  ^O structure  ^T italic  ^S save  ^Q quit";
 
 const USAGE: &str = "\
 usage: mascii [SAVE_PATH]          interactive TUI editor (default: formula.tex)
        mascii aa2tex   [FILE]     AA formula (file or stdin) -> LaTeX
        mascii aa2typst [FILE]     AA formula (file or stdin) -> Typst
-       mascii fmt      [FILE]     AA formula -> canonical AA (normalize)
-       mascii fmt --compat [FILE] AA formula -> compat AA (box-drawing/ASCII,
-                                  display only; not re-parseable)";
+       mascii fmt      [FILE]     AA formula -> canonical AA (normalize)";
 
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("aa2tex") | Some("aa2typst") | Some("fmt") => {
             let rest: Vec<&str> = args[1..].iter().map(String::as_str).collect();
-            let compat = rest.contains(&"--compat");
             let file = rest.into_iter().find(|a| !a.starts_with("--"));
-            return convert(&args[0].clone(), file, compat);
+            return convert(&args[0].clone(), file);
         }
         Some("-h") | Some("--help") => {
             println!("{}", USAGE);
@@ -65,7 +62,7 @@ fn main() -> std::io::Result<()> {
 }
 
 /// aa2tex / aa2typst / fmt: read AA text (file or stdin), write to stdout.
-fn convert(mode: &str, file: Option<&str>, compat: bool) -> std::io::Result<()> {
+fn convert(mode: &str, file: Option<&str>) -> std::io::Result<()> {
     let text = match file {
         Some(path) => fs::read_to_string(path)?,
         None => std::io::read_to_string(std::io::stdin())?,
@@ -81,8 +78,7 @@ fn convert(mode: &str, file: Option<&str>, compat: bool) -> std::io::Result<()> 
         "aa2tex" => println!("{}", latex::row_to_latex(&row)),
         "aa2typst" => println!("{}", typst::row_to_typst(&row)),
         _ => {
-            let ctx = if compat { RenderCtx::compat() } else { RenderCtx::canonical() };
-            let block = render_row(&row, None, false, &ctx);
+            let block = render_row(&row, None, false, &RenderCtx::canonical());
             println!("{}", block.to_text());
         }
     }
@@ -139,7 +135,6 @@ fn handle_key(
             KeyCode::Char('q') | KeyCode::Char('c') => return true,
             KeyCode::Char('g') => ed.start_jump(),
             KeyCode::Char('t') => ed.italic = !ed.italic,
-            KeyCode::Char('p') => ed.compat = !ed.compat,
             KeyCode::Char('b') => ed.highlight = !ed.highlight,
             KeyCode::Char('o') => ed.structure = !ed.structure,
             KeyCode::Char('s') => {
@@ -189,7 +184,6 @@ fn handle_key(
         }
         // F-keys kept as aliases (often captured by the terminal/OS).
         KeyCode::F(2) => ed.italic = !ed.italic,
-        KeyCode::F(3) => ed.compat = !ed.compat,
         KeyCode::F(4) => ed.highlight = !ed.highlight,
         KeyCode::F(5) => ed.structure = !ed.structure,
         KeyCode::Char('\\') => ed.minibuffer = Some(String::new()),
@@ -279,11 +273,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) {
     let inner = border.inner(area);
     f.render_widget(border, area);
 
-    let ctx = RenderCtx {
-        italic: ed.italic && !ed.compat,
-        compact: false,
-        glyphs: if ed.compat { GlyphSet::Compat } else { GlyphSet::Unicode },
-    };
+    let ctx = RenderCtx { italic: ed.italic, compact: false };
     // Structure view: cursor-free canonical render, re-parsed to recover
     // every block's rectangle, painted by nesting depth.
     if ed.structure {

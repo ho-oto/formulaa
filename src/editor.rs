@@ -18,8 +18,6 @@ pub struct Editor {
     pub minibuffer: Option<String>,
     pub message: String,
     pub italic: bool,
-    /// Display-only compat glyph mode (Ctrl+P); see render::GlyphSet.
-    pub compat: bool,
     /// EasyMotion-style jump: Some(targets) while waiting for a label key.
     pub jump: Option<Vec<CursorPos>>,
     /// Highlight the enclosing blocks of the cursor (Ctrl+B).
@@ -61,7 +59,6 @@ impl Editor {
             minibuffer: None,
             message: String::new(),
             italic: true,
-            compat: false,
             jump: None,
             highlight: false,
             structure: false,
