@@ -284,7 +284,6 @@ pub fn render_row(
     struct Info {
         script: bool,
         script_2d: bool,
-        banded_op: bool,
         cancel: bool,
     }
 
@@ -308,10 +307,6 @@ pub fn render_row(
                 }
                 _ => false,
             },
-            banded_op: match node {
-                Node::BigOp { lower, upper, .. } => !lower.is_empty() || !upper.is_empty(),
-                _ => false,
-            },
             cancel: matches!(node, Node::Cancel { .. }),
         };
         let mut block = render_node(node, child_cursor, ctx);
@@ -326,13 +321,12 @@ pub fn render_row(
         blocks.insert(col, (Block::from_chars(vec![CURSOR_CHAR]), Info::default()));
     }
 
-    // Single-column spacers between siblings. Parse-safe because a fully
-    // blank column always separates same-baseline siblings (normalize
-    // re-merges any script segments the blank column splits). Inserted:
+    // Single-column spacers between siblings, inserted only where the
+    // picture would otherwise be unparseable (visual spacing is the user's
+    // job via explicit ␣ atoms). Parse-safe because a fully blank column
+    // always separates same-baseline siblings (normalize re-merges any
+    // script segments the blank column splits). Inserted:
     //  - between two identical bar glyphs (── / ┄┄ would merge into one run)
-    //  - after a 2D script, unless another script follows (keeps x^a_b
-    //    together but detaches the script block from the next base)
-    //  - on both sides of a big operator with limits (band readability)
     let mut spaced: Vec<Block> = Vec::with_capacity(blocks.len() * 2);
     let mut prev: Option<Info> = None;
     for (block, info) in blocks {
@@ -348,10 +342,7 @@ pub fn render_row(
                 // fuse the ragged edge with the neighbour's columns.
                 let ragged_cancel =
                     p.cancel && last.baseline_edge(false) == Some(' ');
-                bars || (p.script_2d && !info.script)
-                    || p.banded_op
-                    || info.banded_op
-                    || ragged_cancel
+                bars || ragged_cancel
             }
             _ => false,
         };

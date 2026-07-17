@@ -496,10 +496,20 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
     }
 }
 
+/// Case count / seed overridable for stress runs:
+/// MASCII_PROP_N=30000 MASCII_PROP_SEED=1234 cargo test property_
 #[test]
 fn property_random_asts_roundtrip() {
-    let mut rng = Rng(0x8bad_f00d_dead_beef);
-    for i in 0..2000 {
+    let n: usize = std::env::var("MASCII_PROP_N")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2000);
+    let seed: u64 = std::env::var("MASCII_PROP_SEED")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0x8bad_f00d_dead_beef);
+    let mut rng = Rng(seed);
+    for i in 0..n {
         let depth = 1 + rng.below(4);
         let row = gen_row(&mut rng, depth, 5);
         roundtrip(&format!("random-{}", i), &row);
