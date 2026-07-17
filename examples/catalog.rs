@@ -363,6 +363,52 @@ fn continued_fraction() {
     roundtrip("continued-fraction", &row);
 }
 
+fn delim(left: char, right: char, mids: Vec<char>, segs: Vec<Row>) -> Node {
+    Node::Delim { left, right, mids, segs }
+}
+
+fn array(rows: usize, cols: usize, cells: Vec<Row>) -> Node {
+    Node::Array { rows, cols, cells }
+}
+
+/// |x| = { x (x≥0), −x (x<0) — cases with an abs on the left.
+fn cases_abs() {
+    let row = cat(&[
+        n(delim('|', '|', vec![], vec![s("x")])),
+        s("="),
+        n(delim(
+            '{',
+            '.',
+            vec![],
+            vec![n(array(2, 2, vec![s("x"), s("x≥0"), s("-x"), s("x<0")]))],
+        )),
+    ]);
+    roundtrip("cases-abs", &row);
+}
+
+/// ⟨ψ|H|ψ⟩ braket with two middles, and a set-builder {x | x² > 2}.
+fn braket_and_set() {
+    let row = n(delim('⟨', '⟩', vec!['|', '|'], vec![s("ψ"), s("H"), s("ψ")]));
+    roundtrip("braket", &row);
+    let row = n(delim(
+        '{',
+        '}',
+        vec!['|'],
+        vec![s("x"), cat(&[s("x"), n(sup(s("2"))), s(">"), n(frac(s("1"), s("2")))])],
+    ));
+    roundtrip("set-builder", &row);
+}
+
+/// Half-open interval (0,1] (mismatched pair) and a bare array with the
+/// ▏ ▕ null-delimiter markers.
+fn interval_and_bare_array() {
+    roundtrip("interval", &n(delim('(', ']', vec![], vec![s("0,1")])));
+    roundtrip(
+        "bare-array",
+        &n(delim('.', '.', vec![], vec![n(array(2, 2, vec![s("a"), s("b"), s("c"), s("d")]))])),
+    );
+}
+
 /// Limits that themselves contain big operators and fractions.
 fn nested_limits() {
     let row = cat(&[
@@ -405,4 +451,8 @@ fn main() {
     cancel_strikes();
     continued_fraction();
     nested_limits();
+    println!("## デリミタ\n");
+    cases_abs();
+    braket_and_set();
+    interval_and_bare_array();
 }

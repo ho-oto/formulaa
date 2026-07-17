@@ -33,6 +33,8 @@ EXAMPLE_PICKS = {
     "variance": "分散",
     "cancel-simple": "約分(打ち消し)",
     "continued-fraction": "連分数",
+    "braket": "ブラケット ⟨ψ|H|ψ⟩",
+    "cases-abs": "場合分け (cases)",
 }
 
 

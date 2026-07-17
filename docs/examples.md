@@ -33,9 +33,9 @@ t = root(3, - q/2 + sqrt((q ^2)/4 + (p ^3)/(27))) + root(3, q/2 - sqrt((q ^2)/4 
 ### cauchy-schwarz
 
 ```
-⎛  𝑛     ¯ ⎞    ⎛  𝑛      ⎞⎛  𝑛      ⎞
-⎜┄┄∑┄┄ 𝑢ₖ𝑣ₖ⎟² ≤ ⎜┄┄∑┄┄ 𝑢ₖ²⎟⎜┄┄∑┄┄ 𝑣ₖ²⎟
-⎝ 𝑘=1      ⎠    ⎝ 𝑘=1     ⎠⎝ 𝑘=1     ⎠
+⎛  𝑛    ¯ ⎞    ⎛  𝑛     ⎞⎛  𝑛     ⎞
+⎜┄┄∑┄┄𝑢ₖ𝑣ₖ⎟² ≤ ⎜┄┄∑┄┄𝑢ₖ²⎟⎜┄┄∑┄┄𝑣ₖ²⎟
+⎝ 𝑘=1     ⎠    ⎝ 𝑘=1    ⎠⎝ 𝑘=1    ⎠
 ```
 
 LaTeX:
@@ -47,7 +47,7 @@ LaTeX:
 Typst:
 
 ```typst
-(∑_(k = 1)^n u _k macron(v) _k) ^2 ≤ (∑_(k = 1)^n u _k ^2) (∑_(k = 1)^n v _k ^2)
+lr(( ∑_(k = 1)^n u _k macron(v) _k )) ^2 ≤ lr(( ∑_(k = 1)^n u _k ^2 )) lr(( ∑_(k = 1)^n v _k ^2 ))
 ```
 
 ### vandermonde
@@ -56,8 +56,8 @@ Typst:
 ⎡1  𝑥₁  𝑥₁²  ⋯  𝑥₁ⁿ⁻¹⎤
 ⎢                    ⎥
 ⎢1  𝑥₂  𝑥₂²  ⋯  𝑥₂ⁿ⁻¹⎥
-⎢                    ⎥ =  ┄┄┄┄∏┄┄┄┄ (𝑥ⱼ − 𝑥ᵢ)
-⎢⋮  ⋮    ⋮   ⋱    ⋮  ⎥     1≤𝑖<𝑗≤𝑛
+⎢                    ⎥ = ┄┄┄┄∏┄┄┄┄(𝑥ⱼ − 𝑥ᵢ)
+⎢⋮  ⋮    ⋮   ⋱    ⋮  ⎥    1≤𝑖<𝑗≤𝑛
 ⎢                    ⎥
 ⎣1  𝑥ₙ  𝑥ₙ²  ⋯  𝑥ₙⁿ⁻¹⎦
 ```
@@ -71,7 +71,7 @@ LaTeX:
 Typst:
 
 ```typst
-mat(delim: "[", 1, x _1, x _1 ^2, ⋯, x _1 ^(n - 1); 1, x _2, x _2 ^2, ⋯, x _2 ^(n - 1); ⋮, ⋮, ⋮, ⋱, ⋮; 1, x _n, x _n ^2, ⋯, x _n ^(n - 1)) = ∏_(1 ≤ i < j ≤ n) (x _j - x _i)
+mat(delim: "[", 1, x _1, x _1 ^2, ⋯, x _1 ^(n - 1); 1, x _2, x _2 ^2, ⋯, x _2 ^(n - 1); ⋮, ⋮, ⋮, ⋱, ⋮; 1, x _n, x _n ^2, ⋯, x _n ^(n - 1)) = ∏_(1 ≤ i < j ≤ n) lr(( x _j - x _i ))
 ```
 
 ## 物理
@@ -79,8 +79,8 @@ mat(delim: "[", 1, x _1, x _1 ^2, ⋯, x _1 ^(n - 1); 1, x _2, x _2 ^2, ⋯, x _
 ### gaussian
 
 ```
- ∞    −𝑥²       _
-┄∫┄┄ 𝑒    𝑑𝑥 = √π
+ ∞   −𝑥²      _
+┄∫┄┄𝑒   𝑑𝑥 = √π
  −∞
 ```
 
@@ -113,7 +113,7 @@ i\hbar \frac{\partial \Psi }{\partial t}=-\frac{\hbar ^{2}}{2m}\frac{\partial ^{
 Typst:
 
 ```typst
-i ℏ (∂ Ψ)/(∂ t) = - (ℏ ^2)/(2 m) (∂ ^2 Ψ)/(∂ x ^2) + V (x) Ψ
+i ℏ (∂ Ψ)/(∂ t) = - (ℏ ^2)/(2 m) (∂ ^2 Ψ)/(∂ x ^2) + V lr(( x )) Ψ
 ```
 
 ### gauss-law
@@ -153,14 +153,14 @@ f\left(a\right)=\frac{1}{2\pi i}\oint \frac{f\left(z\right)}{z-a}dz
 Typst:
 
 ```typst
-f (a) = 1/(2 π i) ∮ (f (z))/(z - a) d z
+f lr(( a )) = 1/(2 π i) ∮ (f lr(( z )))/(z - a) d z
 ```
 
 ### euler
 
 ```
  𝑖π
-𝑒    + 1 = 0
+𝑒   + 1 = 0
 ```
 
 LaTeX:
@@ -197,15 +197,15 @@ f\left(x\right)=\frac{1}{\sqrt{2\pi \sigma ^{2}}}e^{-\frac{\left(x-\mu \right)^{
 Typst:
 
 ```typst
-f (x) = 1/(sqrt(2 π σ ^2)) e ^(- ((x - μ) ^2)/(2 σ ^2))
+f lr(( x )) = 1/(sqrt(2 π σ ^2)) e ^(- (lr(( x - μ )) ^2)/(2 σ ^2))
 ```
 
 ### variance
 
 ```
-      1    𝑛
-σ² = ─── ┄┄∑┄┄ (𝑥ᵢ − μ)²
-      𝑛   𝑖=1
+      1   𝑛
+σ² = ───┄┄∑┄┄(𝑥ᵢ − μ)²
+      𝑛  𝑖=1
 ```
 
 LaTeX:
@@ -217,7 +217,7 @@ LaTeX:
 Typst:
 
 ```typst
-σ ^2 = 1/n ∑_(i = 1)^n (x _i - μ) ^2
+σ ^2 = 1/n ∑_(i = 1)^n lr(( x _i - μ )) ^2
 ```
 
 ### bayes
@@ -237,7 +237,7 @@ P\left(A|B\right)=\frac{P\left(B|A\right)P\left(A\right)}{P\left(B\right)}
 Typst:
 
 ```typst
-P (A | B) = (P (B | A) P (A))/(P (B))
+P lr(( A | B )) = (P lr(( B | A )) P lr(( A )))/(P lr(( B )))
 ```
 
 ## 構造ストレステスト
@@ -395,12 +395,12 @@ Typst:
 ### nested-limits
 
 ```
-     𝑛
-    ───
-     2
-┄┄┄┄┄∑┄┄┄┄┄ 𝑎ᵢ
- 𝑖∈ ┄⋃┄ 𝑆ₖ
-     𝑘
+    𝑛
+   ───
+    2
+┄┄┄┄∑┄┄┄┄𝑎ᵢ
+ 𝑖∈┄⋃┄𝑆ₖ
+    𝑘
 ```
 
 LaTeX:
@@ -413,5 +413,103 @@ Typst:
 
 ```typst
 ∑_(i ∈ ⋃_k S _k)^(n/2) a _i
+```
+
+## デリミタ
+
+### cases-abs
+
+```
+      ⎧𝑥   𝑥≥0▕
+⎸𝑥⎹ = ⎨       ▕
+      ⎩−𝑥  𝑥<0▕
+```
+
+LaTeX:
+
+```latex
+\left|x\right|=\begin{cases} x & x\ge 0 \\ -x & x<0 \end{cases}
+```
+
+Typst:
+
+```typst
+lr(| x |) = cases(x & x ≥ 0, - x & x < 0)
+```
+
+### braket
+
+```
+⟨ψ│𝐻│ψ⟩
+```
+
+LaTeX:
+
+```latex
+\left\langle \psi \middle|H\middle|\psi \right\rangle 
+```
+
+Typst:
+
+```typst
+lr(angle.l ψ mid(|) H mid(|) ψ angle.r)
+```
+
+### set-builder
+
+```
+⎧ │      1 ⎫
+⎨𝑥│𝑥² > ───⎬
+⎩ │      2 ⎭
+```
+
+LaTeX:
+
+```latex
+\left\{x\middle|x^{2}>\frac{1}{2}\right\}
+```
+
+Typst:
+
+```typst
+lr({ x mid(|) x ^2 > 1/2 })
+```
+
+### interval
+
+```
+(0, 1]
+```
+
+LaTeX:
+
+```latex
+\left(0,1\right]
+```
+
+Typst:
+
+```typst
+lr(( 0 , 1 ])
+```
+
+### bare-array
+
+```
+▏𝑎  𝑏▕
+▏    ▕
+▏𝑐  𝑑▕
+```
+
+LaTeX:
+
+```latex
+\begin{matrix} a & b \\ c & d \end{matrix}
+```
+
+Typst:
+
+```typst
+mat(delim: #none, a, b; c, d)
 ```
 

@@ -67,6 +67,12 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
   カーソルなし描画のみ。
 - `Sqrt` は `index: u8`(2/3/4 = √∛∜)を持つ。`Node::Accent` の base は
   1 文字(Row ではない)。
+- 括弧は `Node::Delim{left,right,mids,segs}` に統一(旧 Paren/Matrix は廃止)。
+  `Node::Array`(素のグリッド)は **Delim の単一 seg 直下のみ**有効 —
+  それ以外は normalize がヌルデリミタ `▏…▕` で包む。素の `[ ]` の中身は
+  常にグリッド。グリッド判定の閾値は「全幅空白行 or 全高空白4列」
+  (素の行は最大3列までしか連続空白を作れない)。
+- Space は ␣ 挿入、インセット脱出は Tab。Enter はグリッド内で行追加。
 - ratatui は feature "tui"(bin 専用)。ライブラリ本体に TUI 依存を
   持ち込まない(wasm ビルドが壊れる)。
 - ratatui のイベントは `KeyEventKind::Press` のみ処理(Windows の重複対策)。

@@ -179,15 +179,17 @@
         <tr><td>\sum \int \oint …</td><td>極限つき大型演算子(↑で上限へ)</td></tr>
         <tr><td>\alpha \bbR \-&gt; \oo</td><td>記号 4000+(ミニバッファで名前入力)</td></tr>
         <tr><td>^ / _</td><td>上付き / 下付き(可能なら x² と表示)</td></tr>
-        <tr><td>( )&nbsp;&nbsp;]</td><td>自動サイズ括弧 / 行列(\matrix)から出る</td></tr>
+        <tr><td>( ) { }&nbsp;&nbsp;]</td><td>自動サイズ括弧に入る/出る、] は行列から出る</td></tr>
       </table>
       <table>
         <tr><td>Tab</td><td>いまの構造(分数など)から抜ける</td></tr>
         <tr><td>Space</td><td>明示空白 ␣ を挿入(LaTeX \ に変換)</td></tr>
+        <tr><td>Enter</td><td>行列内: 下に行を追加(\addcol \delrow なども)</td></tr>
         <tr><td>← → ↑ ↓</td><td>構造の中を通り抜けて移動</td></tr>
         <tr><td>Shift+← →</td><td>ブロック選択 → \cancel ^ _ ( \frac で包む</td></tr>
         <tr><td>\hat \vec \bar \dot</td><td>直前の1文字にアクセント</td></tr>
         <tr><td>\cancel</td><td>打ち消し線(選択があれば選択に適用)</td></tr>
+        <tr><td>\braket \abs \set \cases</td><td>⟨·|·⟩ |·| {·|·} 場合分け(\mid で分割追加)</td></tr>
         <tr><td>Backspace</td><td>削除(構造は中身から / 選択は一括)</td></tr>
       </table>
     </div>
