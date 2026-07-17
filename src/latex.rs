@@ -16,6 +16,9 @@ fn braced(row: &Row) -> String {
 }
 
 fn sym_to_latex(c: char) -> String {
+    if c == '␣' {
+        return "\\ ".into();
+    }
     match latex_name(c) {
         Some(name) => format!("\\{} ", name),
         None => c.to_string(),

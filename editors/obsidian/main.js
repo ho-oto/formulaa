@@ -43,7 +43,7 @@ class MasciiModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.createEl('div', {
-      text: '\\cmd  ^/_ scripts  ( ) insets  Space exit  ⇧←→ select — Ctrl+Enter: apply, Esc Esc: cancel',
+      text: '\\cmd  ^/_ scripts  ( ) insets  Tab exit / Space ␣  ⇧←→ select — Ctrl+Enter: apply, Esc Esc: cancel',
       cls: 'mascii-help',
     });
     this.screen = contentEl.createEl('pre', { cls: 'mascii-screen' });

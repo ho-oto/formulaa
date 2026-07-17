@@ -193,7 +193,11 @@ impl MasciiEditor {
             ")" => ed.close_paren(),
             "[" => ed.message = "[ ] are reserved for matrices; use \\matrix".into(),
             "]" => ed.close_bracket(),
-            " " => ed.exit_inset(),
+            "Tab" => ed.exit_inset(),
+            " " => {
+                ed.select_anchor = None;
+                ed.insert_sym('␣');
+            }
             k if k.chars().count() == 1 => {
                 let c = k.chars().next().unwrap();
                 if c.is_ascii_graphic() {

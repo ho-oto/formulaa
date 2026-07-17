@@ -38,6 +38,9 @@ pub const SYMBOLS: &[(&str, char)] = &[
     ("degree", '°'), ("cdots", '⋯'), ("ldots", '…'), ("dots", '…'),
     ("vdots", '⋮'), ("ddots", '⋱'),
     ("langle", '⟨'), ("rangle", '⟩'),
+    // Explicit space atom (the Space key): visible ␣ in canonical AA so the
+    // picture stays parseable (a real blank column is a sibling separator).
+    ("space", '␣'),
 ];
 
 /// Accent marks: (command name, mark char, is_under, latex command).

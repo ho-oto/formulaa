@@ -15,7 +15,7 @@ use mascii::editor::{
 };
 use mascii::{ast, latex, parse, typst};
 
-const HELP: &str = "\\cmd  ^/_ ( ) insets  Space exit  ←→↑↓ move  ⇧←→ select  ^G jump  ^B blocks  ^O structure  ^T italic  ^S save  ^Q quit";
+const HELP: &str = "\\cmd  ^/_ ( ) insets  Tab exit  Space ␣  ←→↑↓ move  ⇧←→ select  ^G jump  ^B blocks  ^O structure  ^T italic  ^S save  ^Q quit";
 
 const USAGE: &str = "\
 usage: mascii [SAVE_PATH]          interactive TUI editor (default: formula.tex)
@@ -207,7 +207,12 @@ fn handle_key(
             ed.message = "[ ] are reserved for matrices; insert one with \\matrix".into()
         }
         KeyCode::Char(']') => ed.close_bracket(),
-        KeyCode::Char(' ') => ed.exit_inset(),
+        KeyCode::Tab => ed.exit_inset(),
+        // Space is content: an explicit visible ␣ atom (Tab leaves insets).
+        KeyCode::Char(' ') => {
+            ed.select_anchor = None;
+            ed.insert_sym('␣');
+        }
         KeyCode::Char(c) if c.is_ascii_graphic() => {
             ed.select_anchor = None;
             ed.insert_sym(c);
@@ -335,6 +340,10 @@ fn decorate_line(line: &str) -> Vec<Span<'static>> {
         if c == CURSOR_CHAR {
             flush(&mut buf, &mut spans);
             spans.push(Span::styled(CURSOR_CHAR.to_string(), cursor_style));
+        } else if c == '␣' {
+            // Explicit space atom: keep visible but unobtrusive.
+            flush(&mut buf, &mut spans);
+            spans.push(Span::styled("␣", Style::default().fg(Color::DarkGray)));
         } else if (JUMP_CHAR_BASE..JUMP_CHAR_BASE + JUMP_LABELS.chars().count() as u32)
             .contains(&u)
         {

@@ -383,6 +383,20 @@ fn cancel_strikes() {
     roundtrip("cancel-in-sup", &row);
 }
 
+/// Explicit ␣ space atoms: manual spacing survives the roundtrip, also
+/// inside matrix cells (␣ is a non-blank atom, so cell splitting holds).
+#[test]
+fn explicit_space_atoms() {
+    let row = cat(&[s("f"), s("␣"), n(paren(s("x"))), s("␣␣"), s("dx")]);
+    roundtrip("space-atoms", &row);
+    let row = cat(&[
+        n(mat(1, 2, vec![cat(&[s("a"), s("␣"), s("b")]), s("c")])),
+        s("␣"),
+        n(frac(s("␣"), s("x"))),
+    ]);
+    roundtrip("space-in-matrix", &row);
+}
+
 /// Continued fraction (deep vertical nesting).
 #[test]
 fn continued_fraction() {
@@ -454,7 +468,7 @@ impl Rng {
 
 const ATOMS: &[char] = &[
     'a', 'b', 'c', 'x', 'y', 'z', 'A', 'B', 'N', '0', '1', '2', '7', '+',
-    '-', '=', '<', 'α', 'β', 'π', 'λ', '∞', '∂', '⋅', '±', '∈', '→',
+    '-', '=', '<', 'α', 'β', 'π', 'λ', '∞', '∂', '⋅', '±', '∈', '→', '␣',
 ];
 
 fn gen_row(rng: &mut Rng, depth: usize, max_len: usize) -> Row {

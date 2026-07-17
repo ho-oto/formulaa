@@ -55,6 +55,7 @@ fn node_to_typst(node: &Node) -> String {
     match node {
         Node::Sym(c) => match c {
             '\'' => "'".into(),
+            '␣' => "space".into(),
             c => c.to_string(),
         },
         Node::Func(name) => name.clone(),

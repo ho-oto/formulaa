@@ -182,7 +182,8 @@
         <tr><td>( )&nbsp;&nbsp;]</td><td>自動サイズ括弧 / 行列(\matrix)から出る</td></tr>
       </table>
       <table>
-        <tr><td>Space</td><td>いまの構造(分数など)から抜ける</td></tr>
+        <tr><td>Tab</td><td>いまの構造(分数など)から抜ける</td></tr>
+        <tr><td>Space</td><td>明示空白 ␣ を挿入(LaTeX \ に変換)</td></tr>
         <tr><td>← → ↑ ↓</td><td>構造の中を通り抜けて移動</td></tr>
         <tr><td>Shift+← →</td><td>ブロック選択 → \cancel ^ _ ( \frac で包む</td></tr>
         <tr><td>\hat \vec \bar \dot</td><td>直前の1文字にアクセント</td></tr>
@@ -237,7 +238,7 @@ function render() {
 }
 
 const PASS = new Set(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Backspace",
-                      "Delete","Home","End","Enter","Escape"," "]);
+                      "Delete","Home","End","Enter","Escape","Tab"," "]);
 screen.addEventListener("keydown", (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey) return; // keep browser shortcuts
   if (!PASS.has(e.key) && e.key.length !== 1) return;

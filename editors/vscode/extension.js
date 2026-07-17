@@ -45,7 +45,7 @@ function webviewHtml(webview, mediaUri) {
 <link rel="stylesheet" href="${mediaUri}/editor.css">
 </head>
 <body>
-<div id="help">\\cmd &nbsp; ^/_ scripts &nbsp; ( ) insets &nbsp; Space exit &nbsp;
+<div id="help">\\cmd &nbsp; ^/_ scripts &nbsp; ( ) insets &nbsp; Tab exit / Space ␣ &nbsp;
 ⇧←→ select &nbsp; <b>Ctrl+Enter: apply</b> &nbsp; Esc Esc: cancel</div>
 <pre id="screen" tabindex="0"></pre>
 <div id="minibuffer"></div>
