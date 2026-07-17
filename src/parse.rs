@@ -158,10 +158,11 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
 
     // Bars sit exactly on the baseline of their block, and the leftmost
     // column of a fraction/big-op block contains only the bar (contents
-    // are centered with >= 1 column of slack on each side).
+    // are centered with >= 1 column of slack on each side). '~' is the
+    // lenient hand-written band char (see parse_region).
     if let Some(&r) = occupied
         .iter()
-        .find(|&&r| g.at(r, c) == FRAC_BAR || g.at(r, c) == OP_BAND)
+        .find(|&&r| matches!(g.at(r, c), FRAC_BAR | OP_BAND | '~'))
     {
         return Ok(r);
     }
@@ -322,6 +323,55 @@ fn parse_region(
                     .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
                 out.push(Node::BigOp { op, lower, upper });
                 col = run_end + 1;
+            }
+            '~' => {
+                // Lenient input: '~' doubles as the band char (easier to
+                // type than ┄) when the full band pattern is present AND
+                // there is limit content above or below — otherwise it is
+                // a plain atom (so spaces around a literal ~ keep it one).
+                // The canonical renderer always emits ┄.
+                let lead_end = scan_while(g, bl, col, rect.r, |c| c == '~');
+                let band = (|| {
+                    if lead_end >= rect.r {
+                        return None;
+                    }
+                    let op = g.at(bl, lead_end + 1);
+                    // Only known big operators: an accented atom between
+                    // literal tildes (~𝑎̇~) must not read as a band.
+                    if !bigop_by_char(op) {
+                        return None;
+                    }
+                    let run_end = scan_while(g, bl, lead_end + 1, rect.r, |c| c == '~');
+                    if run_end == lead_end + 1 {
+                        return None;
+                    }
+                    let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end };
+                    let limits = region_above(span, bl).and_then(|r| trim(g, r)).is_some()
+                        || region_below(span, bl).and_then(|r| trim(g, r)).is_some();
+                    limits.then_some((op, span, run_end))
+                })();
+                if let Some((op, span, run_end)) = band {
+                    let upper = region_above(span, bl)
+                        .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
+                    let lower = region_below(span, bl)
+                        .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
+                    out.push(Node::BigOp { op, lower, upper });
+                    col = run_end + 1;
+                } else {
+                    // Same accent probe as ordinary atoms.
+                    let over = bl > rect.t && is_over_mark(g.at(bl - 1, col));
+                    let under = bl < rect.b && is_under_mark(g.at(bl + 1, col));
+                    if over && under {
+                        return err("stacked accents are not supported", bl, col);
+                    } else if over {
+                        out.push(Node::Accent { accent: g.at(bl - 1, col), base: '~' });
+                    } else if under {
+                        out.push(Node::Accent { accent: g.at(bl + 1, col), base: '~' });
+                    } else {
+                        out.push(Node::Sym('~'));
+                    }
+                    col += 1;
+                }
             }
             '(' => {
                 let close = match_on_row(g, bl, col, rect.r, '(', ')')?;
@@ -770,6 +820,23 @@ mod tests {
         assert_eq!(row_to_latex(&row), "x+1");
         let row = parse("E=mc²").unwrap();
         assert_eq!(row_to_latex(&row), "E=mc^{2}");
+    }
+
+    #[test]
+    fn lenient_tilde_band() {
+        // Hand-written band with ~ instead of ┄ (canonical stays ┄).
+        let aa = " ∞ \n~∑~\nn=1";
+        let row = parse(aa).unwrap();
+        assert_eq!(
+            row,
+            vec![Node::BigOp { op: '∑', lower: syms("n=1"), upper: syms("∞") }]
+        );
+        // Without limits (or with spaces around), ~ is a plain atom.
+        assert_eq!(parse("a~b").unwrap(), syms("a~b"));
+        assert_eq!(parse("a ~ b").unwrap(), syms("a~b"));
+        // A literal ~ still takes accents.
+        let row = parse("^\n~").unwrap();
+        assert_eq!(row, vec![Node::Accent { accent: '^', base: '~' }]);
     }
 
     #[test]
