@@ -42,6 +42,7 @@ fn main() -> std::io::Result<()> {
     let mut ed = Editor::new();
     ed.message = format!("mascii — LyX-like math editor (saves to {})", save_path);
 
+    let mut guard = RoundtripGuard::default();
     let result = loop {
         if let Err(e) = terminal.draw(|f| draw(f, &ed)) {
             break Err(e);
@@ -51,6 +52,7 @@ fn main() -> std::io::Result<()> {
                 if handle_key(&mut ed, key.code, key.modifiers, &save_path) {
                     break Ok(());
                 }
+                guard.check(&mut ed);
             }
             Ok(_) => {}
             Err(e) => break Err(e),
@@ -83,6 +85,83 @@ fn convert(mode: &str, file: Option<&str>) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Live roundtrip checker: after every edit, re-parse the canonical AA of
+/// the current formula and compare. Any mismatch is a renderer/parser bug;
+/// it is dumped to mascii_debug/roundtrip-N.txt so an AI (or human) can
+/// load the report later and fix the toolchain.
+#[derive(Default)]
+struct RoundtripGuard {
+    /// Last AA already reported (avoid one file per keystroke).
+    reported: Option<String>,
+}
+
+impl RoundtripGuard {
+    fn check(&mut self, ed: &mut Editor) {
+        let row = ast::normalize(&ed.root);
+        if row.is_empty() {
+            return;
+        }
+        let ctx = RenderCtx::canonical();
+        let aa = render_row(&row, None, false, &ctx).to_text();
+        let (kind, parsed): (String, Option<ast::Row>) = match parse::parse(&aa) {
+            Err(e) => (format!("parse error: {}", e), None),
+            Ok(p) if p != row => ("AST mismatch".into(), Some(p)),
+            Ok(p) => {
+                let aa2 = render_row(&p, None, false, &ctx).to_text();
+                if aa2 == aa {
+                    return; // roundtrip holds
+                }
+                ("re-render mismatch".into(), Some(p))
+            }
+        };
+        if self.reported.as_deref() == Some(&aa) {
+            return;
+        }
+        self.reported = Some(aa.clone());
+        match write_report(&kind, &aa, &row, parsed.as_ref()) {
+            Ok(path) => ed.message = format!("⚠ roundtrip bug — report: {}", path),
+            Err(e) => ed.message = format!("⚠ roundtrip bug (report failed: {})", e),
+        }
+    }
+}
+
+fn write_report(
+    kind: &str,
+    aa: &str,
+    expected: &ast::Row,
+    parsed: Option<&ast::Row>,
+) -> std::io::Result<String> {
+    fs::create_dir_all("mascii_debug")?;
+    let path = (1..)
+        .map(|i| format!("mascii_debug/roundtrip-{}.txt", i))
+        .find(|p| !std::path::Path::new(p).exists())
+        .unwrap();
+    let mut report = String::new();
+    use std::fmt::Write as _;
+    let _ = writeln!(report, "mascii roundtrip failure report");
+    let _ = writeln!(report, "kind: {}", kind);
+    let _ = writeln!(report, "\n--- canonical AA (fed to parse) ---\n{}", aa);
+    let _ = writeln!(report, "\n--- expected AST (normalized editor content) ---\n{:#?}", expected);
+    match parsed {
+        Some(p) => {
+            let _ = writeln!(report, "\n--- parsed AST ---\n{:#?}", p);
+            let _ = writeln!(
+                report,
+                "\n--- re-rendered AA from parsed ---\n{}",
+                render_row(p, None, false, &RenderCtx::canonical()).to_text()
+            );
+            let _ = writeln!(report, "\n--- LaTeX expected ---\n{}", latex::row_to_latex(expected));
+            let _ = writeln!(report, "\n--- LaTeX parsed ---\n{}", latex::row_to_latex(p));
+        }
+        None => {
+            let _ = writeln!(report, "\n--- parsed AST ---\n(parse failed)");
+            let _ = writeln!(report, "\n--- LaTeX expected ---\n{}", latex::row_to_latex(expected));
+        }
+    }
+    fs::write(&path, report)?;
+    Ok(path)
 }
 
 /// Returns true when the app should quit.

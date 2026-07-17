@@ -24,7 +24,13 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
    `symbols.rs` / `symbols_ext.rs` に原子として同じ文字が存在しないことを確認。
 3. `normalize`(ast.rs)は**冪等**でなければならない(合流後の再正規化)。
 4. 機能追加はまず `tests/roundtrip.rs` に実式を足してから実装する。
-   ランダムプロパティテスト(2000件)が回帰を検出してくれる。
+   ランダムプロパティテスト(2000件、`MASCII_PROP_N`/`MASCII_PROP_SEED` で
+   増量可)が回帰を検出してくれる。
+5. TUI は毎編集後にラウンドトリップを自動検査し、失敗すると
+   **`mascii_debug/roundtrip-N.txt`**(gitignore 済み)にレポートを吐く。
+   ユーザーから「バグった」と言われたらまずこのディレクトリを読むこと。
+   レポートには正準AA・期待AST・パース結果AST・両者の LaTeX が入っている。
+   修正したら同じ AA を `tests/roundtrip.rs` に回帰として追加する。
 
 ## モジュール地図
 
