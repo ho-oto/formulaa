@@ -40,7 +40,7 @@ fn sub(arg: Row) -> Node {
 }
 
 fn paren(inner: Row) -> Node {
-    Node::Paren { inner }
+    Node::Delim { left: '(', right: ')', mids: vec![], segs: vec![inner] }
 }
 
 fn bigop(op: char, lower: Row, upper: Row) -> Node {
@@ -57,7 +57,12 @@ fn acc(accent: char, base: char) -> Node {
 
 fn mat(rows: usize, cols: usize, cells: Vec<Row>) -> Node {
     assert_eq!(cells.len(), rows * cols);
-    Node::Matrix { rows, cols, cells }
+    Node::Delim {
+        left: '[',
+        right: ']',
+        mids: vec![],
+        segs: vec![vec![Node::Array { rows, cols, cells }]],
+    }
 }
 
 fn cancel(arg: Row) -> Node {

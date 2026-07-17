@@ -59,19 +59,64 @@ fn node_to_latex(node: &Node) -> String {
             }
             s
         }
-        Node::Paren { inner } => {
-            format!("\\left({}\\right)", row_to_latex(inner))
+        Node::Delim { left, right, mids, segs } => {
+            // Single grid seg with a well-known pair -> a matrix environment.
+            if mids.is_empty() {
+                if let [seg] = &segs[..] {
+                    if let [Node::Array { cols, cells, .. }] = &seg[..] {
+                        let env = match (left, right) {
+                            ('(', ')') => Some("pmatrix"),
+                            ('[', ']') => Some("bmatrix"),
+                            ('{', '}') => Some("Bmatrix"),
+                            ('|', '|') => Some("vmatrix"),
+                            ('.', '.') => Some("matrix"),
+                            ('{', '.') => Some("cases"),
+                            _ => None,
+                        };
+                        if let Some(env) = env {
+                            return format!(
+                                "\\begin{{{env}}} {} \\end{{{env}}}",
+                                array_body(*cols, cells)
+                            );
+                        }
+                    }
+                }
+            }
+            let mut s = format!("\\left{}", delim_latex(*left));
+            for (k, seg) in segs.iter().enumerate() {
+                if k > 0 {
+                    s.push_str(&format!("\\middle{}", delim_latex(mids[k - 1])));
+                }
+                s.push_str(&row_to_latex(seg));
+            }
+            s.push_str(&format!("\\right{}", delim_latex(*right)));
+            s
+        }
+        Node::Array { cols, cells, .. } => {
+            format!("\\begin{{matrix}} {} \\end{{matrix}}", array_body(*cols, cells))
         }
         // Requires \usepackage{cancel}.
         Node::Cancel { arg } => format!("\\cancel{}", braced(arg)),
-        Node::Matrix { cols, cells, .. } => {
-            let body = cells
-                .chunks(*cols)
-                .map(|row| row.iter().map(row_to_latex).collect::<Vec<_>>().join(" & "))
-                .collect::<Vec<_>>()
-                .join(" \\\\ ");
-            format!("\\begin{{bmatrix}} {} \\end{{bmatrix}}", body)
-        }
+    }
+}
+
+fn array_body(cols: usize, cells: &[Row]) -> String {
+    cells
+        .chunks(cols)
+        .map(|row| row.iter().map(row_to_latex).collect::<Vec<_>>().join(" & "))
+        .collect::<Vec<_>>()
+        .join(" \\\\ ")
+}
+
+fn delim_latex(spec: char) -> String {
+    match spec {
+        '{' => "\\{".into(),
+        '}' => "\\}".into(),
+        '⟨' => "\\langle ".into(),
+        '⟩' => "\\rangle ".into(),
+        '|' => "|".into(),
+        '.' => ".".into(),
+        c => c.to_string(),
     }
 }
 
@@ -108,10 +153,15 @@ mod tests {
         let root = vec![
             Node::Func("sin".into()),
             Node::Accent { accent: '⇀', base: 'v' },
-            Node::Matrix {
-                rows: 1,
-                cols: 2,
-                cells: vec![vec![Node::Sym('a')], vec![Node::Sym('b')]],
+            Node::Delim {
+                left: '[',
+                right: ']',
+                mids: vec![],
+                segs: vec![vec![Node::Array {
+                    rows: 1,
+                    cols: 2,
+                    cells: vec![vec![Node::Sym('a')], vec![Node::Sym('b')]],
+                }]],
             },
             Node::Sqrt { arg: vec![Node::Sym('x')], index: 3 },
         ];

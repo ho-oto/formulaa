@@ -79,16 +79,79 @@ fn node_to_typst(node: &Node) -> String {
             }
             s
         }
-        Node::Paren { inner } => format!("({})", row_to_typst(inner)),
-        Node::Cancel { arg } => format!("cancel({})", row_to_typst(arg)),
-        Node::Matrix { cols, cells, .. } => {
-            let body = cells
-                .chunks(*cols)
-                .map(|row| row.iter().map(row_to_typst).collect::<Vec<_>>().join(", "))
-                .collect::<Vec<_>>()
-                .join("; ");
-            format!("mat(delim: \"[\", {})", body)
+        Node::Delim { left, right, mids, segs } => {
+            if mids.is_empty() {
+                if let [seg] = &segs[..] {
+                    if let [Node::Array { cols, cells, .. }] = &seg[..] {
+                        let body = mat_body(*cols, cells);
+                        return match (left, right) {
+                            ('{', '.') => {
+                                // cases(): one argument per grid row.
+                                let rows = cells
+                                    .chunks(*cols)
+                                    .map(|row| {
+                                        row.iter()
+                                            .map(row_to_typst)
+                                            .collect::<Vec<_>>()
+                                            .join(" & ")
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                format!("cases({})", rows)
+                            }
+                            ('(', ')') => format!("mat(delim: \"(\", {})", body),
+                            ('[', ']') => format!("mat(delim: \"[\", {})", body),
+                            ('{', '}') => format!("mat(delim: \"{{\", {})", body),
+                            ('|', '|') => format!("mat(delim: \"|\", {})", body),
+                            ('.', '.') => format!("mat(delim: #none, {})", body),
+                            _ => format!(
+                                "lr({} mat(delim: #none, {}) {})",
+                                delim_typst(*left),
+                                body,
+                                delim_typst(*right)
+                            ),
+                        };
+                    }
+                }
+            }
+            let mut s = String::from("lr(");
+            s.push_str(&delim_typst(*left));
+            for (k, seg) in segs.iter().enumerate() {
+                if k > 0 {
+                    s.push_str(&format!(" mid({})", delim_typst(mids[k - 1])));
+                }
+                s.push(' ');
+                s.push_str(&row_to_typst(seg));
+            }
+            s.push(' ');
+            s.push_str(&delim_typst(*right));
+            s.push(')');
+            s
         }
+        Node::Array { cols, cells, .. } => {
+            format!("mat(delim: #none, {})", mat_body(*cols, cells))
+        }
+        Node::Cancel { arg } => format!("cancel({})", row_to_typst(arg)),
+    }
+}
+
+fn mat_body(cols: usize, cells: &[Row]) -> String {
+    cells
+        .chunks(cols)
+        .map(|row| row.iter().map(row_to_typst).collect::<Vec<_>>().join(", "))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn delim_typst(spec: char) -> String {
+    match spec {
+        '{' => "{".into(),
+        '}' => "}".into(),
+        '⟨' => "angle.l".into(),
+        '⟩' => "angle.r".into(),
+        '|' => "|".into(),
+        '.' => "".into(),
+        c => c.to_string(),
     }
 }
 

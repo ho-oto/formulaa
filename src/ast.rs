@@ -23,13 +23,32 @@ pub enum Node {
     Sub { arg: Row },
     /// Big operator (∑ ∫ ∏ …) with optional limits typeset under/over it.
     BigOp { op: char, lower: Row, upper: Row },
-    /// Auto-scaling round brackets.
-    Paren { inner: Row },
+    /// Auto-scaling delimiter block. `left`/`right`/`mids` hold delimiter
+    /// *spec* chars: ( ) [ ] { } ⟨ ⟩ | and '.' (null delimiter, drawn as
+    /// the thin ▏ ▕ markers). Middles ('|' only) separate the segments;
+    /// segs.len() == mids.len() + 1. Canonical constraints (normalize):
+    /// a plain [ ] pair with no mids always holds a single [Array] seg
+    /// (that picture is the matrix), other segs hold an [Array] only when
+    /// the grid has >= 2 cells.
+    Delim { left: char, right: char, mids: Vec<char>, segs: Vec<Row> },
+    /// Bare rows×cols grid (LaTeX array/matrix), cells stored row-major.
+    /// Only valid as the sole node of a Delim segment; normalize wraps a
+    /// stray Array into the null delimiter ▏…▕.
+    Array { rows: usize, cols: usize, cells: Vec<Row> },
     /// Struck-through content (\cancel): every cell of the rendered
     /// argument carries a combining long solidus overlay (U+0338).
     Cancel { arg: Row },
-    /// rows×cols matrix, cells stored row-major.
-    Matrix { rows: usize, cols: usize, cells: Vec<Row> },
+}
+
+/// Valid delimiter spec chars for `Node::Delim` (`.` = null delimiter).
+pub const DELIM_SPECS: &[char] = &['(', ')', '[', ']', '{', '}', '⟨', '⟩', '|', '.'];
+
+impl Node {
+    /// A `[ … ]` pair with no middles: its interior is always a grid
+    /// (this is the canonical matrix picture).
+    pub fn is_plain_bracket(left: char, right: char, mids: &[char]) -> bool {
+        left == '[' && right == ']' && mids.is_empty()
+    }
 }
 
 /// Identifies one editable slot inside a structure node.
@@ -42,9 +61,10 @@ pub enum Field {
     SubArg,
     OpLower,
     OpUpper,
-    ParenInner,
+    /// Segment index of a Delim.
+    Seg(usize),
     CancelArg,
-    /// Row-major cell index of a Matrix.
+    /// Row-major cell index of an Array.
     Cell(usize),
 }
 
@@ -58,9 +78,9 @@ impl Node {
             Node::Sup { .. } => vec![Field::SupArg],
             Node::Sub { .. } => vec![Field::SubArg],
             Node::BigOp { .. } => vec![Field::OpLower, Field::OpUpper],
-            Node::Paren { .. } => vec![Field::ParenInner],
+            Node::Delim { segs, .. } => (0..segs.len()).map(Field::Seg).collect(),
             Node::Cancel { .. } => vec![Field::CancelArg],
-            Node::Matrix { cells, .. } => (0..cells.len()).map(Field::Cell).collect(),
+            Node::Array { cells, .. } => (0..cells.len()).map(Field::Cell).collect(),
         }
     }
 
@@ -73,9 +93,9 @@ impl Node {
             (Node::Sub { arg }, Field::SubArg) => arg,
             (Node::BigOp { lower, .. }, Field::OpLower) => lower,
             (Node::BigOp { upper, .. }, Field::OpUpper) => upper,
-            (Node::Paren { inner }, Field::ParenInner) => inner,
+            (Node::Delim { segs, .. }, Field::Seg(i)) => &segs[i],
             (Node::Cancel { arg }, Field::CancelArg) => arg,
-            (Node::Matrix { cells, .. }, Field::Cell(i)) => &cells[i],
+            (Node::Array { cells, .. }, Field::Cell(i)) => &cells[i],
             _ => panic!("field {:?} does not belong to node {:?}", f, self),
         }
     }
@@ -89,9 +109,9 @@ impl Node {
             (Node::Sub { arg }, Field::SubArg) => arg,
             (Node::BigOp { lower, .. }, Field::OpLower) => lower,
             (Node::BigOp { upper, .. }, Field::OpUpper) => upper,
-            (Node::Paren { inner }, Field::ParenInner) => inner,
+            (Node::Delim { segs, .. }, Field::Seg(i)) => &mut segs[i],
             (Node::Cancel { arg }, Field::CancelArg) => arg,
-            (Node::Matrix { cells, .. }, Field::Cell(i)) => &mut cells[i],
+            (Node::Array { cells, .. }, Field::Cell(i)) => &mut cells[i],
             (node, f) => panic!("field {:?} does not belong to node {:?}", f, node),
         }
     }
@@ -126,6 +146,19 @@ pub fn normalize(row: &Row) -> Row {
     let mut out: Row = Vec::with_capacity(row.len());
     for node in row {
         let node = normalize_node(node);
+        // An Array is only valid as the sole node of a Delim segment
+        // (normalize_node handles that case before recursing). Anywhere
+        // else it has no parseable extent of its own; canonical form wraps
+        // it in the null delimiter (▏…▕ markers).
+        let node = match node {
+            Node::Array { .. } => Node::Delim {
+                left: '.',
+                right: '.',
+                mids: vec![],
+                segs: vec![vec![node]],
+            },
+            n => n,
+        };
         // Empty scripts/cancels do not exist in normal form: their lone ⬚
         // placeholder fuses with neighbouring script blocks in the picture,
         // so the renderer must never produce one.
@@ -194,8 +227,13 @@ fn strip_cancels(row: &Row) -> Row {
                 lower: strip_cancels(lower),
                 upper: strip_cancels(upper),
             }),
-            Node::Paren { inner } => out.push(Node::Paren { inner: strip_cancels(inner) }),
-            Node::Matrix { rows, cols, cells } => out.push(Node::Matrix {
+            Node::Delim { left, right, mids, segs } => out.push(Node::Delim {
+                left: *left,
+                right: *right,
+                mids: mids.clone(),
+                segs: segs.iter().map(strip_cancels).collect(),
+            }),
+            Node::Array { rows, cols, cells } => out.push(Node::Array {
                 rows: *rows,
                 cols: *cols,
                 cells: cells.iter().map(strip_cancels).collect(),
@@ -222,14 +260,50 @@ fn normalize_node(node: &Node) -> Node {
             lower: normalize(lower),
             upper: normalize(upper),
         },
-        Node::Paren { inner } => Node::Paren { inner: normalize(inner) },
+        Node::Delim { left, right, mids, segs } => {
+            let plain_bracket = Node::is_plain_bracket(*left, *right, mids);
+            // A direct Array segment is only canonical in a *single-segment*
+            // delimiter (the grid then owns the whole extent, so its
+            // center-baseline is recoverable); in a multi-segment block it
+            // gets null-delim-wrapped like any stray Array.
+            let sole = segs.len() == 1;
+            let segs = segs
+                .iter()
+                .map(|seg| {
+                    let seg = match &seg[..] {
+                        [Node::Array { rows, cols, cells }] if sole => vec![Node::Array {
+                            rows: *rows,
+                            cols: *cols,
+                            cells: cells.iter().map(normalize).collect(),
+                        }],
+                        _ => normalize(seg),
+                    };
+                    match &seg[..] {
+                        // Plain [ ]: the interior is always a grid.
+                        [Node::Array { .. }] if plain_bracket => seg,
+                        _ if plain_bracket => vec![Node::Array {
+                            rows: 1,
+                            cols: 1,
+                            cells: vec![seg],
+                        }],
+                        // Elsewhere a 1×1 grid is the same picture as the
+                        // cell itself rendered compact — canonical form is
+                        // the plain row (compact vs. display spacing would
+                        // otherwise make two ASTs for one picture family).
+                        [Node::Array { rows: 1, cols: 1, cells }] => normalize(&cells[0]),
+                        _ => seg,
+                    }
+                })
+                .collect();
+            Node::Delim { left: *left, right: *right, mids: mids.clone(), segs }
+        }
         Node::Cancel { arg } => {
             // A cancel strikes every cell of its subtree, so any Cancel
             // nested anywhere inside it (even deep in a fraction) is the
             // same picture; dissolve them all.
             Node::Cancel { arg: normalize(&strip_cancels(&normalize(arg))) }
         }
-        Node::Matrix { rows, cols, cells } => Node::Matrix {
+        Node::Array { rows, cols, cells } => Node::Array {
             rows: *rows,
             cols: *cols,
             cells: cells.iter().map(normalize).collect(),

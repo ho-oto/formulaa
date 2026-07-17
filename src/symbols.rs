@@ -37,11 +37,24 @@ pub const SYMBOLS: &[(&str, char)] = &[
     ("angle", '∠'), ("perp", '⊥'), ("parallel", '∥'), ("prime", '′'),
     ("degree", '°'), ("cdots", '⋯'), ("ldots", '…'), ("dots", '…'),
     ("vdots", '⋮'), ("ddots", '⋱'),
-    ("langle", '⟨'), ("rangle", '⟩'),
     // Explicit space atom (the Space key): visible ␣ in canonical AA so the
     // picture stays parseable (a real blank column is a sibling separator).
     ("space", '␣'),
 ];
+
+/// Structure-reserved glyphs: never valid as atoms (see docs/aa-spec.md §2).
+/// `symbol_by_name` filters these so no symbol table entry can inject one.
+pub fn is_reserved_glyph(c: char) -> bool {
+    matches!(
+        c,
+        '─' | '┄' | '√' | '∛' | '∜' | '│' | '⬚' | '▌' | '▶'
+            | '⎛' | '⎜' | '⎝' | '⎞' | '⎟' | '⎠'
+            | '⎡' | '⎢' | '⎣' | '⎤' | '⎥' | '⎦'
+            | '{' | '}' | '⟨' | '⟩'
+            | '⎧' | '⎨' | '⎩' | '⎪' | '⎫' | '⎬' | '⎭'
+            | '╱' | '╲' | '⎸' | '⎹' | '▏' | '▕'
+    )
+}
 
 /// Accent marks: (command name, mark char, is_under, latex command).
 /// Mark chars are RESERVED — they never occur as atoms, and over-marks are
@@ -125,6 +138,7 @@ pub fn symbol_by_name(name: &str) -> Option<char> {
                 .find(|(n, _)| *n == name)
                 .map(|&(_, c)| c)
         })
+        .filter(|&c| !is_reserved_glyph(c))
 }
 
 pub fn bigop_by_name(name: &str) -> Option<char> {

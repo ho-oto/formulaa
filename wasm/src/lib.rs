@@ -186,11 +186,27 @@ impl MasciiEditor {
                 }
             }
             "(" => {
-                if !ed.wrap_selection(|c| Node::Paren { inner: c }) {
-                    ed.insert_and_enter(Node::Paren { inner: vec![] });
+                if !ed.wrap_selection(|c| Node::Delim {
+                    left: '(',
+                    right: ')',
+                    mids: vec![],
+                    segs: vec![c],
+                }) {
+                    ed.insert_delim('(', ')', vec![]);
                 }
             }
             ")" => ed.close_paren(),
+            "{" => {
+                if !ed.wrap_selection(|c| Node::Delim {
+                    left: '{',
+                    right: '}',
+                    mids: vec![],
+                    segs: vec![c],
+                }) {
+                    ed.insert_delim('{', '}', vec![]);
+                }
+            }
+            "}" => ed.close_brace(),
             "[" => ed.message = "[ ] are reserved for matrices; use \\matrix".into(),
             "]" => ed.close_bracket(),
             "Tab" => ed.exit_inset(),

@@ -277,11 +277,27 @@ fn handle_key(
             }
         }
         KeyCode::Char('(') => {
-            if !ed.wrap_selection(|c| ast::Node::Paren { inner: c }) {
-                ed.insert_and_enter(ast::Node::Paren { inner: vec![] });
+            if !ed.wrap_selection(|c| ast::Node::Delim {
+                left: '(',
+                right: ')',
+                mids: vec![],
+                segs: vec![c],
+            }) {
+                ed.insert_delim('(', ')', vec![]);
             }
         }
         KeyCode::Char(')') => ed.close_paren(),
+        KeyCode::Char('{') => {
+            if !ed.wrap_selection(|c| ast::Node::Delim {
+                left: '{',
+                right: '}',
+                mids: vec![],
+                segs: vec![c],
+            }) {
+                ed.insert_delim('{', '}', vec![]);
+            }
+        }
+        KeyCode::Char('}') => ed.close_brace(),
         KeyCode::Char('[') => {
             ed.message = "[ ] are reserved for matrices; insert one with \\matrix".into()
         }

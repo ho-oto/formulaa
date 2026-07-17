@@ -45,8 +45,12 @@ fn sub(arg: Row) -> Node {
     Node::Sub { arg }
 }
 
+fn delim(left: char, right: char, mids: Vec<char>, segs: Vec<Row>) -> Node {
+    Node::Delim { left, right, mids, segs }
+}
+
 fn paren(inner: Row) -> Node {
-    Node::Paren { inner }
+    delim('(', ')', vec![], vec![inner])
 }
 
 fn bigop(op: char, lower: Row, upper: Row) -> Node {
@@ -61,9 +65,14 @@ fn acc(accent: char, base: char) -> Node {
     Node::Accent { accent, base }
 }
 
-fn mat(rows: usize, cols: usize, cells: Vec<Row>) -> Node {
+fn array(rows: usize, cols: usize, cells: Vec<Row>) -> Node {
     assert_eq!(cells.len(), rows * cols);
-    Node::Matrix { rows, cols, cells }
+    Node::Array { rows, cols, cells }
+}
+
+/// A [ ] matrix (grid wrapped in brackets, the old Matrix node).
+fn mat(rows: usize, cols: usize, cells: Vec<Row>) -> Node {
+    delim('[', ']', vec![], vec![vec![array(rows, cols, cells)]])
 }
 
 fn cancel(arg: Row) -> Node {
@@ -383,6 +392,67 @@ fn cancel_strikes() {
     roundtrip("cancel-in-sup", &row);
 }
 
+/// Generalized delimiters: |x|, ⟨x|y⟩, {x | P(x)}, cases, bare arrays,
+/// pmatrix, mismatched pairs.
+#[test]
+fn delimiter_blocks() {
+    // |−x| = |x|
+    let abs = |r: Row| delim('|', '|', vec![], vec![r]);
+    roundtrip(
+        "abs",
+        &cat(&[n(abs(s("-x"))), s("="), n(abs(s("x")))]),
+    );
+    // ⟨ψ|H|ψ⟩ (two mids)
+    roundtrip(
+        "braket",
+        &n(delim('⟨', '⟩', vec!['|', '|'], vec![s("ψ"), s("H"), s("ψ")])),
+    );
+    // {x | x² > 0} with a tall member
+    roundtrip(
+        "set-builder",
+        &n(delim(
+            '{',
+            '}',
+            vec!['|'],
+            vec![s("x"), cat(&[s("x"), n(sup(s("2"))), s(">"), n(frac(s("1"), s("2")))])],
+        )),
+    );
+    // cases: |x| = { x (x≥0) / −x (x<0)
+    roundtrip(
+        "cases",
+        &cat(&[
+            n(abs(s("x"))),
+            s("="),
+            n(delim(
+                '{',
+                '.',
+                vec![],
+                vec![n(array(2, 2, vec![s("x"), s("x≥0"), s("-x"), s("x<0")]))],
+            )),
+        ]),
+    );
+    // Bare array (null delimiters) and a ( ) matrix.
+    roundtrip(
+        "bare-array",
+        &n(delim('.', '.', vec![], vec![n(array(2, 2, vec![s("a"), s("b"), s("c"), s("d")]))])),
+    );
+    roundtrip(
+        "pmatrix",
+        &n(delim('(', ')', vec![], vec![n(array(1, 2, vec![s("a+b"), s("c")]))])),
+    );
+    // Mismatched pair (half-open interval) and nested delimiters.
+    roundtrip("interval", &n(delim('(', ']', vec![], vec![s("0,1")])));
+    roundtrip(
+        "nested-delims",
+        &n(delim(
+            '{',
+            '}',
+            vec![],
+            vec![n(delim('⟨', '⟩', vec!['|'], vec![s("u"), n(abs(s("v")))]))],
+        )),
+    );
+}
+
 /// Explicit ␣ space atoms: manual spacing survives the roundtrip, also
 /// inside matrix cells (␣ is a non-blank atom, so cell splitting holds).
 #[test]
@@ -489,7 +559,7 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
         };
     }
     let d = depth - 1;
-    match rng.below(9) {
+    match rng.below(10) {
         0 => Node::Frac { num: gen_row(rng, d, 3), den: gen_row(rng, d, 3) },
         1 => Node::Sqrt { arg: gen_row(rng, d, 3), index: [2, 2, 3, 4][rng.below(4)] },
         2 => Node::Sup { arg: gen_row(rng, d, 2) },
@@ -499,13 +569,44 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             lower: gen_row(rng, d, 3),
             upper: gen_row(rng, d, 2),
         },
-        5 => Node::Paren { inner: gen_row(rng, d, 3) },
+        5 => {
+            // Random delimiter block: any pair (mismatched allowed), with
+            // an occasional │ middle. normalize repairs constraint slips.
+            let pairs = [
+                ('(', ')'),
+                ('[', ']'),
+                ('{', '}'),
+                ('⟨', '⟩'),
+                ('|', '|'),
+                ('.', '.'),
+                ('(', ']'),
+                ('{', '.'),
+            ];
+            let (l, r) = pairs[rng.below(pairs.len())];
+            let nsegs = 1 + rng.below(2); // 1 or 2 segs
+            let segs = (0..nsegs).map(|_| gen_row(rng, d, 3)).collect::<Vec<_>>();
+            Node::Delim { left: l, right: r, mids: vec!['|'; nsegs - 1], segs }
+        }
         7 => Node::Cancel { arg: gen_row(rng, d, 3) },
-        6 => Node::Matrix {
-            rows: 2,
-            cols: 2,
-            cells: (0..4).map(|_| gen_row(rng, d, 2)).collect(),
-        },
+        6 => {
+            // Grid inside a random known pair (bracket matrix most often).
+            let pairs = [('[', ']'), ('[', ']'), ('(', ')'), ('.', '.'), ('{', '.')];
+            let (l, r) = pairs[rng.below(pairs.len())];
+            let (rows, cols) = [(2, 2), (1, 2), (2, 1), (1, 1)][rng.below(4)];
+            let cells = (0..rows * cols).map(|_| gen_row(rng, d, 2)).collect();
+            Node::Delim {
+                left: l,
+                right: r,
+                mids: vec![],
+                segs: vec![vec![Node::Array { rows, cols, cells }]],
+            }
+        }
+        8 => {
+            // Stray Array: normalize must wrap it in the null delimiter.
+            let (rows, cols) = [(2, 2), (1, 2)][rng.below(2)];
+            let cells = (0..rows * cols).map(|_| gen_row(rng, d, 2)).collect();
+            Node::Array { rows, cols, cells }
+        }
         _ => Node::Sym(ATOMS[rng.below(ATOMS.len())]),
     }
 }

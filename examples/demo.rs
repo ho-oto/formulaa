@@ -86,10 +86,13 @@ fn main() {
     // Nested: f(x) = (1 + 1/(1 + 1/x))
     let nested = vec![
         Node::Sym('f'),
-        Node::Paren { inner: syms("x") },
+        Node::Delim { left: '(', right: ')', mids: vec![], segs: vec![syms("x")] },
         Node::Sym('='),
-        Node::Paren {
-            inner: vec![
+        Node::Delim {
+            left: '(',
+            right: ')',
+            mids: vec![],
+            segs: vec![vec![
                 Node::Sym('1'),
                 Node::Sym('+'),
                 Node::Frac {
@@ -100,7 +103,7 @@ fn main() {
                         Node::Frac { num: syms("1"), den: syms("x") },
                     ],
                 },
-            ],
+            ]],
         },
     ];
     show("Nested fractions in parens", &nested);

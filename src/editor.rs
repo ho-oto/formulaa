@@ -152,7 +152,7 @@ impl Editor {
                 (Field::OpLower, true) => Some(Field::OpUpper),
                 (Field::OpUpper, false) => Some(Field::OpLower),
                 (Field::Cell(c), up) => match node {
-                    Node::Matrix { cols, cells, .. } => {
+                    Node::Array { cols, cells, .. } => {
                         if up && c >= *cols {
                             Some(Field::Cell(c - cols))
                         } else if !up && c + cols < cells.len() {
@@ -235,36 +235,81 @@ impl Editor {
 
     // ----- LyX-like keys -----
 
-    /// `)` closes the innermost paren inset if we are inside one.
-    pub fn close_paren(&mut self) {
-        let inside = self
-            .path
-            .iter()
-            .rposition(|&(_, f)| f == Field::ParenInner);
-        match inside {
-            Some(k) => {
-                let (i, _) = self.path[k];
+    /// Insert a delimiter block and enter its first segment.
+    pub fn insert_delim(&mut self, left: char, right: char, mids: Vec<char>) {
+        let segs = vec![vec![]; mids.len() + 1];
+        self.insert_and_enter(Node::Delim { left, right, mids, segs });
+    }
+
+    /// Close (step out of) the innermost enclosing Delim whose right
+    /// delimiter is `right`. Returns false when there is none.
+    pub fn close_delim(&mut self, right: char) -> bool {
+        for k in (0..self.path.len()).rev() {
+            let (i, f) = self.path[k];
+            if !matches!(f, Field::Seg(_)) {
+                continue;
+            }
+            let node = &row_at(&self.root, &self.path[..k])[i];
+            if matches!(node, Node::Delim { right: r, .. } if *r == right) {
                 self.path.truncate(k);
                 self.col = i + 1;
+                return true;
             }
-            None => self.insert_sym(')'),
+        }
+        false
+    }
+
+    /// `)` closes the innermost ( … ) inset, or inserts a literal atom.
+    pub fn close_paren(&mut self) {
+        if !self.close_delim(')') {
+            self.insert_sym(')');
         }
     }
 
-    /// `]` leaves the innermost matrix if we are inside one.
+    /// `]` leaves the innermost [ … ] block (matrix).
     pub fn close_bracket(&mut self) {
-        let inside = self
-            .path
-            .iter()
-            .rposition(|&(_, f)| matches!(f, Field::Cell(_)));
-        match inside {
-            Some(k) => {
-                let (i, _) = self.path[k];
-                self.path.truncate(k);
-                self.col = i + 1;
-            }
-            None => self.message = "not inside a matrix ([ ] are reserved; use \\matrix)".into(),
+        if !self.close_delim(']') {
+            self.message = "not inside a matrix ([ ] are reserved; use \\matrix)".into();
         }
+    }
+
+    /// `}` leaves the innermost { … } block.
+    pub fn close_brace(&mut self) {
+        if !self.close_delim('}') {
+            self.message = "not inside a { } block ({ inserts one)".into();
+        }
+    }
+
+    /// Insert a rows×cols grid wrapped in the given delimiter pair and put
+    /// the cursor into the first cell.
+    pub fn insert_grid(&mut self, left: char, right: char, rows: usize, cols: usize) {
+        let array = Node::Array { rows, cols, cells: vec![vec![]; rows * cols] };
+        let node = Node::Delim { left, right, mids: vec![], segs: vec![vec![array]] };
+        let col = self.col;
+        self.cur_row_mut().insert(col, node);
+        self.path.push((col, Field::Seg(0)));
+        self.path.push((0, Field::Cell(0)));
+        self.col = 0;
+    }
+
+    /// `\mid`: split the current Delim segment at the cursor, inserting a
+    /// │ middle; the cursor lands at the start of the new segment.
+    pub fn insert_mid(&mut self) {
+        let Some(&(i, Field::Seg(k))) = self.path.last() else {
+            self.message = "\\mid works directly inside a delimiter block".into();
+            return;
+        };
+        let col = self.col;
+        let parent_path = self.path[..self.path.len() - 1].to_vec();
+        let Node::Delim { mids, segs, .. } = &mut row_at_mut(&mut self.root, &parent_path)[i]
+        else {
+            unreachable!()
+        };
+        let tail: Row = segs[k].split_off(col);
+        segs.insert(k + 1, tail);
+        mids.insert(k, '|');
+        *self.path.last_mut().unwrap() = (i, Field::Seg(k + 1));
+        self.col = 0;
     }
 
     /// Wrap the atom just before the cursor with an accent mark.
@@ -465,11 +510,37 @@ impl Editor {
             "cbrt" | "sqrt3" => self.insert_and_enter(Node::Sqrt { arg: vec![], index: 3 }),
             "qdrt" | "sqrt4" => self.insert_and_enter(Node::Sqrt { arg: vec![], index: 4 }),
             "cancel" => self.insert_and_enter(Node::Cancel { arg: vec![] }),
-            "matrix" => self.insert_and_enter(Node::Matrix {
-                rows: 2,
-                cols: 2,
-                cells: vec![vec![], vec![], vec![], vec![]],
-            }),
+            "matrix" | "bmatrix" => self.insert_grid('[', ']', 2, 2),
+            "pmatrix" => self.insert_grid('(', ')', 2, 2),
+            "Bmatrix" => self.insert_grid('{', '}', 2, 2),
+            "vmatrix" => self.insert_grid('|', '|', 2, 2),
+            "array" => self.insert_grid('.', '.', 2, 2),
+            "cases" => self.insert_grid('{', '.', 2, 2),
+            "abs" => self.insert_delim('|', '|', vec![]),
+            "langle" | "angle" => self.insert_delim('⟨', '⟩', vec![]),
+            "braket" => self.insert_delim('⟨', '⟩', vec!['|']),
+            "set" => self.insert_delim('{', '}', vec!['|']),
+            "mid" => self.insert_mid(),
+            _ if cmd.starts_with("delim") && cmd.len() > "delim".len() => {
+                // \delim<spec chars>: left, right, then middles, e.g.
+                // \delim(] or \delim{}| or \delim.. ; < > alias ⟨ ⟩.
+                let specs: Vec<char> = cmd["delim".len()..]
+                    .chars()
+                    .map(|c| match c {
+                        '<' => '⟨',
+                        '>' => '⟩',
+                        c => c,
+                    })
+                    .collect();
+                let valid = |c: &char| crate::ast::DELIM_SPECS.contains(c);
+                if specs.len() >= 2 && specs.iter().all(valid) {
+                    let (l, r) = (specs[0], specs[1]);
+                    self.insert_delim(l, r, specs[2..].to_vec());
+                } else {
+                    self.message =
+                        "usage: \\delim<left><right>[mids] with chars ()[]{}<>|.".into();
+                }
+            }
             _ => {
                 if let Some(op) = bigop_by_name(cmd) {
                     self.insert_and_enter(Node::BigOp {
@@ -645,11 +716,37 @@ mod tests {
     #[test]
     fn close_paren_exits_inset() {
         let mut ed = Editor::new();
-        ed.insert_and_enter(Node::Paren { inner: vec![] });
+        ed.insert_delim('(', ')', vec![]);
         ed.insert_sym('x');
         ed.close_paren();
         assert!(ed.path.is_empty());
         assert_eq!(ed.col, 1);
         assert_eq!(row_to_latex(&ed.root), "\\left(x\\right)");
+    }
+
+    #[test]
+    fn grid_and_mid_editing() {
+        // \matrix puts the cursor into cell 0 of a [ ] grid.
+        let mut ed = Editor::new();
+        ed.execute("matrix");
+        ed.insert_sym('a');
+        assert_eq!(ed.path.len(), 2);
+        ed.close_bracket();
+        assert!(ed.path.is_empty());
+        assert_eq!(row_to_latex(&ed.root), "\\begin{bmatrix} a &  \\\\  &  \\end{bmatrix}");
+
+        // ⟨x|y⟩ via \braket, plus \mid splitting.
+        let mut ed = Editor::new();
+        ed.execute("braket");
+        ed.insert_sym('x');
+        ed.right(); // into second segment
+        ed.insert_sym('y');
+        assert_eq!(row_to_latex(&ed.root), "\\left\\langle x\\middle|y\\right\\rangle ");
+        ed.execute("mid"); // split after y -> third (empty) segment
+        ed.insert_sym('z');
+        assert_eq!(
+            row_to_latex(&ed.root),
+            "\\left\\langle x\\middle|y\\middle|z\\right\\rangle "
+        );
     }
 }

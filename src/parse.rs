@@ -115,8 +115,90 @@ fn trim(g: &Grid, mut rect: Rect) -> Option<Rect> {
     Some(rect)
 }
 
-const OPEN_BRACKETS: &[char] = &['(', '⎛', '⎡', '['];
-const CLOSE_BRACKETS: &[char] = &[')', '⎞', '⎤', ']'];
+/// Side-distinct delimiter glyphs (each char appears on exactly one side;
+/// the shared extension ⎪ and the angle arms ╱ ╲ are deliberately absent).
+const OPEN_BRACKETS: &[char] = &[
+    '(', '⎛', '⎜', '⎝', '[', '⎡', '⎢', '⎣', '{', '⎧', '⎨', '⎩', '⟨', '⎸', '▏',
+];
+const CLOSE_BRACKETS: &[char] = &[
+    ')', '⎞', '⎟', '⎠', ']', '⎤', '⎥', '⎦', '}', '⎫', '⎬', '⎭', '⟩', '⎹', '▕',
+];
+
+/// Delimiter spec char for a glyph that can appear on the *baseline row*
+/// of a left delimiter column. Brace/angle columns always show their
+/// vertex (⎨ / ⟨) on the baseline, so ⎧ ⎪ ⎩ ╱ ╲ never occur here.
+fn open_spec(c: char) -> Option<char> {
+    Some(match c {
+        '(' | '⎛' | '⎜' | '⎝' => '(',
+        '[' | '⎡' | '⎢' | '⎣' => '[',
+        '{' | '⎨' => '{',
+        '⟨' => '⟨',
+        '⎸' => '|',
+        '▏' => '.',
+        _ => return None,
+    })
+}
+
+fn close_spec(c: char) -> Option<char> {
+    Some(match c {
+        ')' | '⎞' | '⎟' | '⎠' => ')',
+        ']' | '⎤' | '⎥' | '⎦' => ']',
+        '}' | '⎬' => '}',
+        '⟩' => '⟩',
+        '⎹' => '|',
+        '▕' => '.',
+        _ => return None,
+    })
+}
+
+/// Every glyph a left delimiter column of `spec` can contain (for the
+/// vertical-extent scan).
+fn left_family(spec: char) -> &'static [char] {
+    match spec {
+        '(' => &['(', '⎛', '⎜', '⎝'],
+        '[' => &['[', '⎡', '⎢', '⎣'],
+        '{' => &['{', '⎧', '⎪', '⎨', '⎩'],
+        '⟨' => &['⟨', '╱', '╲'],
+        '|' => &['⎸'],
+        _ => &['▏'],
+    }
+}
+
+/// Which side of a delimiter pair the glyph at (row, col) belongs to:
+/// Some(true) = left/open, Some(false) = right/close, None = neither.
+/// The shared glyphs (brace extension ⎪, angle arms ╱ ╲) resolve their
+/// side by walking the contiguous column run to a side-distinct glyph —
+/// without this, depth counting desyncs on rows that cut through a
+/// mismatched pair (e.g. a { … ▕ cases block).
+fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
+    let ch = g.at(row, col);
+    if OPEN_BRACKETS.contains(&ch) {
+        return Some(true);
+    }
+    if CLOSE_BRACKETS.contains(&ch) {
+        return Some(false);
+    }
+    let family: &[char] = match ch {
+        '⎪' => &['⎧', '⎨', '⎩', '⎫', '⎬', '⎭', '⎪'],
+        '╱' | '╲' => &['⟨', '⟩', '╱', '╲'],
+        _ => return None,
+    };
+    let mut r = row;
+    while r > 0 && family.contains(&g.at(r - 1, col)) {
+        r -= 1;
+    }
+    while r < g.g.len() && family.contains(&g.at(r, col)) {
+        let c2 = g.at(r, col);
+        if OPEN_BRACKETS.contains(&c2) {
+            return Some(true);
+        }
+        if CLOSE_BRACKETS.contains(&c2) {
+            return Some(false);
+        }
+        r += 1;
+    }
+    None
+}
 
 /// Columns lying strictly inside a bracket pair on any row of `rect`
 /// (relative to rect.l). Such columns are never treated as matrix cell
@@ -131,14 +213,14 @@ fn protected_cols(g: &Grid, rect: Rect, skip_row: Option<usize>) -> Vec<bool> {
         }
         let mut depth: i32 = 0;
         for c in rect.cols() {
-            let ch = g.at(r, c);
-            if CLOSE_BRACKETS.contains(&ch) {
+            let side = delim_side(g, r, c);
+            if side == Some(false) {
                 depth -= 1;
             }
             if depth > 0 {
                 protected[c - rect.l] = true;
             }
-            if OPEN_BRACKETS.contains(&ch) {
+            if side == Some(true) {
                 depth += 1;
             }
         }
@@ -180,11 +262,48 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
     let first = *occupied.first().unwrap();
     let last = *occupied.last().unwrap();
     match g.at(first, c) {
-        // Matrix: baseline is the vertical center of the bracket extent.
-        '⎡' | '[' => Ok((first + last) / 2),
-        // Paren: baseline is the baseline of the inner region.
-        '⎛' => find_baseline(g, Rect { t: first, b: last, l: c + 1, r: rect.r }),
+        // Bracket block: a plain [ ] pair always holds a grid, whose
+        // baseline is the vertical center of the extent; with │ middles the
+        // segments are plain rows, so recurse like a paren.
+        '⎡' | '[' => {
+            if let Ok(close) = match_delim(g, first, c, rect.r) {
+                if close > c + 1
+                    && !mid_columns(g, Rect { t: first, b: last, l: c + 1, r: close - 1 })
+                        .is_empty()
+                {
+                    return find_baseline(g, Rect { t: first, b: last, l: c + 1, r: rect.r });
+                }
+            }
+            Ok((first + last) / 2)
+        }
+        // Paren / bar / null delimiters: a grid interior (sole Array seg)
+        // centers on the extent like a bracket grid; anything else has the
+        // baseline of the inner region. All rows of these columns carry a
+        // side-distinct glyph, so the close matches on the top row.
+        '⎛' | '⎸' | '▏' => {
+            if let Ok(close) = match_delim(g, first, c, rect.r) {
+                if close > c + 1
+                    && region_is_grid(g, Rect { t: first, b: last, l: c + 1, r: close - 1 })
+                {
+                    return Ok((first + last) / 2);
+                }
+            }
+            find_baseline(g, Rect { t: first, b: last, l: c + 1, r: rect.r })
+        }
         '(' => Ok(first),
+        // Brace / angle columns carry their vertex on the baseline row.
+        '⎧' | '⎪' | '⎨' | '⎩' => occupied
+            .iter()
+            .find(|&&r| g.at(r, c) == '⎨')
+            .copied()
+            .ok_or(())
+            .or_else(|_| err("brace column without ⎨", first, c)),
+        '⟨' | '╱' | '╲' => occupied
+            .iter()
+            .find(|&&r| g.at(r, c) == '⟨')
+            .copied()
+            .ok_or(())
+            .or_else(|_| err("angle column without ⟨", first, c)),
         // Sqrt: stem covers exactly the content rows; recurse into content.
         '│' => find_baseline(g, Rect { t: first, b: last, l: c + 1, r: rect.r }),
         ch if radical_index(ch).is_some() => {
@@ -373,40 +492,15 @@ fn parse_region(
                     col += 1;
                 }
             }
-            '(' => {
-                let close = match_on_row(g, bl, col, rect.r, '(', ')')?;
-                let inner = Rect { t: bl, b: bl, l: col + 1, r: close.wrapping_sub(1) };
-                let inner_row = if close > col + 1 {
-                    parse_region(g, inner, Some(bl), depth + 1, trace, in_cancel)?
-                } else {
-                    vec![]
-                };
-                out.push(Node::Paren { inner: inner_row });
-                col = close + 1;
-            }
             ')' => {
                 // Unmatched close (LyX lets you type one): plain atom.
                 out.push(Node::Sym(')'));
                 col += 1;
             }
-            '⎛' | '⎜' | '⎝' => {
-                let (top, bot) = vertical_extent(g, rect, col, bl, &['⎛', '⎜', '⎝']);
-                let close = match_on_row(g, top, col, rect.r, '⎛', '⎞')?;
-                let inner = Rect { t: top, b: bot, l: col + 1, r: close - 1 };
-                out.push(Node::Paren { inner: parse_region(g, inner, Some(bl), depth + 1, trace, in_cancel)? });
-                col = close + 1;
-            }
-            '⎡' | '⎢' | '⎣' | '[' => {
-                let (top, bot) = if ch == '[' {
-                    (bl, bl)
-                } else {
-                    vertical_extent(g, rect, col, bl, &['⎡', '⎢', '⎣'])
-                };
-                let (open, close_ch) = if ch == '[' { ('[', ']') } else { ('⎡', '⎤') };
-                let close = match_on_row(g, top, col, rect.r, open, close_ch)?;
-                let inner = Rect { t: top, b: bot, l: col + 1, r: close - 1 };
-                out.push(parse_matrix(g, inner, depth + 1, trace, in_cancel)?);
-                col = close + 1;
+            _ if open_spec(ch).is_some() => {
+                let (node, close_col) = parse_delim(g, rect, bl, col, depth, trace, in_cancel)?;
+                out.push(node);
+                col = close_col + 1;
             }
             '│' | '√' | '∛' | '∜' => {
                 // Stem covers exactly the content rows; the radical glyph
@@ -590,22 +684,128 @@ fn parse_script_run(
     Ok(())
 }
 
-/// Column of the matching `close` for the `open` at (row, col), scanning
-/// right with depth counting (nested pairs whose top row coincides).
-fn match_on_row(g: &Grid, row: usize, col: usize, max: usize, open: char, close: char) -> Result<usize> {
-    let mut depth = 0;
-    for c in col..=max {
-        let ch = g.at(row, c);
-        if ch == open {
-            depth += 1;
-        } else if ch == close {
-            depth -= 1;
-            if depth == 0 {
-                return Ok(c);
+/// A delimiter block starting at (bl, col): left column, optional
+/// full-height │ middles, matching right column (possibly of a different
+/// family — mismatched pairs are legal). Returns the node and the close
+/// column.
+#[allow(clippy::too_many_arguments)]
+fn parse_delim(
+    g: &Grid,
+    rect: Rect,
+    bl: usize,
+    col: usize,
+    depth: usize,
+    trace: &mut Vec<RegionSpan>,
+    in_cancel: bool,
+) -> Result<(Node, usize)> {
+    let left = open_spec(g.at(bl, col)).unwrap();
+    let close_col = match_delim(g, bl, col, rect.r)?;
+    let right = close_spec(g.at(bl, close_col)).unwrap();
+    let (top, bot) = vertical_extent(g, rect, col, bl, left_family(left));
+
+    let mid_cols = if close_col > col + 1 {
+        mid_columns(g, Rect { t: top, b: bot, l: col + 1, r: close_col - 1 })
+    } else {
+        vec![]
+    };
+
+    let plain_bracket = left == '[' && right == ']' && mid_cols.is_empty();
+    let mut segs: Vec<Row> = Vec::new();
+    let mut start = col + 1;
+    for &m in mid_cols.iter().chain(std::iter::once(&close_col)) {
+        let seg = if start >= m {
+            vec![]
+        } else {
+            let rect = Rect { t: top, b: bot, l: start, r: m - 1 };
+            parse_seg(g, rect, bl, plain_bracket, depth, trace, in_cancel)?
+        };
+        segs.push(seg);
+        start = m + 1;
+    }
+    let node = Node::Delim { left, right, mids: vec!['|'; mid_cols.len()], segs };
+    Ok((node, close_col))
+}
+
+/// One delimiter segment. Inside a plain [ ] pair the interior is always a
+/// grid; elsewhere it is a grid only when the picture proves it (internal
+/// blank row, or a run of >= 3 fully blank columns — a plain row never
+/// produces more than 2).
+#[allow(clippy::too_many_arguments)]
+fn parse_seg(
+    g: &Grid,
+    rect: Rect,
+    bl: usize,
+    plain_bracket: bool,
+    depth: usize,
+    trace: &mut Vec<RegionSpan>,
+    in_cancel: bool,
+) -> Result<Row> {
+    let Some(trect) = trim(g, rect) else {
+        return Ok(vec![]);
+    };
+    let grid = plain_bracket || region_is_grid(g, trect);
+    if grid {
+        Ok(vec![parse_matrix(g, trect, depth + 1, trace, in_cancel)?])
+    } else {
+        parse_region(g, trect, Some(bl), depth + 1, trace, in_cancel)
+    }
+}
+
+/// Middle-separator columns of a delimiter interior: │ over the full
+/// extent (a √ stem never spans the extent — its top row is the overline
+/// row — and a nested delimiter's middles are bracket-protected).
+fn mid_columns(g: &Grid, interior: Rect) -> Vec<usize> {
+    let protected = protected_cols(g, interior, None);
+    interior
+        .cols()
+        .filter(|&c| {
+            interior.rows().all(|r| g.at(r, c) == '│') && !protected[c - interior.l]
+        })
+        .collect()
+}
+
+/// Does this (trimmed or untrimmed) region show grid structure: an internal
+/// fully blank row, or a run of >= 4 fully blank unprotected columns?
+/// (A plain rendered row produces at most 3 adjacent blank columns:
+/// spaced-op margin + ragged-cancel spacer + spaced-op margin.)
+fn region_is_grid(g: &Grid, rect: Rect) -> bool {
+    let Some(t) = trim(g, rect) else { return false };
+    if (t.t + 1..t.b).any(|r| row_blank(g, t, r)) {
+        return true;
+    }
+    let protected = protected_cols(g, t, None);
+    let mut run = 0usize;
+    for c in t.cols() {
+        if col_blank(g, t, c) && !protected[c - t.l] {
+            run += 1;
+            if run >= 4 {
+                return true;
             }
+        } else {
+            run = 0;
         }
     }
-    err(format!("unmatched {}", open), row, col)
+    false
+}
+
+/// Column of the structurally matching close delimiter for the open one at
+/// (row, col): depth counting over every side-distinct delimiter glyph, so
+/// mismatched pairs like ( … ] pair up too.
+fn match_delim(g: &Grid, row: usize, col: usize, max: usize) -> Result<usize> {
+    let mut depth = 0;
+    for c in col..=max {
+        match delim_side(g, row, c) {
+            Some(false) => {
+                depth -= 1;
+                if depth == 0 {
+                    return Ok(c);
+                }
+            }
+            Some(true) => depth += 1,
+            None => {}
+        }
+    }
+    err(format!("unmatched {}", g.at(row, col)), row, col)
 }
 
 /// Contiguous vertical run of `chars` through (bl, col).
@@ -621,13 +821,13 @@ fn vertical_extent(g: &Grid, rect: Rect, col: usize, bl: usize, chars: &[char]) 
     (top, bot)
 }
 
-/// Split the interior of a matrix into cells.
+/// Split a grid region into Array cells.
 /// Row separators: fully blank rows. Column separators: runs of >= 2 fully
 /// blank, unprotected columns (see `protected_cols`).
 fn parse_matrix(g: &Grid, inner: Rect, depth: usize, trace: &mut Vec<RegionSpan>, in_cancel: bool) -> Result<Node> {
     let inner = match trim(g, inner) {
         Some(r) => r,
-        None => return err("empty matrix", inner.t, inner.l),
+        None => return err("empty grid", inner.t, inner.l),
     };
 
     let mut row_segs: Vec<(usize, usize)> = Vec::new();
@@ -676,7 +876,7 @@ fn parse_matrix(g: &Grid, inner: Rect, depth: usize, trace: &mut Vec<RegionSpan>
 
     let (rows, cols) = (row_segs.len(), col_segs.len());
     if rows == 0 || cols == 0 {
-        return err("matrix with no cells", inner.t, inner.l);
+        return err("grid with no cells", inner.t, inner.l);
     }
     let mut cells = Vec::with_capacity(rows * cols);
     for &(rt, rb) in &row_segs {
@@ -684,7 +884,7 @@ fn parse_matrix(g: &Grid, inner: Rect, depth: usize, trace: &mut Vec<RegionSpan>
             cells.push(parse_region(g, Rect { t: rt, b: rb, l: cl, r: cr }, None, depth, trace, in_cancel)?);
         }
     }
-    Ok(Node::Matrix { rows, cols, cells })
+    Ok(Node::Array { rows, cols, cells })
 }
 
 /// Parse a formula from its AA text form.
@@ -804,12 +1004,22 @@ mod tests {
         roundtrip(&vec![Node::Accent { accent: '^', base: 'x' }]);
         roundtrip(&vec![Node::Accent { accent: '‗', base: 'y' }]);
         roundtrip(&vec![Node::Func("sin".into()), Node::Sym('x')]);
-        roundtrip(&vec![Node::Matrix {
-            rows: 2,
-            cols: 2,
-            cells: vec![syms("a"), syms("b+1"), vec![], syms("d")],
+        roundtrip(&vec![Node::Delim {
+            left: '[',
+            right: ']',
+            mids: vec![],
+            segs: vec![vec![Node::Array {
+                rows: 2,
+                cols: 2,
+                cells: vec![syms("a"), syms("b+1"), vec![], syms("d")],
+            }]],
         }]);
-        roundtrip(&vec![Node::Paren { inner: syms("a+b") }]);
+        roundtrip(&vec![Node::Delim {
+            left: '(',
+            right: ')',
+            mids: vec![],
+            segs: vec![syms("a+b")],
+        }]);
         roundtrip(&vec![Node::BigOp { op: '∑', lower: syms("i=0"), upper: syms("n") }]);
         roundtrip(&vec![Node::BigOp { op: '∫', lower: vec![], upper: vec![] }]);
     }

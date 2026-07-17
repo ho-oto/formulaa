@@ -498,28 +498,41 @@ fn render_node(
             Block { lines, baseline, cancel }
         }
 
-        Node::Paren { inner } => {
-            let a = render_row(inner, cur(Field::ParenInner), true, ctx);
-            let h = a.height().max(1);
+        Node::Delim { left, right, mids: _, segs } => {
+            // Segments render as ordinary rows (an Array node inside is a
+            // grid body); 1-column gaps between them become full-height │
+            // middles after concatenation.
+            let mut parts: Vec<Block> = Vec::with_capacity(segs.len() * 2);
+            for (k, seg) in segs.iter().enumerate() {
+                if k > 0 {
+                    parts.push(Block::from_chars(vec![' ']));
+                }
+                parts.push(render_row(seg, cur(Field::Seg(k)), true, ctx));
+            }
+            let mut body = hcat(&parts);
+            let mut x = 0;
+            for (k, b) in parts.iter().enumerate() {
+                if k % 2 == 1 {
+                    for line in body.lines.iter_mut() {
+                        line[x] = '│';
+                    }
+                }
+                x += b.width();
+            }
+            let h = body.height().max(1);
+            let bl = body.baseline.min(h - 1);
+            let lcol = delim_column(*left, true, h, bl);
+            let rcol = delim_column(*right, false, h, bl);
             let mut lines = Vec::with_capacity(h);
-            for (r, line) in a.lines.iter().enumerate() {
-                let (lc, rc) = if h == 1 {
-                    ('(', ')')
-                } else if r == 0 {
-                    ('⎛', '⎞')
-                } else if r == h - 1 {
-                    ('⎝', '⎠')
-                } else {
-                    ('⎜', '⎟')
-                };
-                let mut row = Vec::with_capacity(a.width() + 2);
-                row.push(lc);
+            for (r, line) in body.lines.iter().enumerate() {
+                let mut row = Vec::with_capacity(body.width() + 2);
+                row.push(lcol[r]);
                 row.extend_from_slice(line);
-                row.push(rc);
+                row.push(rcol[r]);
                 lines.push(row);
             }
-            let cancel = a.cancel.iter().map(|&(r, c)| (r, c + 1)).collect();
-            Block { lines, baseline: a.baseline, cancel }
+            let cancel = body.cancel.iter().map(|&(r, c)| (r, c + 1)).collect();
+            Block { lines, baseline: body.baseline, cancel }
         }
 
         Node::Cancel { arg } => {
@@ -536,13 +549,101 @@ fn render_node(
             Block { lines: a.lines, baseline: a.baseline, cancel }
         }
 
-        Node::Matrix { rows, cols, cells } => {
-            render_matrix(*rows, *cols, cells, cursor, ctx)
+        Node::Array { rows, cols, cells } => {
+            render_array(*rows, *cols, cells, cursor, ctx)
         }
     }
 }
 
-fn render_matrix(
+/// One rendered column of a delimiter. `spec` is the delimiter spec char,
+/// `bl` the baseline row of the body being wrapped. Vertex glyphs (⎨ ⎬ ⟨ ⟩)
+/// always sit on the baseline row — that is what lets the parser read the
+/// baseline straight off a brace/angle column.
+fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
+    if h == 1 {
+        return vec![match spec {
+            '|' => {
+                if left {
+                    '⎸'
+                } else {
+                    '⎹'
+                }
+            }
+            '.' => {
+                if left {
+                    '▏'
+                } else {
+                    '▕'
+                }
+            }
+            c => c,
+        }];
+    }
+    (0..h)
+        .map(|r| match spec {
+            '(' | ')' | '[' | ']' => {
+                let (top, ext, bot) = match spec {
+                    '(' => ('⎛', '⎜', '⎝'),
+                    ')' => ('⎞', '⎟', '⎠'),
+                    '[' => ('⎡', '⎢', '⎣'),
+                    _ => ('⎤', '⎥', '⎦'),
+                };
+                if r == 0 {
+                    top
+                } else if r == h - 1 {
+                    bot
+                } else {
+                    ext
+                }
+            }
+            '{' | '}' => {
+                let (top, mid, bot) = if spec == '{' { ('⎧', '⎨', '⎩') } else { ('⎫', '⎬', '⎭') };
+                if r == bl {
+                    mid
+                } else if r == 0 {
+                    top
+                } else if r == h - 1 {
+                    bot
+                } else {
+                    '⎪'
+                }
+            }
+            '⟨' => match r.cmp(&bl) {
+                std::cmp::Ordering::Equal => '⟨',
+                std::cmp::Ordering::Less => '╱',
+                std::cmp::Ordering::Greater => '╲',
+            },
+            '⟩' => match r.cmp(&bl) {
+                std::cmp::Ordering::Equal => '⟩',
+                std::cmp::Ordering::Less => '╲',
+                std::cmp::Ordering::Greater => '╱',
+            },
+            '|' => {
+                if left {
+                    '⎸'
+                } else {
+                    '⎹'
+                }
+            }
+            _ => {
+                if left {
+                    '▏'
+                } else {
+                    '▕'
+                }
+            }
+        })
+        .collect()
+}
+
+/// Bare grid body (no delimiters — the enclosing Delim draws those).
+/// Cells are compact, centered per column, baseline-aligned per row.
+/// Column separator: 2 blank columns, or 4 for a single-row grid (a plain
+/// row can produce up to 3 adjacent blank columns — spaced-op margin +
+/// ragged-cancel spacer + spaced-op margin — so >= 4 is what lets the
+/// parser recognize a one-row grid inside a non-[ ] delimiter).
+/// Row separator: exactly one blank line.
+fn render_array(
     rows: usize,
     cols: usize,
     cells: &[Row],
@@ -566,9 +667,8 @@ fn render_matrix(
         .map(|j| (0..rows).map(|i| blocks[i * cols + j].width()).max().unwrap_or(1))
         .collect();
 
-    // Each grid row: cells centered in their column, baseline-aligned,
-    // separated by exactly two blank columns (the column-separator rule).
-    let gap = Block::new(vec![vec![' ', ' ']], 0);
+    let gap_w = if rows == 1 { 4 } else { 2 };
+    let gap = Block::new(vec![vec![' '; gap_w]], 0);
     let mut body: Vec<Vec<char>> = Vec::new();
     let mut cancel: Vec<(usize, usize)> = Vec::new();
     for i in 0..rows {
@@ -587,44 +687,22 @@ fn render_matrix(
         }
         let row_block = hcat(&parts);
         if i > 0 {
-            // Exactly one blank line separates grid rows (row-separator rule).
             body.push(vec![' '; row_block.width()]);
         }
         let row_off = body.len();
         cancel.extend(row_block.cancel.iter().map(|&(r, c)| (r + row_off, c)));
         body.extend(row_block.lines);
     }
-    let w = body.iter().map(|l| l.len()).max().unwrap_or(0);
+    let w = body.iter().map(|l| l.len()).max().unwrap_or(1);
     for l in &mut body {
         l.resize(w, ' ');
     }
-
-    // Bracket columns shift content one column right.
-    let cancel: Vec<(usize, usize)> = cancel.into_iter().map(|(r, c)| (r, c + 1)).collect();
-    let h = body.len().max(1);
-    if h == 1 {
-        let mut row = vec!['['];
-        row.extend(body.into_iter().next().unwrap_or_default());
-        row.push(']');
-        return Block { lines: vec![row], baseline: 0, cancel };
+    if body.is_empty() {
+        body.push(vec![' '; w]);
     }
-    let mut lines = Vec::with_capacity(h);
-    for (r, line) in body.into_iter().enumerate() {
-        let (lc, rc) = if r == 0 {
-            ('⎡', '⎤')
-        } else if r == h - 1 {
-            ('⎣', '⎦')
-        } else {
-            ('⎢', '⎥')
-        };
-        let mut row = Vec::with_capacity(w + 2);
-        row.push(lc);
-        row.extend(line);
-        row.push(rc);
-        lines.push(row);
-    }
-    // Matches the parser: baseline of a matrix is its vertical center.
-    Block { lines, baseline: (h - 1) / 2, cancel }
+    let h = body.len();
+    // Matches the parser: baseline of a grid is its vertical center.
+    Block { lines: body, baseline: (h - 1) / 2, cancel }
 }
 
 #[cfg(test)]
@@ -686,12 +764,49 @@ mod tests {
 
     #[test]
     fn matrix_2x2() {
-        let root = vec![Node::Matrix {
-            rows: 2,
-            cols: 2,
-            cells: vec![sym_row("a"), sym_row("b"), sym_row("c"), sym_row("d")],
+        let root = vec![Node::Delim {
+            left: '[',
+            right: ']',
+            mids: vec![],
+            segs: vec![vec![Node::Array {
+                rows: 2,
+                cols: 2,
+                cells: vec![sym_row("a"), sym_row("b"), sym_row("c"), sym_row("d")],
+            }]],
         }];
         assert_eq!(plain(&root), vec!["⎡a  b⎤", "⎢    ⎥", "⎣c  d⎦"]);
+    }
+
+    #[test]
+    fn delim_families_render() {
+        // {x} with a tall fraction: brace vertex ⎨ on the baseline row.
+        let root = vec![Node::Delim {
+            left: '{',
+            right: '}',
+            mids: vec![],
+            segs: vec![vec![Node::Frac { num: sym_row("1"), den: sym_row("2") }]],
+        }];
+        assert_eq!(plain(&root), vec!["⎧ 1 ⎫", "⎨───⎬", "⎩ 2 ⎭"]);
+        // ⟨x|y⟩ single-line braket.
+        let root = vec![Node::Delim {
+            left: '⟨',
+            right: '⟩',
+            mids: vec!['|'],
+            segs: vec![sym_row("x"), sym_row("y")],
+        }];
+        assert_eq!(plain(&root), vec!["⟨x│y⟩"]);
+        // Bare 1×2 array: null-delimiter markers, 4-blank column gap.
+        let root = vec![Node::Delim {
+            left: '.',
+            right: '.',
+            mids: vec![],
+            segs: vec![vec![Node::Array {
+                rows: 1,
+                cols: 2,
+                cells: vec![sym_row("a"), sym_row("b")],
+            }]],
+        }];
+        assert_eq!(plain(&root), vec!["▏a    b▕"]);
     }
 
     #[test]
