@@ -303,6 +303,8 @@ fn handle_key(
         }
         KeyCode::Char(']') => ed.close_bracket(),
         KeyCode::Tab => ed.exit_inset(),
+        // Enter inside a grid: new row below (like LyX table editing).
+        KeyCode::Enter => ed.add_row(),
         // Space is content: an explicit visible ␣ atom (Tab leaves insets).
         KeyCode::Char(' ') => {
             ed.select_anchor = None;

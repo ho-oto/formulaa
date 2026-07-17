@@ -210,6 +210,7 @@ impl MasciiEditor {
             "[" => ed.message = "[ ] are reserved for matrices; use \\matrix".into(),
             "]" => ed.close_bracket(),
             "Tab" => ed.exit_inset(),
+            "Enter" => ed.add_row(),
             " " => {
                 ed.select_anchor = None;
                 ed.insert_sym('␣');

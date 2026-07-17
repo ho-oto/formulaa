@@ -292,6 +292,91 @@ impl Editor {
         self.col = 0;
     }
 
+    /// Innermost enclosing Array: (path index, node index, cell index).
+    fn enclosing_array(&self) -> Option<(usize, usize, usize)> {
+        self.path
+            .iter()
+            .rposition(|&(_, f)| matches!(f, Field::Cell(_)))
+            .map(|k| {
+                let (i, Field::Cell(c)) = self.path[k] else { unreachable!() };
+                (k, i, c)
+            })
+    }
+
+    /// Grid editing. `MutOp` computes (new rows, new cols, new cells, new
+    /// cursor cell) from the current grid and cursor cell.
+    fn edit_array(
+        &mut self,
+        op: impl FnOnce(usize, usize, &mut Vec<Row>, usize) -> Option<(usize, usize, usize)>,
+    ) {
+        let Some((k, i, c)) = self.enclosing_array() else {
+            self.message = "not inside a matrix/array".into();
+            return;
+        };
+        let parent_path = self.path[..k].to_vec();
+        let Node::Array { rows, cols, cells } = &mut row_at_mut(&mut self.root, &parent_path)[i]
+        else {
+            unreachable!()
+        };
+        let Some((nr, nc, ncell)) = op(*rows, *cols, cells, c) else {
+            self.message = "cannot remove the last row/column".into();
+            return;
+        };
+        *rows = nr;
+        *cols = nc;
+        self.path.truncate(k);
+        self.path.push((i, Field::Cell(ncell)));
+        self.col = 0;
+    }
+
+    /// Insert an empty row below the cursor's row (Enter inside a grid).
+    pub fn add_row(&mut self) {
+        self.edit_array(|rows, cols, cells, c| {
+            let r = c / cols;
+            for j in 0..cols {
+                cells.insert((r + 1) * cols + j, vec![]);
+            }
+            Some((rows + 1, cols, (r + 1) * cols + c % cols))
+        });
+    }
+
+    /// Insert an empty column right of the cursor's column.
+    pub fn add_col(&mut self) {
+        self.edit_array(|rows, cols, cells, c| {
+            let j = c % cols;
+            for r in (0..rows).rev() {
+                cells.insert(r * cols + j + 1, vec![]);
+            }
+            Some((rows, cols + 1, (c / cols) * (cols + 1) + j + 1))
+        });
+    }
+
+    /// Delete the cursor's row (unless it is the only one).
+    pub fn del_row(&mut self) {
+        self.edit_array(|rows, cols, cells, c| {
+            if rows == 1 {
+                return None;
+            }
+            let r = c / cols;
+            cells.drain(r * cols..(r + 1) * cols);
+            Some((rows - 1, cols, r.min(rows - 2) * cols + c % cols))
+        });
+    }
+
+    /// Delete the cursor's column (unless it is the only one).
+    pub fn del_col(&mut self) {
+        self.edit_array(|rows, cols, cells, c| {
+            if cols == 1 {
+                return None;
+            }
+            let j = c % cols;
+            for r in (0..rows).rev() {
+                cells.remove(r * cols + j);
+            }
+            Some((rows, cols - 1, (c / cols) * (cols - 1) + j.min(cols - 2)))
+        });
+    }
+
     /// `\mid`: split the current Delim segment at the cursor, inserting a
     /// │ middle; the cursor lands at the start of the new segment.
     pub fn insert_mid(&mut self) {
@@ -521,6 +606,10 @@ impl Editor {
             "braket" => self.insert_delim('⟨', '⟩', vec!['|']),
             "set" => self.insert_delim('{', '}', vec!['|']),
             "mid" => self.insert_mid(),
+            "addrow" => self.add_row(),
+            "addcol" => self.add_col(),
+            "delrow" => self.del_row(),
+            "delcol" => self.del_col(),
             _ if cmd.starts_with("delim") && cmd.len() > "delim".len() => {
                 // \delim<spec chars>: left, right, then middles, e.g.
                 // \delim(] or \delim{}| or \delim.. ; < > alias ⟨ ⟩.
@@ -722,6 +811,31 @@ mod tests {
         assert!(ed.path.is_empty());
         assert_eq!(ed.col, 1);
         assert_eq!(row_to_latex(&ed.root), "\\left(x\\right)");
+    }
+
+    #[test]
+    fn grid_row_col_editing() {
+        let mut ed = Editor::new();
+        ed.execute("matrix"); // 2x2, cursor in cell 0
+        ed.insert_sym('a');
+        ed.execute("addcol"); // now 2x3, cursor in new empty cell (0,1)
+        ed.insert_sym('x');
+        ed.execute("addrow"); // 3x3, cursor at (1,1)
+        ed.insert_sym('y');
+        assert_eq!(
+            row_to_latex(&ed.root),
+            "\\begin{bmatrix} a & x &  \\\\  & y &  \\\\  &  &  \\end{bmatrix}"
+        );
+        ed.execute("delcol"); // drop middle column, cursor stays in row 1
+        ed.execute("delrow");
+        assert_eq!(
+            row_to_latex(&ed.root),
+            "\\begin{bmatrix} a &  \\\\  &  \\end{bmatrix}"
+        );
+        // Deleting down to a single row/col is refused.
+        ed.execute("delrow");
+        ed.execute("delrow");
+        assert_eq!(ed.message, "cannot remove the last row/column");
     }
 
     #[test]
