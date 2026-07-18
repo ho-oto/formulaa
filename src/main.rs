@@ -15,7 +15,7 @@ use mascii::editor::{
 };
 use mascii::{ast, latex, parse, typst};
 
-const HELP: &str = "\\cmd  ^/_ ( ) insets  Tab exit  Space ␣  ←→↑↓ move  ⇧←→ select  ^G jump  ^B blocks  ^O structure  ^T italic  ^S save  ^Q quit";
+const HELP: &str = "\\cmd  ^/_ ( ) insets  Tab exit  Space ␣  ←→↑↓ move  ⇧←→ select  ^G jump  ^B blocks  ^O structure  ^T italic  ^Y copy AA  ^S save  ^Q quit";
 
 const USAGE: &str = "\
 usage: mascii [SAVE_PATH]          interactive TUI editor (default: formula.tex)
@@ -85,6 +85,37 @@ fn convert(mode: &str, file: Option<&str>) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Pipe `text` into the first available system clipboard command.
+fn copy_to_clipboard(text: &str) -> Result<&'static str, String> {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+    const CANDIDATES: &[(&str, &[&str])] = &[
+        ("pbcopy", &[]),
+        ("wl-copy", &[]),
+        ("xclip", &["-selection", "clipboard"]),
+        ("xsel", &["--clipboard", "--input"]),
+        ("clip.exe", &[]),
+    ];
+    for &(cmd, args) in CANDIDATES {
+        let child = Command::new(cmd)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        let Ok(mut child) = child else { continue };
+        let ok = child
+            .stdin
+            .take()
+            .map(|mut i| i.write_all(text.as_bytes()).is_ok())
+            .unwrap_or(false);
+        if child.wait().map(|s| s.success()).unwrap_or(false) && ok {
+            return Ok(cmd);
+        }
+    }
+    Err("no clipboard command found (pbcopy / wl-copy / xclip / xsel)".into())
 }
 
 /// Live roundtrip checker: after every edit, re-parse the canonical AA of
@@ -221,6 +252,15 @@ fn handle_key(
                 match fs::write(save_path, format!("{}\n", tex)) {
                     Ok(()) => ed.message = format!("saved LaTeX to {}", save_path),
                     Err(e) => ed.message = format!("save failed: {}", e),
+                }
+            }
+            // Yank: canonical AA to the system clipboard.
+            KeyCode::Char('y') => {
+                let row = ast::normalize(&ed.root);
+                let aa = render_row(&row, None, false, &RenderCtx::canonical()).to_text();
+                match copy_to_clipboard(&aa) {
+                    Ok(cmd) => ed.message = format!("copied AA to clipboard ({})", cmd),
+                    Err(e) => ed.message = format!("copy failed: {}", e),
                 }
             }
             _ => {}
