@@ -36,9 +36,14 @@ fn node_to_latex(node: &Node) -> String {
                 format!("\\operatorname{{{}}}", name)
             }
         }
-        Node::Accent { accent, base } => {
-            let cmd = accent_info(*accent).map(|(_, l)| l).unwrap_or("hat");
-            format!("\\{}{{{}}}", cmd, sym_to_latex(*base).trim_end())
+        Node::Accent { overs, unders, base } => {
+            // Canonical nesting: under-marks innermost, then over-marks.
+            let mut s = sym_to_latex(*base).trim_end().to_string();
+            for &m in unders.iter().chain(overs.iter()) {
+                let cmd = accent_info(m).map(|(_, l)| l).unwrap_or("hat");
+                s = format!("\\{}{{{}}}", cmd, s);
+            }
+            s
         }
         Node::Frac { num, den } => format!("\\frac{}{}", braced(num), braced(den)),
         Node::Sqrt { arg, index } => match index {
@@ -153,7 +158,7 @@ mod tests {
     fn serializes_matrix_func_accent() {
         let root = vec![
             Node::Func("sin".into()),
-            Node::Accent { accent: '⇀', base: 'v' },
+            Node::Accent { overs: vec!['⇀'], unders: vec![], base: 'v' },
             Node::Delim {
                 left: '[',
                 right: ']',

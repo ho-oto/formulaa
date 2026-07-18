@@ -64,8 +64,12 @@ fn node_to_typst(node: &Node) -> String {
             c => c.to_string(),
         },
         Node::Func(name) => name.clone(),
-        Node::Accent { accent, base } => {
-            format!("{}({})", accent_fn(*accent), base)
+        Node::Accent { overs, unders, base } => {
+            let mut s = base.to_string();
+            for &m in unders.iter().chain(overs.iter()) {
+                s = format!("{}({})", accent_fn(m), s);
+            }
+            s
         }
         Node::Frac { num, den } => format!("{}/{}", grouped(num), grouped(den)),
         Node::Sqrt { arg, index } => match index {

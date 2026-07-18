@@ -62,7 +62,11 @@ fn func(name: &str) -> Node {
 }
 
 fn acc(accent: char, base: char) -> Node {
-    Node::Accent { accent, base }
+    if mascii::symbols::is_under_mark(accent) {
+        Node::Accent { overs: vec![], unders: vec![accent], base }
+    } else {
+        Node::Accent { overs: vec![accent], unders: vec![], base }
+    }
 }
 
 fn array(rows: usize, cols: usize, cells: Vec<Row>) -> Node {
@@ -491,6 +495,24 @@ fn explicit_space_atoms() {
     roundtrip("space-in-matrix", &row);
 }
 
+/// Stacked accents: marks pile outward above/below one base.
+#[test]
+fn stacked_accents() {
+    // \hat{\vec{a}} and a bar over an underlined x.
+    let row = cat(&[
+        n(Node::Accent { overs: vec!['⇀', '^'], unders: vec![], base: 'a' }),
+        s("+"),
+        n(Node::Accent { overs: vec!['¯'], unders: vec!['‗'], base: 'x' }),
+    ]);
+    roundtrip("stacked-accents", &row);
+    // Triple stack next to a fraction (baseline stripping goes deep).
+    let row = cat(&[
+        n(Node::Accent { overs: vec!['˙', '¯', '^'], unders: vec![], base: 'v' }),
+        n(frac(s("1"), s("2"))),
+    ]);
+    roundtrip("triple-accent", &row);
+}
+
 /// Formatting spacers: blank columns in the AA that vanish on reparse.
 #[test]
 fn formatting_spacers() {
@@ -593,10 +615,17 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
     if !structural {
         return match rng.below(10) {
             0 => Node::Func(["sin", "cos", "log", "exp"][rng.below(4)].into()),
-            1 => Node::Accent {
-                accent: ['^', '¯', '˙', '⇀', '˜', '‗'][rng.below(6)],
-                base: ['x', 'v', 'a', 'E'][rng.below(4)],
-            },
+            1 => {
+                // 1–2 marks, mixing over and under stacks.
+                let marks = ['^', '¯', '˙', '⇀', '˜', '‗'];
+                let base = ['x', 'v', 'a', 'E'][rng.below(4)];
+                let (mut overs, mut unders) = (vec![], vec![]);
+                for _ in 0..1 + rng.below(2) {
+                    let m = marks[rng.below(marks.len())];
+                    if m == '‗' { unders.push(m) } else { overs.push(m) }
+                }
+                Node::Accent { overs, unders, base }
+            }
             2 => Node::Spacer,
             _ => Node::Sym(ATOMS[rng.below(ATOMS.len())]),
         };

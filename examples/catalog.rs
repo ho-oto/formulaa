@@ -52,7 +52,11 @@ fn func(name: &str) -> Node {
 }
 
 fn acc(accent: char, base: char) -> Node {
-    Node::Accent { accent, base }
+    if mascii::symbols::is_under_mark(accent) {
+        Node::Accent { overs: vec![], unders: vec![accent], base }
+    } else {
+        Node::Accent { overs: vec![accent], unders: vec![], base }
+    }
 }
 
 fn mat(rows: usize, cols: usize, cells: Vec<Row>) -> Node {

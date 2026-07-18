@@ -542,16 +542,11 @@ fn parse_region(
                     col = run_end + 1;
                 } else {
                     // Same accent probe as ordinary atoms.
-                    let over = bl > rect.t && is_over_mark(g.at(bl - 1, col));
-                    let under = bl < rect.b && is_under_mark(g.at(bl + 1, col));
-                    if over && under {
-                        return err("stacked accents are not supported", bl, col);
-                    } else if over {
-                        out.push(Node::Accent { accent: g.at(bl - 1, col), base: '~' });
-                    } else if under {
-                        out.push(Node::Accent { accent: g.at(bl + 1, col), base: '~' });
-                    } else {
+                    let (overs, unders) = accent_stacks(g, rect, bl, col);
+                    if overs.is_empty() && unders.is_empty() {
                         out.push(Node::Sym('~'));
+                    } else {
+                        out.push(Node::Accent { overs, unders, base: '~' });
                     }
                     col += 1;
                 }
@@ -627,17 +622,12 @@ fn parse_region(
                 col = run_end + 1;
             }
             _ => {
-                // A mark in the cell directly above (or below) an atom is
-                // an accent; those cells are otherwise always blank.
-                let over = bl > rect.t && is_over_mark(g.at(bl - 1, col));
-                let under = bl < rect.b && is_under_mark(g.at(bl + 1, col));
+                // Marks in the cells directly above/below an atom are an
+                // accent stack; those cells are otherwise always blank.
+                let (overs, unders) = accent_stacks(g, rect, bl, col);
                 let base = unstyle_char(ch);
-                if over && under {
-                    return err("stacked accents are not supported", bl, col);
-                } else if over {
-                    out.push(Node::Accent { accent: g.at(bl - 1, col), base });
-                } else if under {
-                    out.push(Node::Accent { accent: g.at(bl + 1, col), base });
+                if !overs.is_empty() || !unders.is_empty() {
+                    out.push(Node::Accent { overs, unders, base });
                 } else if bigop_by_char(ch) {
                     // A bare big operator is a BigOp with empty limits.
                     out.push(Node::BigOp { op: ch, lower: vec![], upper: vec![] });
@@ -746,6 +736,24 @@ fn parse_script_run(
         out.push(if is_sup { Node::Sup { arg } } else { Node::Sub { arg } });
     }
     Ok(())
+}
+
+/// Accent-mark stacks in the cells directly above/below (bl, col),
+/// innermost first. Returns (overs, unders).
+fn accent_stacks(g: &Grid, rect: Rect, bl: usize, col: usize) -> (Vec<char>, Vec<char>) {
+    let mut overs = Vec::new();
+    let mut r = bl;
+    while r > rect.t && is_over_mark(g.at(r - 1, col)) {
+        overs.push(g.at(r - 1, col));
+        r -= 1;
+    }
+    let mut unders = Vec::new();
+    let mut r = bl;
+    while r < rect.b && is_under_mark(g.at(r + 1, col)) {
+        unders.push(g.at(r + 1, col));
+        r += 1;
+    }
+    (overs, unders)
 }
 
 /// A grid lattice whose leftmost marker column is `col`: box-drawing
@@ -1109,8 +1117,8 @@ mod tests {
         roundtrip(&vec![Node::Frac { num: syms("1"), den: syms("x+1") }]);
         roundtrip(&vec![Node::Sqrt { arg: syms("2"), index: 2 }]);
         roundtrip(&vec![Node::Sqrt { arg: syms("x+1"), index: 3 }]);
-        roundtrip(&vec![Node::Accent { accent: '^', base: 'x' }]);
-        roundtrip(&vec![Node::Accent { accent: '‗', base: 'y' }]);
+        roundtrip(&vec![Node::Accent { overs: vec!['^'], unders: vec![], base: 'x' }]);
+        roundtrip(&vec![Node::Accent { overs: vec![], unders: vec!['‗'], base: 'y' }]);
         roundtrip(&vec![Node::Func("sin".into()), Node::Sym('x')]);
         roundtrip(&vec![Node::Delim {
             left: '[',
@@ -1154,7 +1162,7 @@ mod tests {
         assert_eq!(parse("a ~ b").unwrap(), syms("a~b"));
         // A literal ~ still takes accents.
         let row = parse("^\n~").unwrap();
-        assert_eq!(row, vec![Node::Accent { accent: '^', base: '~' }]);
+        assert_eq!(row, vec![Node::Accent { overs: vec!['^'], unders: vec![], base: '~' }]);
     }
 
     #[test]

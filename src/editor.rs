@@ -451,9 +451,17 @@ impl Editor {
         }
         let col = self.col;
         let row = self.cur_row_mut();
-        match &row[col - 1] {
-            Node::Sym(c) => row[col - 1] = Node::Accent { accent: mark, base: *c },
-            Node::Accent { .. } => self.message = "stacked accents are not supported".into(),
+        let under = crate::symbols::is_under_mark(mark);
+        match &mut row[col - 1] {
+            Node::Sym(c) => {
+                let (mut overs, mut unders) = (vec![], vec![]);
+                if under { unders.push(mark) } else { overs.push(mark) }
+                row[col - 1] = Node::Accent { overs, unders, base: *c };
+            }
+            // Applying another accent stacks it outside the existing ones.
+            Node::Accent { overs, unders, .. } => {
+                if under { unders.push(mark) } else { overs.push(mark) }
+            }
             _ => self.message = "accents apply to a single character".into(),
         }
     }
@@ -868,6 +876,16 @@ mod tests {
         assert!(ed.path.is_empty());
         assert_eq!(ed.col, 1);
         assert_eq!(row_to_latex(&ed.root), "\\left(x\\right)");
+    }
+
+    #[test]
+    fn accent_stacking() {
+        let mut ed = Editor::new();
+        ed.insert_sym('a');
+        ed.execute("vec");
+        ed.execute("hat");
+        ed.execute("underline");
+        assert_eq!(row_to_latex(&ed.root), "\\hat{\\vec{\\underline{a}}}");
     }
 
     #[test]

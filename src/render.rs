@@ -407,17 +407,16 @@ fn render_node(
         // render math-italic), which is what makes them parseable.
         Node::Func(name) => Block::from_chars(name.chars().collect()),
 
-        // Mark in the cell directly above (or below) the base. That cell is
-        // never used by anything else (scripts go up-right, limits live
-        // inside their band), so a one-cell probe parses it back.
-        Node::Accent { accent, base } => {
+        // Marks in the cells directly above/below the base, stacking
+        // outward (innermost first in each list). Those cells are never
+        // used by anything else (scripts go up-right, limits live inside
+        // their band), so a column probe parses the stack back.
+        Node::Accent { overs, unders, base } => {
             let b = display_char(*base, ctx);
-            let mark = *accent;
-            if crate::symbols::is_under_mark(*accent) {
-                Block::new(vec![vec![b], vec![mark]], 0)
-            } else {
-                Block::new(vec![vec![mark], vec![b]], 1)
-            }
+            let mut lines: Vec<Vec<char>> = overs.iter().rev().map(|&m| vec![m]).collect();
+            lines.push(vec![b]);
+            lines.extend(unders.iter().map(|&m| vec![m]));
+            Block::new(lines, overs.len())
         }
 
         Node::Frac { num, den } => {

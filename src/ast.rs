@@ -18,9 +18,12 @@ pub enum Node {
     /// Named function/operator rendered upright (sin, cos, log, ...).
     /// Only names from `symbols::FUNCS` are valid (parse relies on this).
     Func(String),
-    /// Accent over a single base character (x̂ ẋ v̄ a⃗ …), typeset as a
-    /// 2D mark in the cell directly above the base.
-    Accent { accent: char, base: char },
+    /// Accented base character (x̂ ẋ v̄ a⃗ …): over-marks stack upward and
+    /// under-marks downward in the cells directly above/below the base,
+    /// innermost first. Flat lists (not nesting) are deliberate: the
+    /// picture cannot distinguish \hat{\underline{x}} from
+    /// \underline{\hat{x}}, so the AST must not either.
+    Accent { overs: Vec<char>, unders: Vec<char>, base: char },
     Frac { num: Row, den: Row },
     /// index 2 = √, 3 = ∛, 4 = ∜ (the only radical glyphs Unicode has).
     Sqrt { arg: Row, index: u8 },
@@ -313,6 +316,11 @@ fn normalize_node(node: &Node) -> Node {
             // A bare big-operator symbol is the same picture as a BigOp
             // with empty limits; canonical form uses the BigOp node.
             Node::BigOp { op: *c, lower: vec![], upper: vec![] }
+        }
+        // A markless accent is just its base.
+        Node::Accent { overs, unders, base } if overs.is_empty() && unders.is_empty() => {
+            let _ = (overs, unders);
+            Node::Sym(*base)
         }
         Node::Sym(_) | Node::Spacer | Node::Func(_) | Node::Accent { .. } => node.clone(),
         Node::Frac { num, den } => Node::Frac { num: normalize(num), den: normalize(den) },
