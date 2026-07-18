@@ -88,6 +88,19 @@ fn node_to_typst(node: &Node) -> String {
             }
             s
         }
+        Node::Text(t) => format!("\"{}\"", t),
+        Node::Arrow { op, over, under } => {
+            let head = if *op == '←' { "<-" } else { "->" };
+            let mut s = format!("attach(stretch({})", head);
+            if !over.is_empty() {
+                s.push_str(&format!(", t: ({})", row_to_typst(over)));
+            }
+            if !under.is_empty() {
+                s.push_str(&format!(", b: ({})", row_to_typst(under)));
+            }
+            s.push(')');
+            s
+        }
         Node::Delim { left, right, mids, segs } => {
             if mids.is_empty() {
                 if let [seg] = &segs[..] {

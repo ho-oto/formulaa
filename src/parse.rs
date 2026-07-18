@@ -12,8 +12,8 @@
 
 use crate::ast::{Node, Row};
 use crate::render::{
-    lattice_char, unstyle_char, unsubscript_char, unsuperscript_char, FRAC_BAR, OP_BAND,
-    PLACEHOLDER,
+    lattice_char, unstyle_char, unsubscript_char, unsuperscript_char, ARROW_BODY, FRAC_BAR,
+    OP_BAND, PLACEHOLDER,
 };
 
 /// Left-edge glyphs of a grid lattice column (see render::LATTICE_CHARS).
@@ -265,7 +265,7 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
     // lenient hand-written band char (see parse_region).
     if let Some(&r) = occupied
         .iter()
-        .find(|&&r| matches!(g.at(r, c), FRAC_BAR | OP_BAND | '~'))
+        .find(|&&r| matches!(g.at(r, c), FRAC_BAR | OP_BAND | ARROW_BODY | '~'))
     {
         return Ok(r);
     }
@@ -506,6 +506,53 @@ fn parse_region(
                     .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
                 out.push(Node::BigOp { op, lower, upper });
                 col = run_end + 1;
+            }
+            _ if ch == ARROW_BODY => {
+                // Right-pointing labeled arrow: ╌ body, → head at the end.
+                let run_end = scan_while(g, bl, col, rect.r, |c| c == ARROW_BODY);
+                if run_end == rect.r || g.at(bl, run_end + 1) != '→' {
+                    return err("arrow body without a → head", bl, col);
+                }
+                let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end + 1 };
+                let over = region_above(span, bl)
+                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
+                let under = region_below(span, bl)
+                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
+                out.push(Node::Arrow { op: '→', over, under });
+                col = run_end + 2;
+            }
+            '←' if col < rect.r && g.at(bl, col + 1) == ARROW_BODY => {
+                // Left-pointing labeled arrow: ← head, then the ╌ body.
+                let run_end = scan_while(g, bl, col + 1, rect.r, |c| c == ARROW_BODY);
+                let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end };
+                let over = region_above(span, bl)
+                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
+                let under = region_below(span, bl)
+                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
+                out.push(Node::Arrow { op: '←', over, under });
+                col = run_end + 1;
+            }
+            '"' => {
+                // Quoted roman/text run ("dx", "if ␣ x"): flat baseline
+                // chars up to the closing quote; ␣ maps back to a space.
+                let mut close = None;
+                for c2 in col + 1..=rect.r {
+                    if g.at(bl, c2) == '"' {
+                        close = Some(c2);
+                        break;
+                    }
+                }
+                let Some(close) = close else {
+                    return err("unclosed \"", bl, col);
+                };
+                let t: String = (col + 1..close)
+                    .map(|c2| match g.at(bl, c2) {
+                        '␣' => ' ',
+                        c2 => c2,
+                    })
+                    .collect();
+                out.push(Node::Text(t));
+                col = close + 1;
             }
             '~' => {
                 // Lenient input: '~' doubles as the band char (easier to

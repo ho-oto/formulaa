@@ -69,6 +69,8 @@ TUI は毎編集後に AA→AST の逆変換を自動検査し、ラウンドト
 - 関数名: `\sin` `\cos` `\log` `\lim` …(立体で表示)
 - アクセント: `\hat` `\vec` `\bar` `\dot` `\tilde` `\underline`
   (直前の1文字に付く。続けて実行すると縦に重ね掛け)
+- 伸縮矢印: `\xto`(`\xrightarrow`)`\xfrom`(`\xleftarrow`)— 上下にラベル
+- テキスト: `\rmdx` → `"dx"`(\mathrm)、`\text...`(空白入りは AA 上 ␣)
 - 記号: 厳選テーブル + [ho-oto/mathematical-symbols](https://github.com/ho-oto/mathematical-symbols)
   由来の 4000+ エントリ(`\bbR`→ℝ, `\->`→→, `\oo`→∞ など)
 

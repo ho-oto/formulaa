@@ -425,6 +425,23 @@ fn nested_limits() {
 }
 
 
+/// A --f--> B with an under label, and ∫f(x)"dx".
+fn arrows_and_text() {
+    let row = cat(&[
+        s("A"),
+        n(Node::Arrow { op: '→', over: s("f"), under: s("n→∞") }),
+        s("B"),
+    ]);
+    roundtrip("xrightarrow", &row);
+    let row = cat(&[
+        n(bigop('∫', vec![], vec![])),
+        s("f"),
+        n(paren(s("x"))),
+        n(Node::Text("dx".into())),
+    ]);
+    roundtrip("mathrm-dx", &row);
+}
+
 fn main() {
     println!("# 数式コーパス カタログ\n");
     println!("`tests/roundtrip.rs` のラウンドトリップ検証済み数式の対照表。");
@@ -456,4 +473,6 @@ fn main() {
     cases_abs();
     braket_and_set();
     interval_and_bare_array();
+    println!("## 矢印・テキスト\n");
+    arrows_and_text();
 }

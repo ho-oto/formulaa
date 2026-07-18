@@ -191,6 +191,8 @@ impl Editor {
                 (Field::FracDen, true) => Some(Field::FracNum),
                 (Field::OpLower, true) => Some(Field::OpUpper),
                 (Field::OpUpper, false) => Some(Field::OpLower),
+                (Field::ArrowUnder, true) => Some(Field::ArrowOver),
+                (Field::ArrowOver, false) => Some(Field::ArrowUnder),
                 (Field::Cell(c), up) => match node {
                     Node::Array { cols, cells, .. } => {
                         if up && c >= *cols {
@@ -671,6 +673,12 @@ impl Editor {
             "braket" => self.insert_delim('⟨', '⟩', vec!['|']),
             "set" => self.insert_delim('{', '}', vec!['|']),
             "mid" => self.insert_mid(),
+            "xrightarrow" | "xto" => {
+                self.insert_and_enter(Node::Arrow { op: '→', over: vec![], under: vec![] })
+            }
+            "xleftarrow" | "xfrom" => {
+                self.insert_and_enter(Node::Arrow { op: '←', over: vec![], under: vec![] })
+            }
             "addrow" => self.add_row(),
             "addcol" => self.add_col(),
             "delrow" => self.del_row(),
@@ -718,6 +726,15 @@ impl Editor {
                     } else {
                         self.insert_sym(c);
                     }
+                } else if let Some(t) = cmd
+                    .strip_prefix("rm")
+                    .or_else(|| cmd.strip_prefix("text"))
+                    .filter(|t| !t.is_empty() && !t.contains('"'))
+                {
+                    // \rm<chars> / \text<chars>: roman/text run "…".
+                    let col = self.col;
+                    self.cur_row_mut().insert(col, Node::Text(t.to_string()));
+                    self.col += 1;
                 } else {
                     self.message = format!("unknown command: \\{}", cmd);
                 }
@@ -876,6 +893,18 @@ mod tests {
         assert!(ed.path.is_empty());
         assert_eq!(ed.col, 1);
         assert_eq!(row_to_latex(&ed.root), "\\left(x\\right)");
+    }
+
+    #[test]
+    fn arrows_and_text_runs() {
+        let mut ed = Editor::new();
+        ed.insert_sym('A');
+        ed.execute("xto");
+        ed.insert_sym('f');
+        ed.exit_inset();
+        ed.insert_sym('B');
+        ed.execute("rmdx");
+        assert_eq!(row_to_latex(&ed.root), "A\\xrightarrow{f}B\\mathrm{dx}");
     }
 
     #[test]

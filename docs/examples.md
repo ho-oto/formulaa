@@ -515,3 +515,43 @@ Typst:
 mat(delim: #none, a, b; c, d)
 ```
 
+## 矢印・テキスト
+
+### xrightarrow
+
+```
+   𝑓
+𝐴╌╌╌╌╌→𝐵
+  𝑛→∞
+```
+
+LaTeX:
+
+```latex
+A\xrightarrow[n\to \infty ]{f}B
+```
+
+Typst:
+
+```typst
+A attach(stretch(->), t: (f), b: (n → ∞)) B
+```
+
+### mathrm-dx
+
+```
+∫𝑓(𝑥)"dx"
+```
+
+LaTeX:
+
+```latex
+\int f\left(x\right)\mathrm{dx}
+```
+
+Typst:
+
+```typst
+∫ f lr(( x )) "dx"
+```
+

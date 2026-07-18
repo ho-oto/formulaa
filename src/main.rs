@@ -343,6 +343,9 @@ fn handle_key(
         KeyCode::Char('[') => {
             ed.message = "[ ] are reserved for matrices; insert one with \\matrix".into()
         }
+        KeyCode::Char('"') => {
+            ed.message = "\" is reserved for text runs; use \\rm<text> or \\text<text>".into()
+        }
         KeyCode::Char(']') => ed.close_bracket(),
         KeyCode::Tab => ed.exit_inset(),
         // Enter inside a grid: new row below (like LyX table editing).

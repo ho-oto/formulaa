@@ -15,6 +15,9 @@ pub const PLACEHOLDER: char = '⬚';
 pub const FRAC_BAR: char = '─';
 /// Big-operator band: marks the horizontal extent of over/under limits.
 pub const OP_BAND: char = '┄';
+/// Stretchy-arrow body (labels span it like a ┄ band; distinct from the
+/// fraction bar so `───→` stays a fraction followed by an arrow atom).
+pub const ARROW_BODY: char = '╌';
 /// Grid lattice markers: a bare Array frames itself with box-drawing
 /// junctions at every crossing of its separator rows/columns including the
 /// outer edges (┌ ┬ ┐ / ├ ┼ ┤ / └ ┴ ┘), so it needs no delimiter to have a
@@ -356,7 +359,9 @@ pub fn render_row(
         let need = match (prev, &spaced.last()) {
             (Some(p), Some(last)) => {
                 let bars = match (last.baseline_edge(false), block.baseline_edge(true)) {
-                    (Some(a), Some(b)) => a == b && (a == FRAC_BAR || a == OP_BAND),
+                    (Some(a), Some(b)) => {
+                        a == b && (a == FRAC_BAR || a == OP_BAND || a == ARROW_BODY)
+                    }
                     _ => false,
                 };
                 // A cancel whose baseline edge is blank (e.g. it ends in a
@@ -406,6 +411,15 @@ fn render_node(
         // Upright letters are reserved for function names (plain letters
         // render math-italic), which is what makes them parseable.
         Node::Func(name) => Block::from_chars(name.chars().collect()),
+
+        // Quoted roman/text run; interior spaces drawn as ␣ so the quotes
+        // never contain structurally meaningful blank columns.
+        Node::Text(t) => {
+            let mut chars = vec!['"'];
+            chars.extend(t.chars().map(|c| if c == ' ' { '␣' } else { c }));
+            chars.push('"');
+            Block::from_chars(chars)
+        }
 
         // Marks in the cells directly above/below the base, stacking
         // outward (innermost first in each list). Those cells are never
@@ -508,6 +522,29 @@ fn render_node(
             lines.extend(center_pad(&l, w));
             let cancel = centered_cancel(&u, w, 0)
                 .chain(centered_cancel(&l, w, baseline + 1))
+                .collect();
+            Block { lines, baseline, cancel }
+        }
+
+        Node::Arrow { op, over, under } => {
+            // Same shape as the big-op band: labels centered over the
+            // extent; empty labels vanish except while editing.
+            let editing = cursor.is_some();
+            let o = render_row(over, cur(Field::ArrowOver), editing, &ctx.child());
+            let u = render_row(under, cur(Field::ArrowUnder), editing, &ctx.child());
+            let w = o.width().max(u.width()).max(1) + 3;
+            let mut body = vec![ARROW_BODY; w];
+            if *op == '←' {
+                body[0] = '←';
+            } else {
+                body[w - 1] = '→';
+            }
+            let mut lines = center_pad(&o, w);
+            let baseline = lines.len();
+            lines.push(body);
+            lines.extend(center_pad(&u, w));
+            let cancel = centered_cancel(&o, w, 0)
+                .chain(centered_cancel(&u, w, baseline + 1))
                 .collect();
             Block { lines, baseline, cancel }
         }

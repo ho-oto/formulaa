@@ -65,6 +65,23 @@ fn node_to_latex(node: &Node) -> String {
             }
             s
         }
+        // \text keeps interior spaces; \mathrm for pure symbol runs.
+        Node::Text(t) => {
+            if t.contains(' ') {
+                format!("\\text{{{}}}", t)
+            } else {
+                format!("\\mathrm{{{}}}", t)
+            }
+        }
+        Node::Arrow { op, over, under } => {
+            let cmd = if *op == '←' { "xleftarrow" } else { "xrightarrow" };
+            let mut s = format!("\\{}", cmd);
+            if !under.is_empty() {
+                s.push_str(&format!("[{}]", row_to_latex(under)));
+            }
+            s.push_str(&braced(over));
+            s
+        }
         Node::Delim { left, right, mids, segs } => {
             // Single grid seg with a well-known pair -> a matrix environment.
             if mids.is_empty() {

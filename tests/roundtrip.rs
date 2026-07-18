@@ -495,6 +495,60 @@ fn explicit_space_atoms() {
     roundtrip("space-in-matrix", &row);
 }
 
+/// Quoted roman/text runs (\mathrm / \text).
+#[test]
+fn text_runs() {
+    // ∫f(x)"dx" and a cases with a worded condition.
+    roundtrip(
+        "mathrm-dx",
+        &cat(&[
+            n(bigop('∫', vec![], vec![])),
+            s("f"),
+            n(paren(s("x"))),
+            n(Node::Text("dx".into())),
+        ]),
+    );
+    roundtrip(
+        "text-otherwise",
+        &n(delim(
+            '{',
+            '.',
+            vec![],
+            vec![n(array(
+                2,
+                2,
+                vec![s("x"), s("x≥0"), s("-x"), n(Node::Text("other wise".into()))],
+            ))],
+        )),
+    );
+}
+
+/// Labeled stretchy arrows (\xrightarrow / \xleftarrow).
+#[test]
+fn labeled_arrows() {
+    let arrow = |op: char, over: Row, under: Row| Node::Arrow { op, over, under };
+    // A --f--> B, with an under label too, and a left arrow.
+    roundtrip(
+        "xrightarrow",
+        &cat(&[s("A"), n(arrow('→', s("f"), vec![])), s("B")]),
+    );
+    roundtrip(
+        "xarrow-both",
+        &cat(&[
+            s("X"),
+            n(arrow('→', cat(&[s("g"), n(sup(s("2")))]), s("n→∞"))),
+            s("Y"),
+            n(arrow('←', vec![], s("h"))),
+            s("Z"),
+        ]),
+    );
+    // Adjacent arrows must not fuse their bodies.
+    roundtrip(
+        "adjacent-arrows",
+        &cat(&[n(arrow('←', s("a"), vec![])), n(arrow('→', s("b"), vec![]))]),
+    );
+}
+
 /// Stacked accents: marks pile outward above/below one base.
 #[test]
 fn stacked_accents() {
@@ -631,7 +685,7 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
         };
     }
     let d = depth - 1;
-    match rng.below(10) {
+    match rng.below(12) {
         0 => Node::Frac { num: gen_row(rng, d, 3), den: gen_row(rng, d, 3) },
         1 => Node::Sqrt { arg: gen_row(rng, d, 3), index: [2, 2, 3, 4][rng.below(4)] },
         2 => Node::Sup { arg: gen_row(rng, d, 2) },
@@ -674,11 +728,17 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             }
         }
         8 => {
-            // Stray Array: normalize must wrap it in the null delimiter.
+            // Bare Array: renders as a self-delimiting lattice.
             let (rows, cols) = [(2, 2), (1, 2)][rng.below(2)];
             let cells = (0..rows * cols).map(|_| gen_row(rng, d, 2)).collect();
             Node::Array { rows, cols, cells }
         }
+        10 => Node::Text(["dx", "if", "abc", "T", "if x"][rng.below(5)].into()),
+        9 => Node::Arrow {
+            op: ['→', '←'][rng.below(2)],
+            over: gen_row(rng, d, 3),
+            under: gen_row(rng, d, 2),
+        },
         _ => Node::Sym(ATOMS[rng.below(ATOMS.len())]),
     }
 }

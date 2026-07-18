@@ -18,6 +18,10 @@ pub enum Node {
     /// Named function/operator rendered upright (sin, cos, log, ...).
     /// Only names from `symbols::FUNCS` are valid (parse relies on this).
     Func(String),
+    /// Roman/text run (\mathrm / \text), rendered as "…" with upright
+    /// chars — the quotes are what keep hand-typed ASCII (lenient italic
+    /// atoms) unambiguous. Interior spaces are drawn as ␣.
+    Text(String),
     /// Accented base character (x̂ ẋ v̄ a⃗ …): over-marks stack upward and
     /// under-marks downward in the cells directly above/below the base,
     /// innermost first. Flat lists (not nesting) are deliberate: the
@@ -31,6 +35,10 @@ pub enum Node {
     Sub { arg: Row },
     /// Big operator (∑ ∫ ∏ …) with optional limits typeset under/over it.
     BigOp { op: char, lower: Row, upper: Row },
+    /// Stretchy labeled arrow (\xrightarrow / \xleftarrow): a ╌ body with
+    /// the head char (→ or ←) at the pointing end, labels over/under
+    /// spanning its extent (same range-band idea as ┄).
+    Arrow { op: char, over: Row, under: Row },
     /// Auto-scaling delimiter block. `left`/`right`/`mids` hold delimiter
     /// *spec* chars: ( ) [ ] { } ⟨ ⟩ | and '.' (null delimiter, drawn as
     /// the thin ▏ ▕ markers). Middles ('|' only) separate the segments;
@@ -71,6 +79,8 @@ pub enum Field {
     SubArg,
     OpLower,
     OpUpper,
+    ArrowOver,
+    ArrowUnder,
     /// Segment index of a Delim.
     Seg(usize),
     CancelArg,
@@ -82,12 +92,13 @@ impl Node {
     /// Editable fields in cursor-traversal order (empty for atoms).
     pub fn fields(&self) -> Vec<Field> {
         match self {
-            Node::Sym(_) | Node::Spacer | Node::Func(_) | Node::Accent { .. } => vec![],
+            Node::Sym(_) | Node::Spacer | Node::Func(_) | Node::Text(_) | Node::Accent { .. } => vec![],
             Node::Frac { .. } => vec![Field::FracNum, Field::FracDen],
             Node::Sqrt { .. } => vec![Field::SqrtArg],
             Node::Sup { .. } => vec![Field::SupArg],
             Node::Sub { .. } => vec![Field::SubArg],
             Node::BigOp { .. } => vec![Field::OpLower, Field::OpUpper],
+            Node::Arrow { .. } => vec![Field::ArrowOver, Field::ArrowUnder],
             Node::Delim { segs, .. } => (0..segs.len()).map(Field::Seg).collect(),
             Node::Cancel { .. } => vec![Field::CancelArg],
             Node::Array { cells, .. } => (0..cells.len()).map(Field::Cell).collect(),
@@ -103,6 +114,8 @@ impl Node {
             (Node::Sub { arg }, Field::SubArg) => arg,
             (Node::BigOp { lower, .. }, Field::OpLower) => lower,
             (Node::BigOp { upper, .. }, Field::OpUpper) => upper,
+            (Node::Arrow { over, .. }, Field::ArrowOver) => over,
+            (Node::Arrow { under, .. }, Field::ArrowUnder) => under,
             (Node::Delim { segs, .. }, Field::Seg(i)) => &segs[i],
             (Node::Cancel { arg }, Field::CancelArg) => arg,
             (Node::Array { cells, .. }, Field::Cell(i)) => &cells[i],
@@ -119,6 +132,8 @@ impl Node {
             (Node::Sub { arg }, Field::SubArg) => arg,
             (Node::BigOp { lower, .. }, Field::OpLower) => lower,
             (Node::BigOp { upper, .. }, Field::OpUpper) => upper,
+            (Node::Arrow { over, .. }, Field::ArrowOver) => over,
+            (Node::Arrow { under, .. }, Field::ArrowUnder) => under,
             (Node::Delim { segs, .. }, Field::Seg(i)) => &mut segs[i],
             (Node::Cancel { arg }, Field::CancelArg) => arg,
             (Node::Array { cells, .. }, Field::Cell(i)) => &mut cells[i],
@@ -168,6 +183,8 @@ pub fn normalize(row: &Row) -> Row {
             Node::Sup { arg } | Node::Sub { arg } | Node::Cancel { arg } if arg.is_empty() => {
                 continue;
             }
+            // An empty text run has no picture of its own worth keeping.
+            Node::Text(t) if t.is_empty() => continue,
             _ => {}
         }
         // Scripts and cancels merge *across* spacers: the blank column a
@@ -233,7 +250,9 @@ fn strip_cancels(row: &Row) -> Row {
     for n in row {
         match n {
             Node::Cancel { arg } => out.extend(strip_cancels(arg)),
-            Node::Sym(_) | Node::Spacer | Node::Func(_) | Node::Accent { .. } => out.push(n.clone()),
+            Node::Sym(_) | Node::Spacer | Node::Func(_) | Node::Text(_) | Node::Accent { .. } => {
+                out.push(n.clone())
+            }
             Node::Frac { num, den } => out.push(Node::Frac {
                 num: strip_cancels(num),
                 den: strip_cancels(den),
@@ -247,6 +266,11 @@ fn strip_cancels(row: &Row) -> Row {
                 op: *op,
                 lower: strip_cancels(lower),
                 upper: strip_cancels(upper),
+            }),
+            Node::Arrow { op, over, under } => out.push(Node::Arrow {
+                op: *op,
+                over: strip_cancels(over),
+                under: strip_cancels(under),
             }),
             Node::Delim { left, right, mids, segs } => out.push(Node::Delim {
                 left: *left,
@@ -272,7 +296,9 @@ pub fn strip_spacers(row: &Row) -> Row {
     for n in row {
         match n {
             Node::Spacer => {}
-            Node::Sym(_) | Node::Func(_) | Node::Accent { .. } => out.push(n.clone()),
+            Node::Sym(_) | Node::Func(_) | Node::Text(_) | Node::Accent { .. } => {
+                out.push(n.clone())
+            }
             Node::Frac { num, den } => out.push(Node::Frac {
                 num: strip_spacers(num),
                 den: strip_spacers(den),
@@ -286,6 +312,11 @@ pub fn strip_spacers(row: &Row) -> Row {
                 op: *op,
                 lower: strip_spacers(lower),
                 upper: strip_spacers(upper),
+            }),
+            Node::Arrow { op, over, under } => out.push(Node::Arrow {
+                op: *op,
+                over: strip_spacers(over),
+                under: strip_spacers(under),
             }),
             Node::Delim { left, right, mids, segs } => out.push(Node::Delim {
                 left: *left,
@@ -322,7 +353,9 @@ fn normalize_node(node: &Node) -> Node {
             let _ = (overs, unders);
             Node::Sym(*base)
         }
-        Node::Sym(_) | Node::Spacer | Node::Func(_) | Node::Accent { .. } => node.clone(),
+        Node::Sym(_) | Node::Spacer | Node::Func(_) | Node::Text(_) | Node::Accent { .. } => {
+            node.clone()
+        }
         Node::Frac { num, den } => Node::Frac { num: normalize(num), den: normalize(den) },
         Node::Sqrt { arg, index } => Node::Sqrt { arg: normalize(arg), index: *index },
         Node::Sup { arg } => Node::Sup { arg: normalize(arg) },
@@ -331,6 +364,11 @@ fn normalize_node(node: &Node) -> Node {
             op: *op,
             lower: normalize(lower),
             upper: normalize(upper),
+        },
+        Node::Arrow { op, over, under } => Node::Arrow {
+            op: *op,
+            over: normalize(over),
+            under: normalize(under),
         },
         Node::Delim { left, right, mids, segs } => {
             let plain_bracket = Node::is_plain_bracket(*left, *right, mids);

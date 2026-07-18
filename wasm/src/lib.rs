@@ -208,6 +208,7 @@ impl MasciiEditor {
             }
             "}" => ed.close_brace(),
             "[" => ed.message = "[ ] are reserved for matrices; use \\matrix".into(),
+            "\"" => ed.message = "\" is reserved for text runs; use \\rm<text>".into(),
             "]" => ed.close_bracket(),
             "Tab" => ed.exit_inset(),
             "Enter" => ed.add_row(),
