@@ -31,9 +31,11 @@ pub enum Node {
     /// (that picture is the matrix), other segs hold an [Array] only when
     /// the grid has >= 2 cells.
     Delim { left: char, right: char, mids: Vec<char>, segs: Vec<Row> },
-    /// Bare rows×cols grid (LaTeX array/matrix), cells stored row-major.
-    /// Only valid as the sole node of a Delim segment; normalize wraps a
-    /// stray Array into the null delimiter ▏…▕.
+    /// rows×cols grid (LaTeX array/matrix), cells stored row-major.
+    /// As the sole node of a Delim segment it renders as a blank-gap grid
+    /// body (the delimiter gives the extent); anywhere else it renders as
+    /// a self-delimiting ┼ lattice (markers at every separator crossing
+    /// including the outer edges).
     Array { rows: usize, cols: usize, cells: Vec<Row> },
     /// Struck-through content (\cancel): every cell of the rendered
     /// argument carries a combining long solidus overlay (U+0338).
@@ -146,19 +148,6 @@ pub fn normalize(row: &Row) -> Row {
     let mut out: Row = Vec::with_capacity(row.len());
     for node in row {
         let node = normalize_node(node);
-        // An Array is only valid as the sole node of a Delim segment
-        // (normalize_node handles that case before recursing). Anywhere
-        // else it has no parseable extent of its own; canonical form wraps
-        // it in the null delimiter (▏…▕ markers).
-        let node = match node {
-            Node::Array { .. } => Node::Delim {
-                left: '.',
-                right: '.',
-                mids: vec![],
-                segs: vec![vec![node]],
-            },
-            n => n,
-        };
         // Empty scripts/cancels do not exist in normal form: their lone ⬚
         // placeholder fuses with neighbouring script blocks in the picture,
         // so the renderer must never produce one.
@@ -262,36 +251,49 @@ fn normalize_node(node: &Node) -> Node {
         },
         Node::Delim { left, right, mids, segs } => {
             let plain_bracket = Node::is_plain_bracket(*left, *right, mids);
-            // A direct Array segment is only canonical in a *single-segment*
-            // delimiter (the grid then owns the whole extent, so its
-            // center-baseline is recoverable); in a multi-segment block it
-            // gets null-delim-wrapped like any stray Array.
-            let sole = segs.len() == 1;
             let segs = segs
                 .iter()
                 .map(|seg| {
+                    // A sole Array stays a blank-gap grid body; Arrays in
+                    // any other position render as self-delimiting ┼
+                    // lattices and need no special casing.
                     let seg = match &seg[..] {
-                        [Node::Array { rows, cols, cells }] if sole => vec![Node::Array {
+                        [Node::Array { rows, cols, cells }] => vec![Node::Array {
                             rows: *rows,
                             cols: *cols,
                             cells: cells.iter().map(normalize).collect(),
                         }],
                         _ => normalize(seg),
                     };
-                    match &seg[..] {
-                        // Plain [ ]: the interior is always a grid.
-                        [Node::Array { .. }] if plain_bracket => seg,
-                        _ if plain_bracket => vec![Node::Array {
-                            rows: 1,
-                            cols: 1,
-                            cells: vec![seg],
-                        }],
-                        // Elsewhere a 1×1 grid is the same picture as the
-                        // cell itself rendered compact — canonical form is
-                        // the plain row (compact vs. display spacing would
-                        // otherwise make two ASTs for one picture family).
-                        [Node::Array { rows: 1, cols: 1, cells }] => normalize(&cells[0]),
-                        _ => seg,
+                    // Iterate to a fixpoint: splicing can surface a new
+                    // sole Array (e.g. a 1×1 grid whose cell held a grid).
+                    let mut seg = seg;
+                    loop {
+                        seg = match &seg[..] {
+                            // Plain [ ]: the interior is always a grid.
+                            [Node::Array { .. }] if plain_bracket => break seg,
+                            _ if plain_bracket => {
+                                break vec![Node::Array { rows: 1, cols: 1, cells: vec![seg] }]
+                            }
+                            // Elsewhere a 1×1 grid is the same picture as
+                            // the cell itself rendered compact — canonical
+                            // form is the plain row.
+                            [Node::Array { rows: 1, cols: 1, cells }] => normalize(&cells[0]),
+                            // A one-row grid has no separator row to prove
+                            // its gridness in a blank-gap body; canonical
+                            // form joins the cells with explicit ␣ spaces.
+                            [Node::Array { rows: 1, cells, .. }] => {
+                                let mut joined: Row = Vec::new();
+                                for (i, cell) in cells.iter().enumerate() {
+                                    if i > 0 {
+                                        joined.push(Node::Sym('␣'));
+                                    }
+                                    joined.extend(cell.clone());
+                                }
+                                normalize(&joined)
+                            }
+                            _ => break seg,
+                        };
                     }
                 })
                 .collect();

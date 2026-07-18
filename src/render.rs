@@ -16,6 +16,19 @@ pub const PLACEHOLDER: char = '⬚';
 pub const FRAC_BAR: char = '─';
 /// Big-operator band: marks the horizontal extent of over/under limits.
 pub const OP_BAND: char = '┄';
+/// Grid lattice markers: a bare Array frames itself with box-drawing
+/// junctions at every crossing of its separator rows/columns including the
+/// outer edges (┌ ┬ ┐ / ├ ┼ ┤ / └ ┴ ┘), so it needs no delimiter to have a
+/// parseable extent, and the explicit corners make adjacent lattices
+/// unambiguous.
+pub const LATTICE_CHARS: &[char] = &['┌', '┬', '┐', '├', '┼', '┤', '└', '┴', '┘'];
+
+/// Junction glyph for a lattice crossing at (row kind, col kind):
+/// 0 = first, 1 = internal, 2 = last.
+pub fn lattice_char(row_kind: usize, col_kind: usize) -> char {
+    let table = [['┌', '┬', '┐'], ['├', '┼', '┤'], ['└', '┴', '┘']];
+    table[row_kind][col_kind]
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
@@ -238,15 +251,19 @@ pub struct RenderCtx {
     /// Script style: no spacing around binary operators. Set inside
     /// scripts, big-op limits and matrix cells; required for parseability.
     pub compact: bool,
+    /// Set by Delim for its segment rows only: a sole Array renders as a
+    /// blank-gap grid body (the delimiter provides the extent). Everywhere
+    /// else an Array renders as a self-delimiting ┼ lattice.
+    pub grid_host: bool,
 }
 
 impl RenderCtx {
     pub fn canonical() -> Self {
-        RenderCtx { italic: true, compact: false }
+        RenderCtx { italic: true, compact: false, grid_host: false }
     }
 
     fn compact(self) -> Self {
-        RenderCtx { compact: true, ..self }
+        RenderCtx { compact: true, grid_host: false, ..self }
     }
 
     fn placeholder(&self) -> char {
@@ -309,7 +326,16 @@ pub fn render_row(
             },
             cancel: matches!(node, Node::Cancel { .. }),
         };
-        let mut block = render_node(node, child_cursor, ctx);
+        // A sole Array in a delimiter segment is a blank-gap grid body
+        // (the delimiter provides the extent); any other Array renders as
+        // a self-delimiting ┼ lattice via render_node.
+        let child_ctx = RenderCtx { grid_host: false, ..*ctx };
+        let mut block = match node {
+            Node::Array { rows, cols, cells } if ctx.grid_host && row.len() == 1 => {
+                render_array(*rows, *cols, cells, child_cursor, &child_ctx)
+            }
+            _ => render_node(node, child_cursor, &child_ctx),
+        };
         // A script at the start of a row gets an explicit ⬚ base, so the
         // picture differs from the row without the script wrapper.
         if i == 0 && info.script {
@@ -507,7 +533,8 @@ fn render_node(
                 if k > 0 {
                     parts.push(Block::from_chars(vec![' ']));
                 }
-                parts.push(render_row(seg, cur(Field::Seg(k)), true, ctx));
+                let seg_ctx = RenderCtx { grid_host: true, ..*ctx };
+                parts.push(render_row(seg, cur(Field::Seg(k)), true, &seg_ctx));
             }
             let mut body = hcat(&parts);
             let mut x = 0;
@@ -550,9 +577,80 @@ fn render_node(
         }
 
         Node::Array { rows, cols, cells } => {
-            render_array(*rows, *cols, cells, cursor, ctx)
+            render_lattice(*rows, *cols, cells, cursor, ctx)
         }
     }
+}
+
+/// Self-delimiting grid: ┼ markers at every crossing of the separator
+/// rows/columns *including the outer edges*, so the extent and the cell
+/// boundaries are explicit without any delimiter (LaTeX \begin{matrix}).
+/// Baseline = vertical center of the whole lattice.
+fn render_lattice(
+    rows: usize,
+    cols: usize,
+    cells: &[Row],
+    cursor: Option<(Field, CursorRef)>,
+    ctx: &RenderCtx,
+) -> Block {
+    let cctx = ctx.compact();
+    let blocks: Vec<Block> = cells
+        .iter()
+        .enumerate()
+        .map(|(i, cell)| {
+            let cur = match cursor {
+                Some((Field::Cell(ci), c)) if ci == i => Some(c),
+                _ => None,
+            };
+            render_row(cell, cur, true, &cctx)
+        })
+        .collect();
+    let col_w: Vec<usize> = (0..cols)
+        .map(|j| (0..rows).map(|i| blocks[i * cols + j].width()).max().unwrap_or(1))
+        .collect();
+    // Marker columns at x = 0 and after every cell span (cell + 1 pad on
+    // each side).
+    let mut marker_x = vec![0usize];
+    for w in &col_w {
+        marker_x.push(marker_x.last().unwrap() + w + 3);
+    }
+    let width = *marker_x.last().unwrap() + 1;
+    let kind = |i: usize, n: usize| if i == 0 { 0 } else if i == n { 2 } else { 1 };
+    let marker_row = |ri: usize| {
+        let mut r = vec![' '; width];
+        for (ci, &x) in marker_x.iter().enumerate() {
+            r[x] = lattice_char(kind(ri, rows), kind(ci, cols));
+        }
+        r
+    };
+
+    let mut lines: Vec<Vec<char>> = vec![marker_row(0)];
+    let mut cancel: Vec<(usize, usize)> = Vec::new();
+    for i in 0..rows {
+        let mut parts: Vec<Block> = Vec::new();
+        for j in 0..cols {
+            // marker column + 1 pad, then the centered cell, then 1 pad.
+            parts.push(Block::new(vec![vec![' '; 2]], 0));
+            let b = &blocks[i * cols + j];
+            parts.push(Block {
+                lines: center_pad(b, col_w[j]),
+                baseline: b.baseline,
+                cancel: centered_cancel(b, col_w[j], 0).collect(),
+            });
+            parts.push(Block::new(vec![vec![' ']], 0));
+        }
+        let row_block = hcat(&parts);
+        let row_off = lines.len();
+        cancel.extend(row_block.cancel.iter().map(|&(r, c)| (r + row_off, c)));
+        for line in row_block.lines {
+            let mut l = line;
+            l.resize(width, ' ');
+            lines.push(l);
+        }
+        lines.push(marker_row(i + 1));
+    }
+    let h = lines.len();
+    Block { lines, baseline: (h - 1) / 2, cancel }
 }
 
 /// One rendered column of a delimiter. `spec` is the delimiter spec char,
@@ -636,13 +734,11 @@ fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
         .collect()
 }
 
-/// Bare grid body (no delimiters — the enclosing Delim draws those).
-/// Cells are compact, centered per column, baseline-aligned per row.
-/// Column separator: 2 blank columns, or 4 for a single-row grid (a plain
-/// row can produce up to 3 adjacent blank columns — spaced-op margin +
-/// ragged-cancel spacer + spaced-op margin — so >= 4 is what lets the
-/// parser recognize a one-row grid inside a non-[ ] delimiter).
-/// Row separator: exactly one blank line.
+/// Blank-gap grid body for a sole-Array delimiter segment (the enclosing
+/// Delim draws the extent). Cells are compact, centered per column,
+/// baseline-aligned per row. Column separator: 2 blank columns; row
+/// separator: exactly one blank line. Outside a delimiter an Array uses
+/// the explicit ┼ lattice instead (render_lattice).
 fn render_array(
     rows: usize,
     cols: usize,
@@ -667,8 +763,7 @@ fn render_array(
         .map(|j| (0..rows).map(|i| blocks[i * cols + j].width()).max().unwrap_or(1))
         .collect();
 
-    let gap_w = if rows == 1 { 4 } else { 2 };
-    let gap = Block::new(vec![vec![' '; gap_w]], 0);
+    let gap = Block::new(vec![vec![' '; 2]], 0);
     let mut body: Vec<Vec<char>> = Vec::new();
     let mut cancel: Vec<(usize, usize)> = Vec::new();
     for i in 0..rows {
@@ -795,18 +890,16 @@ mod tests {
             segs: vec![sym_row("x"), sym_row("y")],
         }];
         assert_eq!(plain(&root), vec!["⟨x│y⟩"]);
-        // Bare 1×2 array: null-delimiter markers, 4-blank column gap.
-        let root = vec![Node::Delim {
-            left: '.',
-            right: '.',
-            mids: vec![],
-            segs: vec![vec![Node::Array {
-                rows: 1,
-                cols: 2,
-                cells: vec![sym_row("a"), sym_row("b")],
-            }]],
+        // Bare 2×2 array: self-delimiting ┼ lattice.
+        let root = vec![Node::Array {
+            rows: 2,
+            cols: 2,
+            cells: vec![sym_row("a"), sym_row("b"), sym_row("c"), sym_row("d")],
         }];
-        assert_eq!(plain(&root), vec!["▏a    b▕"]);
+        assert_eq!(
+            plain(&root),
+            vec!["┌   ┬   ┐", "  a   b", "├   ┼   ┤", "  c   d", "└   ┴   ┘"]
+        );
     }
 
     #[test]

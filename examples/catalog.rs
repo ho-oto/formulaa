@@ -399,14 +399,11 @@ fn braket_and_set() {
     roundtrip("set-builder", &row);
 }
 
-/// Half-open interval (0,1] (mismatched pair) and a bare array with the
-/// ▏ ▕ null-delimiter markers.
+/// Half-open interval (0,1] (mismatched pair) and a bare array drawn as
+/// a self-delimiting ┌┬┐ lattice.
 fn interval_and_bare_array() {
     roundtrip("interval", &n(delim('(', ']', vec![], vec![s("0,1")])));
-    roundtrip(
-        "bare-array",
-        &n(delim('.', '.', vec![], vec![n(array(2, 2, vec![s("a"), s("b"), s("c"), s("d")]))])),
-    );
+    roundtrip("bare-array", &n(array(2, 2, vec![s("a"), s("b"), s("c"), s("d")])));
 }
 
 /// Limits that themselves contain big operators and fractions.

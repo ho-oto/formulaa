@@ -11,7 +11,14 @@
 //! parse as `Node::Func`.
 
 use crate::ast::{Node, Row};
-use crate::render::{unstyle_char, unsubscript_char, unsuperscript_char, FRAC_BAR, OP_BAND, PLACEHOLDER};
+use crate::render::{
+    lattice_char, unstyle_char, unsubscript_char, unsuperscript_char, FRAC_BAR, OP_BAND,
+    PLACEHOLDER,
+};
+
+/// Left-edge glyphs of a grid lattice column (see render::LATTICE_CHARS).
+const LATTICE_LEFT: &[char] = &['┌', '├', '└'];
+const LATTICE_TOP: &[char] = &['┌', '┬', '┐'];
 use crate::symbols::{bigop_by_char, func_prefix, is_over_mark, is_under_mark};
 
 const RADICALS: &[(char, u8)] = &[('√', 2), ('∛', 3), ('∜', 4)];
@@ -224,6 +231,22 @@ fn protected_cols(g: &Grid, rect: Rect, skip_row: Option<usize>) -> Vec<bool> {
     protected
 }
 
+/// Baseline of a delimiter interior, derived from its *first* segment
+/// (every segment is baseline-aligned, so any one of them determines the
+/// row): a grid segment centers on its extent, anything else recurses.
+fn delim_interior_baseline(g: &Grid, interior: Rect) -> Option<usize> {
+    let mids = mid_columns(g, interior);
+    let seg0 = Rect { r: mids.first().map_or(interior.r, |&m| m - 1), ..interior };
+    if seg0.l > seg0.r {
+        return None;
+    }
+    if region_is_grid(g, seg0) {
+        trim(g, seg0).map(|t| (t.t + t.b) / 2)
+    } else {
+        find_baseline(g, seg0).ok()
+    }
+}
+
 /// Determine the baseline row of a region from its leftmost column.
 /// See docs/aa-spec.md §baseline-recovery.
 fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
@@ -260,28 +283,31 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
     match g.at(first, c) {
         // Bracket block: a plain [ ] pair always holds a grid, whose
         // baseline is the vertical center of the extent; with │ middles the
-        // segments are plain rows, so recurse like a paren.
+        // segments are independent, so read the first one.
         '⎡' | '[' => {
             if let Ok(close) = match_delim(g, first, c, rect.r) {
-                if close > c + 1
-                    && !mid_columns(g, Rect { t: first, b: last, l: c + 1, r: close - 1 })
-                        .is_empty()
-                {
-                    return find_baseline(g, Rect { t: first, b: last, l: c + 1, r: rect.r });
+                if close > c + 1 {
+                    let interior = Rect { t: first, b: last, l: c + 1, r: close - 1 };
+                    if !mid_columns(g, interior).is_empty() {
+                        if let Some(bl) = delim_interior_baseline(g, interior) {
+                            return Ok(bl);
+                        }
+                    }
                 }
             }
             Ok((first + last) / 2)
         }
-        // Paren / bar / null delimiters: a grid interior (sole Array seg)
-        // centers on the extent like a bracket grid; anything else has the
-        // baseline of the inner region. All rows of these columns carry a
-        // side-distinct glyph, so the close matches on the top row.
+        // Paren / bar / null delimiters: read the baseline off the first
+        // interior segment (grid segments center on their extent). All
+        // rows of these columns carry a side-distinct glyph, so the close
+        // matches on the top row.
         '⎛' | '⎸' | '▏' => {
             if let Ok(close) = match_delim(g, first, c, rect.r) {
-                if close > c + 1
-                    && region_is_grid(g, Rect { t: first, b: last, l: c + 1, r: close - 1 })
-                {
-                    return Ok((first + last) / 2);
+                if close > c + 1 {
+                    let interior = Rect { t: first, b: last, l: c + 1, r: close - 1 };
+                    if let Some(bl) = delim_interior_baseline(g, interior) {
+                        return Ok(bl);
+                    }
                 }
             }
             find_baseline(g, Rect { t: first, b: last, l: c + 1, r: rect.r })
@@ -300,6 +326,8 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
             .copied()
             .ok_or(())
             .or_else(|_| err("angle column without ⟨", first, c)),
+        // Lattice left-edge column: the grid centers on its extent.
+        '┌' | '├' | '└' => Ok((first + last) / 2),
         // Sqrt: stem covers exactly the content rows; recurse into content.
         '│' => find_baseline(g, Rect { t: first, b: last, l: c + 1, r: rect.r }),
         ch if radical_index(ch).is_some() => {
@@ -309,7 +337,14 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
             if occupied.len() == 1 {
                 Ok(first)
             } else {
-                err("cannot determine baseline (ambiguous leftmost column)", first, c)
+                err(
+                    format!(
+                        "cannot determine baseline (ambiguous leftmost column; region rows {}..{} cols {}..{})",
+                        rect.t, rect.b, rect.l, rect.r
+                    ),
+                    first,
+                    c,
+                )
             }
         }
     }
@@ -403,8 +438,39 @@ fn parse_region(
         match ch {
             ' ' => {
                 let run_end = scan_while(g, bl, col, rect.r, |c| c == ' ');
+                // Lattice edge glyphs mark a grid; one whose extent centers
+                // on *this* baseline is an inline sibling even though its
+                // center row may be blank — carve it out of the run before
+                // script handling. (A lattice fully above/below is script
+                // content and is left to parse_script_run.)
+                let lattice_start = (col..=run_end).find(|&c| {
+                    let rows: Vec<usize> = rect
+                        .rows()
+                        .filter(|&r| LATTICE_LEFT.contains(&g.at(r, c)))
+                        .collect();
+                    rows.len() >= 2 && (rows[0] + rows[rows.len() - 1]) / 2 == bl
+                });
+                let run_end = match lattice_start {
+                    Some(ls) => {
+                        if ls > col {
+                            parse_script_run(
+                                g, rect, bl, col, ls - 1, depth, trace, in_cancel, &mut out,
+                            )?;
+                        }
+                        let (node, right) = parse_lattice(g, rect, ls, depth, trace, in_cancel)?;
+                        out.push(node);
+                        col = right + 1;
+                        continue;
+                    }
+                    None => run_end,
+                };
                 parse_script_run(g, rect, bl, col, run_end, depth, trace, in_cancel, &mut out)?;
                 col = run_end + 1;
+            }
+            '┌' | '├' | '└' => {
+                let (node, right) = parse_lattice(g, rect, col, depth, trace, in_cancel)?;
+                out.push(node);
+                col = right + 1;
             }
             _ if ch == FRAC_BAR => {
                 let run_end = scan_while(g, bl, col, rect.r, |c| c == FRAC_BAR);
@@ -680,6 +746,86 @@ fn parse_script_run(
     Ok(())
 }
 
+/// A grid lattice whose leftmost marker column is `col`: box-drawing
+/// junctions (┌ ┬ ┐ / ├ ┼ ┤ / └ ┴ ┘) frame every crossing of the separator
+/// rows/columns including the outer edges; the explicit corners terminate
+/// the scan, so adjacent lattices can never merge. Returns the Array and
+/// the rightmost marker column.
+fn parse_lattice(
+    g: &Grid,
+    rect: Rect,
+    col: usize,
+    depth: usize,
+    trace: &mut Vec<RegionSpan>,
+    in_cancel: bool,
+) -> Result<(Node, usize)> {
+    let marker_rows: Vec<usize> = rect
+        .rows()
+        .filter(|&r| LATTICE_LEFT.contains(&g.at(r, col)))
+        .collect();
+    if marker_rows.len() < 2 || g.at(marker_rows[0], col) != '┌' {
+        return err("broken lattice edge column", rect.t, col);
+    }
+    let top = marker_rows[0];
+    // Marker columns: junctions on the top row, through the closing ┐.
+    let mut marker_cols = vec![col];
+    let mut c = col + 1;
+    loop {
+        if c > rect.r {
+            return err("lattice without a closing ┐", top, col);
+        }
+        let ch = g.at(top, c);
+        if LATTICE_TOP.contains(&ch) {
+            marker_cols.push(c);
+            if ch == '┐' {
+                break;
+            }
+        }
+        c += 1;
+    }
+    let (rows_n, cols_n) = (marker_rows.len() - 1, marker_cols.len() - 1);
+    let kind = |i: usize, n: usize| if i == 0 { 0 } else if i == n { 2 } else { 1 };
+    for (ri, &r) in marker_rows.iter().enumerate() {
+        for (ci, &mc) in marker_cols.iter().enumerate() {
+            let want = lattice_char(kind(ri, rows_n), kind(ci, cols_n));
+            if g.at(r, mc) != want {
+                return err(format!("broken lattice (expected {} at a crossing)", want), r, mc);
+            }
+        }
+    }
+    let bot = *marker_rows.last().unwrap();
+    let right = *marker_cols.last().unwrap();
+    trace.push(((top, bot, col, right), depth));
+    // A fully struck lattice is \cancel content: wrap it so the adjacent-
+    // Cancel merge in normalize reassembles the whole struck run (the
+    // cancel-extent scan cannot anchor on the lattice's blank baseline).
+    let struck = !in_cancel
+        && (top..=bot)
+            .all(|r| (col..=right).all(|c| g.at(r, c) == ' ' || g.cancelled(r, c)));
+    let in_cancel = in_cancel || struck;
+    let (rows, cols) = (rows_n, cols_n);
+    let mut cells = Vec::with_capacity(rows * cols);
+    for ri in 0..rows {
+        for ci in 0..cols {
+            let cell = Rect {
+                t: marker_rows[ri] + 1,
+                b: marker_rows[ri + 1] - 1,
+                l: marker_cols[ci] + 1,
+                r: marker_cols[ci + 1] - 1,
+            };
+            let row = if cell.t > cell.b || cell.l > cell.r {
+                vec![]
+            } else {
+                parse_region(g, cell, None, depth + 1, trace, in_cancel)?
+            };
+            cells.push(row);
+        }
+    }
+    let node = Node::Array { rows, cols, cells };
+    let node = if struck { Node::Cancel { arg: vec![node] } } else { node };
+    Ok((node, right))
+}
+
 /// A delimiter block starting at (bl, col): left column, optional
 /// full-height │ middles, matching right column (possibly of a different
 /// family — mismatched pairs are legal). Returns the node and the close
@@ -760,28 +906,13 @@ fn mid_columns(g: &Grid, interior: Rect) -> Vec<usize> {
         .collect()
 }
 
-/// Does this (trimmed or untrimmed) region show grid structure: an internal
-/// fully blank row, or a run of >= 4 fully blank unprotected columns?
-/// (A plain rendered row produces at most 3 adjacent blank columns:
-/// spaced-op margin + ragged-cancel spacer + spaced-op margin.)
+/// Does this (trimmed or untrimmed) region show grid structure: an
+/// internal fully blank row? (Blank columns prove nothing — formatting
+/// spaces are free — so one-row grids exist only inside plain [ ] or as
+/// ┼ lattices.)
 fn region_is_grid(g: &Grid, rect: Rect) -> bool {
     let Some(t) = trim(g, rect) else { return false };
-    if (t.t + 1..t.b).any(|r| row_blank(g, t, r)) {
-        return true;
-    }
-    let protected = protected_cols(g, t, None);
-    let mut run = 0usize;
-    for c in t.cols() {
-        if col_blank(g, t, c) && !protected[c - t.l] {
-            run += 1;
-            if run >= 4 {
-                return true;
-            }
-        } else {
-            run = 0;
-        }
-    }
-    false
+    (t.t + 1..t.b).any(|r| row_blank(g, t, r))
 }
 
 /// Column of the structurally matching close delimiter for the open one at

@@ -415,7 +415,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) {
     let inner = border.inner(area);
     f.render_widget(border, area);
 
-    let ctx = RenderCtx { italic: ed.italic, compact: false };
+    let ctx = RenderCtx { italic: ed.italic, ..RenderCtx::canonical() };
     // Structure view: cursor-free canonical render, re-parsed to recover
     // every block's rectangle, painted by nesting depth.
     if ed.structure {

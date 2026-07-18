@@ -266,9 +266,15 @@ impl Editor {
         }
     }
 
-    /// `]` leaves the innermost [ … ] block (matrix).
+    /// `]` leaves the innermost [ … ] block (matrix) or bare array.
     pub fn close_bracket(&mut self) {
-        if !self.close_delim(']') {
+        if self.close_delim(']') {
+            return;
+        }
+        if let Some((k, i, _)) = self.enclosing_array() {
+            self.path.truncate(k);
+            self.col = i + 1;
+        } else {
             self.message = "not inside a matrix ([ ] are reserved; use \\matrix)".into();
         }
     }
@@ -599,8 +605,15 @@ impl Editor {
             "pmatrix" => self.insert_grid('(', ')', 2, 2),
             "Bmatrix" => self.insert_grid('{', '}', 2, 2),
             "vmatrix" => self.insert_grid('|', '|', 2, 2),
-            "array" => self.insert_grid('.', '.', 2, 2),
             "cases" => self.insert_grid('{', '.', 2, 2),
+            "array" => {
+                // Bare grid: self-delimiting ┼ lattice, no brackets.
+                let array = Node::Array { rows: 2, cols: 2, cells: vec![vec![]; 4] };
+                let col = self.col;
+                self.cur_row_mut().insert(col, array);
+                self.path.push((col, Field::Cell(0)));
+                self.col = 0;
+            }
             "abs" => self.insert_delim('|', '|', vec![]),
             "langle" | "angle" => self.insert_delim('⟨', '⟩', vec![]),
             "braket" => self.insert_delim('⟨', '⟩', vec!['|']),

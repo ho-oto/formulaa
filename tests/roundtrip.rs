@@ -431,9 +431,27 @@ fn delimiter_blocks() {
             )),
         ]),
     );
-    // Bare array (null delimiters) and a ( ) matrix.
+    // Bare array: self-delimiting ┌┬┐ lattice, also adjacent pairs and
+    // inside a superscript.
     roundtrip(
         "bare-array",
+        &n(array(2, 2, vec![s("a"), s("b"), s("c"), s("d")])),
+    );
+    roundtrip(
+        "adjacent-lattices",
+        &cat(&[
+            n(array(2, 1, vec![s("a"), s("b")])),
+            s("x"),
+            n(array(2, 1, vec![s("c"), s("d")])),
+        ]),
+    );
+    roundtrip(
+        "lattice-in-sup",
+        &cat(&[s("e"), n(sup(n(array(1, 2, vec![s("0"), s("t")]))))]),
+    );
+    // Explicit ▏ ▕ null pair still available via \delim..
+    roundtrip(
+        "null-delim-grid",
         &n(delim('.', '.', vec![], vec![n(array(2, 2, vec![s("a"), s("b"), s("c"), s("d")]))])),
     );
     roundtrip(

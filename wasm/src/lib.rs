@@ -74,7 +74,7 @@ impl MasciiEditor {
     pub fn screen(&self) -> String {
         let (root, cursor) = self.ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
-        let ctx = RenderCtx { italic: self.ed.italic, compact: false };
+        let ctx = RenderCtx { italic: self.ed.italic, ..RenderCtx::canonical() };
         let text = render_row(&root, cursor_ref, false, &ctx).to_text();
         text.chars()
             .map(|c| match c {
