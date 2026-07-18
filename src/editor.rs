@@ -50,6 +50,38 @@ impl Default for Editor {
     }
 }
 
+/// Delimiter pair of a grid command (None = bare lattice array).
+type GridDelims = Option<(char, char)>;
+
+/// Grid minibuffer commands with an optional RxC digit suffix
+/// (`matrix34` = 3 rows × 4 cols; bare name = 2×2). Returns the delimiter
+/// pair and the dimensions.
+fn grid_command(cmd: &str) -> Option<(GridDelims, usize, usize)> {
+    const GRIDS: &[(&str, GridDelims)] = &[
+        ("matrix", Some(('[', ']'))),
+        ("bmatrix", Some(('[', ']'))),
+        ("pmatrix", Some(('(', ')'))),
+        ("Bmatrix", Some(('{', '}'))),
+        ("vmatrix", Some(('|', '|'))),
+        ("cases", Some(('{', '.'))),
+        ("array", None),
+    ];
+    for &(name, delims) in GRIDS {
+        let Some(rest) = cmd.strip_prefix(name) else { continue };
+        match rest.as_bytes() {
+            [] => return Some((delims, 2, 2)),
+            [r, c] if r.is_ascii_digit() && c.is_ascii_digit() => {
+                let (rows, cols) = ((r - b'0') as usize, (c - b'0') as usize);
+                if rows >= 1 && cols >= 1 {
+                    return Some((delims, rows, cols));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 impl Editor {
     pub fn new() -> Self {
         Editor {
@@ -609,18 +641,22 @@ impl Editor {
             "cbrt" | "sqrt3" => self.insert_and_enter(Node::Sqrt { arg: vec![], index: 3 }),
             "qdrt" | "sqrt4" => self.insert_and_enter(Node::Sqrt { arg: vec![], index: 4 }),
             "cancel" => self.insert_and_enter(Node::Cancel { arg: vec![] }),
-            "matrix" | "bmatrix" => self.insert_grid('[', ']', 2, 2),
-            "pmatrix" => self.insert_grid('(', ')', 2, 2),
-            "Bmatrix" => self.insert_grid('{', '}', 2, 2),
-            "vmatrix" => self.insert_grid('|', '|', 2, 2),
-            "cases" => self.insert_grid('{', '.', 2, 2),
-            "array" => {
-                // Bare grid: self-delimiting ┼ lattice, no brackets.
-                let array = Node::Array { rows: 2, cols: 2, cells: vec![vec![]; 4] };
-                let col = self.col;
-                self.cur_row_mut().insert(col, array);
-                self.path.push((col, Field::Cell(0)));
-                self.col = 0;
+            // Grid commands take an optional RxC digit suffix:
+            // \matrix (2×2), \matrix34 (3 rows × 4 cols), \cases41 …
+            _ if grid_command(cmd).is_some() => {
+                let (delims, rows, cols) = grid_command(cmd).unwrap();
+                match delims {
+                    Some((l, r)) => self.insert_grid(l, r, rows, cols),
+                    None => {
+                        // Bare grid: self-delimiting ┌┬┐ lattice.
+                        let array =
+                            Node::Array { rows, cols, cells: vec![vec![]; rows * cols] };
+                        let col = self.col;
+                        self.cur_row_mut().insert(col, array);
+                        self.path.push((col, Field::Cell(0)));
+                        self.col = 0;
+                    }
+                }
             }
             "abs" => self.insert_delim('|', '|', vec![]),
             "langle" | "angle" => self.insert_delim('⟨', '⟩', vec![]),
@@ -832,6 +868,18 @@ mod tests {
         assert!(ed.path.is_empty());
         assert_eq!(ed.col, 1);
         assert_eq!(row_to_latex(&ed.root), "\\left(x\\right)");
+    }
+
+    #[test]
+    fn grid_size_suffix() {
+        let mut ed = Editor::new();
+        ed.execute("matrix13"); // 1×3 row vector
+        ed.insert_sym('a');
+        assert_eq!(row_to_latex(&ed.root), "\\begin{bmatrix} a &  &  \\end{bmatrix}");
+        let mut ed = Editor::new();
+        ed.execute("cases32");
+        let Node::Delim { segs, .. } = &ed.root[0] else { panic!() };
+        let [Node::Array { rows: 3, cols: 2, .. }] = &segs[0][..] else { panic!() };
     }
 
     #[test]

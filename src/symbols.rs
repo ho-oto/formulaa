@@ -159,14 +159,3 @@ pub fn latex_name(c: char) -> Option<&'static str> {
         .map(|&(n, _)| n)
 }
 
-/// Characters treated as binary operators / relations for render spacing.
-pub fn is_spaced_op(c: char) -> bool {
-    matches!(
-        c,
-        '+' | '-' | '=' | '<' | '>' | '±' | '∓' | '×' | '÷' | '⋅' | '∘'
-            | '⊕' | '⊗' | '≤' | '≥' | '≠' | '≈' | '≡' | '∼' | '≃' | '∝'
-            | '≪' | '≫' | '→' | '←' | '⇒' | '⇐' | '↔' | '⇔' | '↦'
-            | '∈' | '∉' | '∋' | '⊂' | '⊆' | '⊃' | '⊇' | '∪' | '∩' | '∖'
-            | '∧' | '∨' | '⊢' | '⊨'
-    )
-}

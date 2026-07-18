@@ -6,7 +6,6 @@
 //! change them in lockstep and keep the roundtrip tests green.
 
 use crate::ast::{Field, Node, Row};
-use crate::symbols::is_spaced_op;
 
 pub const CURSOR_CHAR: char = '▌';
 /// Placeholder for an empty mandatory slot, and explicit base of a script
@@ -248,9 +247,6 @@ fn inline_script(row: &Row, map: fn(char) -> Option<char>) -> Option<Vec<char>> 
 #[derive(Clone, Copy)]
 pub struct RenderCtx {
     pub italic: bool,
-    /// Script style: no spacing around binary operators. Set inside
-    /// scripts, big-op limits and matrix cells; required for parseability.
-    pub compact: bool,
     /// Set by Delim for its segment rows only: a sole Array renders as a
     /// blank-gap grid body (the delimiter provides the extent). Everywhere
     /// else an Array renders as a self-delimiting ┼ lattice.
@@ -259,11 +255,12 @@ pub struct RenderCtx {
 
 impl RenderCtx {
     pub fn canonical() -> Self {
-        RenderCtx { italic: true, compact: false, grid_host: false }
+        RenderCtx { italic: true, grid_host: false }
     }
 
-    fn compact(self) -> Self {
-        RenderCtx { compact: true, grid_host: false, ..self }
+    /// Context for nested rows (clears the Delim-segment grid flag).
+    fn child(self) -> Self {
+        RenderCtx { grid_host: false, ..self }
     }
 
     fn placeholder(&self) -> char {
@@ -402,18 +399,9 @@ fn render_node(
 
     match node {
         Node::Spacer => Block::from_chars(vec![' ']),
-        Node::Sym(c) => {
-            let d = display_char(*c, ctx);
-            if ctx.compact {
-                Block::from_chars(vec![d])
-            } else if is_spaced_op(*c) {
-                Block::from_chars(vec![' ', d, ' '])
-            } else if *c == ',' {
-                Block::from_chars(vec![d, ' '])
-            } else {
-                Block::from_chars(vec![d])
-            }
-        }
+        // No automatic spacing anywhere (operators included): spacing is
+        // the user's, via formatting Spacers or the semantic ␣ atom.
+        Node::Sym(c) => Block::from_chars(vec![display_char(*c, ctx)]),
 
         // Upright letters are reserved for function names (plain letters
         // render math-italic), which is what makes them parseable.
@@ -481,7 +469,7 @@ fn render_node(
                     return Block::from_chars(chars);
                 }
             }
-            let a = render_row(arg, cur(Field::SupArg), true, &ctx.compact());
+            let a = render_row(arg, cur(Field::SupArg), true, &ctx.child());
             let h = a.height();
             Block { lines: a.lines, baseline: h, cancel: a.cancel }
         }
@@ -492,7 +480,7 @@ fn render_node(
                     return Block::from_chars(chars);
                 }
             }
-            let a = render_row(arg, cur(Field::SubArg), true, &ctx.compact());
+            let a = render_row(arg, cur(Field::SubArg), true, &ctx.child());
             let mut lines = vec![vec![' '; a.width()]];
             lines.extend(a.lines);
             let cancel = a.cancel.iter().map(|&(r, c)| (r + 1, c)).collect();
@@ -504,8 +492,8 @@ fn render_node(
             // is inside this operator both slots must stay visible (⬚) so
             // they can be navigated to.
             let editing = cursor.is_some();
-            let u = render_row(upper, cur(Field::OpUpper), editing, &ctx.compact());
-            let l = render_row(lower, cur(Field::OpLower), editing, &ctx.compact());
+            let u = render_row(upper, cur(Field::OpUpper), editing, &ctx.child());
+            let l = render_row(lower, cur(Field::OpLower), editing, &ctx.child());
             if u.is_empty() && l.is_empty() && cursor.is_none() {
                 // No limits: a bare operator character.
                 return Block::from_chars(vec![*op]);
@@ -594,7 +582,7 @@ fn render_lattice(
     cursor: Option<(Field, CursorRef)>,
     ctx: &RenderCtx,
 ) -> Block {
-    let cctx = ctx.compact();
+    let cctx = ctx.child();
     let blocks: Vec<Block> = cells
         .iter()
         .enumerate()
@@ -747,7 +735,7 @@ fn render_array(
     cursor: Option<(Field, CursorRef)>,
     ctx: &RenderCtx,
 ) -> Block {
-    let cctx = ctx.compact();
+    let cctx = ctx.child();
     let blocks: Vec<Block> = cells
         .iter()
         .enumerate()
@@ -821,7 +809,7 @@ mod tests {
     #[test]
     fn fraction_renders_with_bar() {
         let root = vec![Node::Frac { num: sym_row("1"), den: sym_row("x+1") }];
-        assert_eq!(plain(&root), vec!["   1", "───────", " x + 1"]);
+        assert_eq!(plain(&root), vec!["  1", "─────", " x+1"]);
     }
 
     #[test]
@@ -938,6 +926,6 @@ mod tests {
         let lines = plain(&root);
         assert_eq!(lines.len(), 3);
         // 'a' sits on the fraction-bar row.
-        assert!(lines[1].starts_with("a +"));
+        assert!(lines[1].starts_with("a+"));
     }
 }
