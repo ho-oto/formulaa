@@ -508,14 +508,6 @@ x  =  ────────
     assert_eq!(row_to_latex(&row), "x=\\frac{x^{2}+1}{2\\pi }");
 }
 
-#[test]
-fn baseline_marker_disambiguates() {
-    // Without ▶ the leftmost column (a over b) would be ambiguous.
-    let aa = "a\n▶b";
-    let row = parse(aa).unwrap();
-    assert_eq!(row.len(), 2); // b with a as superscript-chunk before it
-}
-
 // ----- randomized property test -----
 
 struct Rng(u64);

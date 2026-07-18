@@ -14,10 +14,6 @@ use crate::ast::{Node, Row};
 use crate::render::{unstyle_char, unsubscript_char, unsuperscript_char, FRAC_BAR, OP_BAND, PLACEHOLDER};
 use crate::symbols::{bigop_by_char, func_prefix, is_over_mark, is_under_mark};
 
-/// Optional explicit baseline marker for hand-written input: a single '▶'
-/// anywhere in the text pins the baseline row (never emitted by the renderer).
-pub const BASELINE_MARKER: char = '▶';
-
 const RADICALS: &[(char, u8)] = &[('√', 2), ('∛', 3), ('∜', 4)];
 
 fn radical_index(c: char) -> Option<u8> {
@@ -932,35 +928,14 @@ pub fn parse_with_regions(text: &str) -> Result<(Row, Vec<RegionSpan>)> {
     for f in &mut flags {
         f.resize(width, false);
     }
-    let mut g = Grid { g: lines, cancel: flags };
-    // Optional explicit baseline marker (hand-written input aid).
-    let mut baseline = None;
-    let markers: Vec<(usize, usize)> = g
-        .g
-        .iter()
-        .enumerate()
-        .flat_map(|(r, line)| {
-            line.iter()
-                .enumerate()
-                .filter(|&(_, &c)| c == BASELINE_MARKER)
-                .map(move |(c, _)| (r, c))
-        })
-        .collect();
-    match markers[..] {
-        [] => {}
-        [(r, c)] => {
-            g.g[r][c] = ' ';
-            baseline = Some(r);
-        }
-        _ => return err("multiple ▶ baseline markers", markers[1].0, markers[1].1),
-    }
+    let g = Grid { g: lines, cancel: flags };
     let rect = Rect { t: 0, b: g.g.len() - 1, l: 0, r: width - 1 };
     let mut trace = Vec::new();
     match trim(&g, rect) {
         // Normalize: a script arg that mixes padded structures with atoms
         // parses as adjacent script chunks; merging them restores the
         // canonical single node (render is only defined on normal forms).
-        Some(rect) => parse_region(&g, rect, baseline, 0, &mut trace, false)
+        Some(rect) => parse_region(&g, rect, None, 0, &mut trace, false)
             .map(|row| (crate::ast::normalize(&row), trace)),
         None => Ok((vec![], trace)),
     }
