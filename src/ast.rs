@@ -10,6 +10,11 @@ pub enum Node {
     /// Stored as the plain (ASCII where possible) character; styling such as
     /// math-italic letters is applied only at render time.
     Sym(char),
+    /// Formatting space (the Space key): renders as one blank column in
+    /// the AA, produces no LaTeX/Typst output, and vanishes on reparse —
+    /// the roundtrip contract is parse∘render == strip_spacers∘normalize.
+    /// (Use the ␣ atom, \space, for a *semantic* space.)
+    Spacer,
     /// Named function/operator rendered upright (sin, cos, log, ...).
     /// Only names from `symbols::FUNCS` are valid (parse relies on this).
     Func(String),
@@ -74,7 +79,7 @@ impl Node {
     /// Editable fields in cursor-traversal order (empty for atoms).
     pub fn fields(&self) -> Vec<Field> {
         match self {
-            Node::Sym(_) | Node::Func(_) | Node::Accent { .. } => vec![],
+            Node::Sym(_) | Node::Spacer | Node::Func(_) | Node::Accent { .. } => vec![],
             Node::Frac { .. } => vec![Field::FracNum, Field::FracDen],
             Node::Sqrt { .. } => vec![Field::SqrtArg],
             Node::Sup { .. } => vec![Field::SupArg],
@@ -148,6 +153,11 @@ pub fn normalize(row: &Row) -> Row {
     let mut out: Row = Vec::with_capacity(row.len());
     for node in row {
         let node = normalize_node(node);
+        // Leading spacers are dropped: they would rob a row-initial script
+        // of its explicit ⬚ base (and trim eats them anyway).
+        if out.is_empty() && matches!(node, Node::Spacer) {
+            continue;
+        }
         // Empty scripts/cancels do not exist in normal form: their lone ⬚
         // placeholder fuses with neighbouring script blocks in the picture,
         // so the renderer must never produce one.
@@ -156,6 +166,16 @@ pub fn normalize(row: &Row) -> Row {
                 continue;
             }
             _ => {}
+        }
+        // Scripts and cancels merge *across* spacers: the blank column a
+        // spacer renders is internal to the script run in the picture, so
+        // the parser reads one merged node — canonical form matches (the
+        // spacers die in the merge, and are restored when no merge fires).
+        let mut tail: Row = Vec::new();
+        if matches!(node, Node::Sup { .. } | Node::Sub { .. } | Node::Cancel { .. }) {
+            while matches!(out.last(), Some(Node::Spacer)) {
+                tail.push(out.pop().unwrap());
+            }
         }
         match (out.last_mut(), &node) {
             // Re-normalize after merging: the concatenation can create new
@@ -189,8 +209,17 @@ pub fn normalize(row: &Row) -> Row {
                 a.push(Node::Sub { arg: inner.clone() });
                 *a = normalize(a);
             }
-            _ => out.push(node),
+            _ => {
+                out.extend(tail);
+                out.push(node);
+            }
         }
+    }
+    // Trailing spacers pad nothing visible (and a trailing one inside a
+    // \cancel argument would meet the ragged-cancel spacer and fake a cell
+    // gap); spacers are only meaningful *between* siblings.
+    while matches!(out.last(), Some(Node::Spacer)) {
+        out.pop();
     }
     out
 }
@@ -201,7 +230,7 @@ fn strip_cancels(row: &Row) -> Row {
     for n in row {
         match n {
             Node::Cancel { arg } => out.extend(strip_cancels(arg)),
-            Node::Sym(_) | Node::Func(_) | Node::Accent { .. } => out.push(n.clone()),
+            Node::Sym(_) | Node::Spacer | Node::Func(_) | Node::Accent { .. } => out.push(n.clone()),
             Node::Frac { num, den } => out.push(Node::Frac {
                 num: strip_cancels(num),
                 den: strip_cancels(den),
@@ -232,6 +261,52 @@ fn strip_cancels(row: &Row) -> Row {
     out
 }
 
+/// Remove every formatting `Spacer` in the subtree — exactly what the
+/// parser cannot see (blank columns are structural). The roundtrip
+/// contract is `parse(render(normalize(x))) == normalize(strip_spacers(normalize(x)))`.
+pub fn strip_spacers(row: &Row) -> Row {
+    let mut out: Row = Vec::new();
+    for n in row {
+        match n {
+            Node::Spacer => {}
+            Node::Sym(_) | Node::Func(_) | Node::Accent { .. } => out.push(n.clone()),
+            Node::Frac { num, den } => out.push(Node::Frac {
+                num: strip_spacers(num),
+                den: strip_spacers(den),
+            }),
+            Node::Sqrt { arg, index } => {
+                out.push(Node::Sqrt { arg: strip_spacers(arg), index: *index })
+            }
+            Node::Sup { arg } => out.push(Node::Sup { arg: strip_spacers(arg) }),
+            Node::Sub { arg } => out.push(Node::Sub { arg: strip_spacers(arg) }),
+            Node::BigOp { op, lower, upper } => out.push(Node::BigOp {
+                op: *op,
+                lower: strip_spacers(lower),
+                upper: strip_spacers(upper),
+            }),
+            Node::Delim { left, right, mids, segs } => out.push(Node::Delim {
+                left: *left,
+                right: *right,
+                mids: mids.clone(),
+                segs: segs.iter().map(strip_spacers).collect(),
+            }),
+            Node::Array { rows, cols, cells } => out.push(Node::Array {
+                rows: *rows,
+                cols: *cols,
+                cells: cells.iter().map(strip_spacers).collect(),
+            }),
+            Node::Cancel { arg } => out.push(Node::Cancel { arg: strip_spacers(arg) }),
+        }
+    }
+    out
+}
+
+/// Top-level spacers only (used where blank columns would be read as cell
+/// separators).
+fn drop_top_spacers(row: &Row) -> Row {
+    row.iter().filter(|n| !matches!(n, Node::Spacer)).cloned().collect()
+}
+
 fn normalize_node(node: &Node) -> Node {
     match node {
         Node::Sym(c) if crate::symbols::bigop_by_char(*c) => {
@@ -239,7 +314,7 @@ fn normalize_node(node: &Node) -> Node {
             // with empty limits; canonical form uses the BigOp node.
             Node::BigOp { op: *c, lower: vec![], upper: vec![] }
         }
-        Node::Sym(_) | Node::Func(_) | Node::Accent { .. } => node.clone(),
+        Node::Sym(_) | Node::Spacer | Node::Func(_) | Node::Accent { .. } => node.clone(),
         Node::Frac { num, den } => Node::Frac { num: normalize(num), den: normalize(den) },
         Node::Sqrt { arg, index } => Node::Sqrt { arg: normalize(arg), index: *index },
         Node::Sup { arg } => Node::Sup { arg: normalize(arg) },
@@ -257,11 +332,16 @@ fn normalize_node(node: &Node) -> Node {
                     // A sole Array stays a blank-gap grid body; Arrays in
                     // any other position render as self-delimiting ┼
                     // lattices and need no special casing.
+                    // Blank-gap grid cells cannot hold top-level spacers
+                    // (their blank columns would read as cell separators).
                     let seg = match &seg[..] {
                         [Node::Array { rows, cols, cells }] => vec![Node::Array {
                             rows: *rows,
                             cols: *cols,
-                            cells: cells.iter().map(normalize).collect(),
+                            cells: cells
+                                .iter()
+                                .map(|c| normalize(&drop_top_spacers(c)))
+                                .collect(),
                         }],
                         _ => normalize(seg),
                     };
@@ -273,7 +353,8 @@ fn normalize_node(node: &Node) -> Node {
                             // Plain [ ]: the interior is always a grid.
                             [Node::Array { .. }] if plain_bracket => break seg,
                             _ if plain_bracket => {
-                                break vec![Node::Array { rows: 1, cols: 1, cells: vec![seg] }]
+                                let cell = normalize(&drop_top_spacers(&seg));
+                                break vec![Node::Array { rows: 1, cols: 1, cells: vec![cell] }];
                             }
                             // Elsewhere a 1×1 grid is the same picture as
                             // the cell itself rendered compact — canonical

@@ -82,6 +82,14 @@ impl Editor {
         self.col += 1;
     }
 
+    /// Formatting space (Space key): blank column in the AA, nothing in
+    /// LaTeX/Typst, vanishes on reparse.
+    pub fn insert_spacer(&mut self) {
+        let col = self.col;
+        self.cur_row_mut().insert(col, Node::Spacer);
+        self.col += 1;
+    }
+
     /// Insert a structure node and move the cursor into its first field.
     pub fn insert_and_enter(&mut self, node: Node) {
         let first = node.fields()[0];

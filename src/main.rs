@@ -15,7 +15,7 @@ use mascii::editor::{
 };
 use mascii::{ast, latex, parse, typst};
 
-const HELP: &str = "\\cmd  ^/_ ( ) insets  Tab exit  Space ␣  ←→↑↓ move  ⇧←→ select  ^G jump  ^B blocks  ^O structure  ^T italic  ^Y copy AA  ^S save  ^Q quit";
+const HELP: &str = "\\cmd  ^/_ ( ) insets  Tab exit  Space blank  ←→↑↓ move  ⇧←→ select  ^G jump  ^B blocks  ^O structure  ^T italic  ^Y copy AA  ^S save  ^Q quit";
 
 const USAGE: &str = "\
 usage: mascii [SAVE_PATH]          interactive TUI editor (default: formula.tex)
@@ -136,12 +136,14 @@ impl RoundtripGuard {
         }
         let ctx = RenderCtx::canonical();
         let aa = render_row(&row, None, false, &ctx).to_text();
+        // Formatting spacers survive in the AA but vanish on reparse.
+        let row = ast::normalize(&ast::strip_spacers(&row));
         let (kind, parsed): (String, Option<ast::Row>) = match parse::parse(&aa) {
             Err(e) => (format!("parse error: {}", e), None),
             Ok(p) if p != row => ("AST mismatch".into(), Some(p)),
             Ok(p) => {
                 let aa2 = render_row(&p, None, false, &ctx).to_text();
-                if aa2 == aa {
+                if aa2 == render_row(&row, None, false, &ctx).to_text() {
                     return; // roundtrip holds
                 }
                 ("re-render mismatch".into(), Some(p))
@@ -345,10 +347,11 @@ fn handle_key(
         KeyCode::Tab => ed.exit_inset(),
         // Enter inside a grid: new row below (like LyX table editing).
         KeyCode::Enter => ed.add_row(),
-        // Space is content: an explicit visible ␣ atom (Tab leaves insets).
+        // Space is a formatting space (Tab leaves insets; \space gives
+        // the semantic ␣ atom).
         KeyCode::Char(' ') => {
             ed.select_anchor = None;
-            ed.insert_sym('␣');
+            ed.insert_spacer();
         }
         KeyCode::Char(c) if c.is_ascii_graphic() => {
             ed.select_anchor = None;

@@ -9,6 +9,10 @@ pub fn row_to_typst(row: &Row) -> String {
     let mut parts: Vec<String> = Vec::new();
     let mut prev_digit = false;
     for node in row {
+        if matches!(node, Node::Spacer) {
+            prev_digit = false;
+            continue;
+        }
         let digit = matches!(node, Node::Sym(c) if c.is_ascii_digit() || *c == '.');
         let s = node_to_typst(node);
         if digit && prev_digit {
@@ -53,6 +57,7 @@ fn accent_fn(mark: char) -> &'static str {
 
 fn node_to_typst(node: &Node) -> String {
     match node {
+        Node::Spacer => String::new(),
         Node::Sym(c) => match c {
             '\'' => "'".into(),
             '␣' => "space".into(),

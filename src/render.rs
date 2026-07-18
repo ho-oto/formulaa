@@ -401,6 +401,7 @@ fn render_node(
     };
 
     match node {
+        Node::Spacer => Block::from_chars(vec![' ']),
         Node::Sym(c) => {
             let d = display_char(*c, ctx);
             if ctx.compact {

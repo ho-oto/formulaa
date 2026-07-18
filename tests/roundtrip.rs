@@ -9,7 +9,7 @@
 //! "Three famous mathematical formulas" (Cardano, Cauchy–Schwarz,
 //! Vandermonde determinant).
 
-use mascii::ast::{normalize, Node, Row};
+use mascii::ast::{normalize, strip_spacers, Node, Row};
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
 use mascii::render::{render_row, RenderCtx};
@@ -89,22 +89,28 @@ fn roundtrip(name: &str, row: &Row) {
     let row = normalize(row);
     let ctx = RenderCtx::canonical();
     let aa = render_row(&row, None, false, &ctx).to_text();
+    // Formatting spacers survive in the AA but are invisible to the
+    // parser, so the roundtrip target is the spacer-free normal form.
+    let expected = normalize(&strip_spacers(&row));
     let parsed = parse(&aa)
         .unwrap_or_else(|e| panic!("[{}] parse failed: {}\n--- AA ---\n{}", name, e, aa));
     assert_eq!(
-        parsed, row,
+        parsed, expected,
         "[{}] AST mismatch\n--- AA ---\n{}\n--- LaTeX (expected) ---\n{}\n--- LaTeX (parsed) ---\n{}",
         name,
         aa,
-        row_to_latex(&row),
+        row_to_latex(&expected),
         row_to_latex(&parsed)
     );
+    // Spacer-free output is a parse fixpoint.
     let aa2 = render_row(&parsed, None, false, &ctx).to_text();
-    assert_eq!(aa2, aa, "[{}] re-render mismatch", name);
+    let reparsed = parse(&aa2)
+        .unwrap_or_else(|e| panic!("[{}] re-parse failed: {}\n--- AA ---\n{}", name, e, aa2));
+    assert_eq!(reparsed, parsed, "[{}] re-render mismatch", name);
     // Exports must not panic and must be non-empty for non-empty input.
-    if !row.is_empty() {
-        assert!(!row_to_latex(&row).is_empty());
-        assert!(!row_to_typst(&row).is_empty());
+    if !expected.is_empty() {
+        assert!(!row_to_latex(&expected).is_empty());
+        assert!(!row_to_typst(&expected).is_empty());
     }
 }
 
@@ -485,6 +491,32 @@ fn explicit_space_atoms() {
     roundtrip("space-in-matrix", &row);
 }
 
+/// Formatting spacers: blank columns in the AA that vanish on reparse.
+#[test]
+fn formatting_spacers() {
+    let sp = || Node::Spacer;
+    // Between siblings, around structures, inside sub-rows.
+    let row = cat(&[
+        s("f"),
+        n(sp()),
+        n(paren(s("x"))),
+        n(sp()),
+        n(sp()),
+        n(frac(cat(&[s("1"), n(sp()), s("+"), s("x")]), s("2"))),
+    ]);
+    roundtrip("spacers", &row);
+    // Across-script spacer merges; leading/trailing die.
+    let row = cat(&[
+        n(sp()),
+        s("x"),
+        n(sup(s("a"))),
+        n(sp()),
+        n(sup(s("b"))),
+        n(sp()),
+    ]);
+    roundtrip("spacers-scripts", &row);
+}
+
 /// Continued fraction (deep vertical nesting).
 #[test]
 fn continued_fraction() {
@@ -565,6 +597,7 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
                 accent: ['^', '¯', '˙', '⇀', '˜', '‗'][rng.below(6)],
                 base: ['x', 'v', 'a', 'E'][rng.below(4)],
             },
+            2 => Node::Spacer,
             _ => Node::Sym(ATOMS[rng.below(ATOMS.len())]),
         };
     }

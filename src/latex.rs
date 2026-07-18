@@ -27,6 +27,7 @@ fn sym_to_latex(c: char) -> String {
 
 fn node_to_latex(node: &Node) -> String {
     match node {
+        Node::Spacer => String::new(),
         Node::Sym(c) => sym_to_latex(*c),
         Node::Func(name) => {
             if is_func_name(name) {

@@ -120,11 +120,13 @@ fn trim(g: &Grid, mut rect: Rect) -> Option<Rect> {
 
 /// Side-distinct delimiter glyphs (each char appears on exactly one side;
 /// the shared extension ⎪ and the angle arms ╱ ╲ are deliberately absent).
+/// Lattice edges (┌├└ / ┐┤┘) are included so a lattice interior is
+/// bracket-protected against cell/script splitting like any other pair.
 const OPEN_BRACKETS: &[char] = &[
-    '(', '⎛', '⎜', '⎝', '[', '⎡', '⎢', '⎣', '{', '⎧', '⎨', '⎩', '⟨', '⎸', '▏',
+    '(', '⎛', '⎜', '⎝', '[', '⎡', '⎢', '⎣', '{', '⎧', '⎨', '⎩', '⟨', '⎸', '▏', '┌', '├', '└',
 ];
 const CLOSE_BRACKETS: &[char] = &[
-    ')', '⎞', '⎟', '⎠', ']', '⎤', '⎥', '⎦', '}', '⎫', '⎬', '⎭', '⟩', '⎹', '▕',
+    ')', '⎞', '⎟', '⎠', ']', '⎤', '⎥', '⎦', '}', '⎫', '⎬', '⎭', '⟩', '⎹', '▕', '┐', '┤', '┘',
 ];
 
 /// Delimiter spec char for a glyph that can appear on the *baseline row*

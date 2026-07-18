@@ -213,7 +213,7 @@ impl MasciiEditor {
             "Enter" => ed.add_row(),
             " " => {
                 ed.select_anchor = None;
-                ed.insert_sym('␣');
+                ed.insert_spacer();
             }
             k if k.chars().count() == 1 => {
                 let c = k.chars().next().unwrap();
