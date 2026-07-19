@@ -19,7 +19,7 @@ use crate::render::{
 /// Left-edge glyphs of a grid lattice column (see render::LATTICE_CHARS).
 const LATTICE_LEFT: &[char] = &['┌', '├', '└'];
 const LATTICE_TOP: &[char] = &['┌', '┬', '┐'];
-use crate::symbols::{bigop_by_char, is_over_mark, is_under_mark};
+use crate::symbols::{is_over_mark, is_under_mark};
 
 const RADICALS: &[(char, u8)] = &[('√', 2), ('∛', 3), ('∜', 4)];
 
@@ -382,11 +382,10 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
 
     // Bars sit exactly on the baseline of their block, and the leftmost
     // column of a fraction/big-op block contains only the bar (contents
-    // are centered with >= 1 column of slack on each side). '~' is the
-    // lenient hand-written band char (see parse_region).
+    // are centered with >= 1 column of slack on each side).
     if let Some(&r) = occupied
         .iter()
-        .find(|&&r| matches!(g.at(r, c), FRAC_BAR | OP_BAND | DOUBLE_BODY | '~'))
+        .find(|&&r| matches!(g.at(r, c), FRAC_BAR | OP_BAND | DOUBLE_BODY))
     {
         return Ok(r);
     }
@@ -732,56 +731,6 @@ fn parse_region(
                     }
                 }
             }
-            '~' => {
-                // Lenient input: '~' doubles as the band char (easier to
-                // type than ┄) when the full band pattern is present, the
-                // pieces are all known operators/functions (an accented
-                // atom between literal tildes must not read as a band),
-                // AND there is limit content above or below. Otherwise a
-                // plain atom (spaces around a literal ~ keep it one).
-                let band = (|| {
-                    let (pieces, end) = scan_band(g, rect, bl, col, '~').ok()?;
-                    if pieces.is_empty() {
-                        return None;
-                    }
-                    let mut base: Row = Vec::new();
-                    for &(l0, r0) in &pieces {
-                        let prect = Rect { t: bl, b: bl, l: l0, r: r0 };
-                        let mut tr = Vec::new();
-                        base.extend(parse_region(g, prect, Some(bl), depth + 1, &mut tr, in_cancel).ok()?);
-                    }
-                    let known = !base.is_empty()
-                        && base.iter().all(|n| match n {
-                            Node::Sym(c) => bigop_by_char(*c),
-                            Node::Func(_) => true,
-                            _ => false,
-                        });
-                    if !known {
-                        return None;
-                    }
-                    let span = Rect { t: rect.t, b: rect.b, l: col, r: end };
-                    let limits = region_above(span, bl).and_then(|r| trim(g, r)).is_some()
-                        || region_below(span, bl).and_then(|r| trim(g, r)).is_some();
-                    limits.then_some((base, span, end))
-                })();
-                if let Some((base, span, run_end)) = band {
-                    let upper = region_above(span, bl)
-                        .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
-                    let lower = region_below(span, bl)
-                        .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
-                    out.push(Node::BigOp { base, lower, upper });
-                    col = run_end + 1;
-                } else {
-                    // Same accent probe as ordinary atoms.
-                    let (overs, unders) = accent_stacks(g, rect, bl, col);
-                    if overs.is_empty() && unders.is_empty() {
-                        out.push(Node::Sym('~'));
-                    } else {
-                        out.push(Node::Accent { overs, unders, base: '~' });
-                    }
-                    col += 1;
-                }
-            }
             ')' => {
                 // Unmatched close (LyX lets you type one): plain atom.
                 out.push(Node::Sym(')'));
@@ -975,7 +924,7 @@ fn parse_script_run(
 /// Scan a band starting at (bl, col): `B+ (piece B+)*` where B is the
 /// band char. Returns the piece spans and the column of the final band
 /// char. A piece not closed by another band char is an error (canonical
-/// bands always are; the lenient caller treats it as "not a band").
+/// bands always are).
 fn scan_band(
     g: &Grid,
     rect: Rect,
@@ -1435,15 +1384,7 @@ mod tests {
     }
 
     #[test]
-    fn lenient_tilde_band() {
-        // Hand-written band with ~ instead of ┄ (canonical stays ┄).
-        let aa = " ∞ \n~∑~\nn=1";
-        let row = parse(aa).unwrap();
-        assert_eq!(
-            row,
-            vec![Node::BigOp { base: vec![Node::Sym('∑')], lower: syms("n=1"), upper: syms("∞") }]
-        );
-        // Without limits (or with spaces around), ~ is a plain atom.
+    fn tilde_is_a_plain_atom() {
         assert_eq!(parse("a~b").unwrap(), syms("a~b"));
         assert_eq!(parse("a ~ b").unwrap(), syms("a~b"));
         // A literal ~ still takes accents.
