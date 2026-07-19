@@ -1,5 +1,6 @@
 pub mod ast;
 pub mod editor;
+pub mod input;
 pub mod latex;
 pub mod parse;
 pub mod render;

@@ -126,6 +126,7 @@ src/ast.rs      AST・カーソルパス・正規形
 src/render.rs   AST → 2D 文字ブロック(正準AA)
 src/parse.rs    AA → AST(逆変換)
 src/editor.rs   構造エディタ(LyX 型)
+src/input.rs    共有キーマップ(TUI/wasm 共通)
 src/latex.rs    AST → LaTeX      src/typst.rs  AST → Typst
 src/symbols.rs  記号・関数・アクセント表(symbols_ext.rs は生成物)
 src/main.rs     ratatui TUI + CLI

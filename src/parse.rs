@@ -12,8 +12,8 @@
 
 use crate::ast::{Node, Row};
 use crate::render::{
-    lattice_char, unstyle_char, unsubscript_char, unsuperscript_char, DOUBLE_BODY, FRAC_BAR,
-    OP_BAND, PLACEHOLDER,
+    DOUBLE_BODY, FRAC_BAR, OP_BAND, PLACEHOLDER, lattice_char, unstyle_char, unsubscript_char,
+    unsuperscript_char,
 };
 
 /// Left-edge glyphs of a grid lattice column (see render::LATTICE_CHARS).
@@ -36,7 +36,13 @@ pub struct ParseError {
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "parse error at {}:{}: {}", self.at.0 + 1, self.at.1 + 1, self.msg)
+        write!(
+            f,
+            "parse error at {}:{}: {}",
+            self.at.0 + 1,
+            self.at.1 + 1,
+            self.msg
+        )
     }
 }
 
@@ -45,7 +51,10 @@ impl std::error::Error for ParseError {}
 type Result<T> = std::result::Result<T, ParseError>;
 
 fn err<T>(msg: impl Into<String>, r: usize, c: usize) -> Result<T> {
-    Err(ParseError { msg: msg.into(), at: (r, c) })
+    Err(ParseError {
+        msg: msg.into(),
+        at: (r, c),
+    })
 }
 
 /// A structural region discovered during parsing: (top, bottom, left,
@@ -123,12 +132,10 @@ fn trim(g: &Grid, mut rect: Rect) -> Option<Rect> {
 /// Lattice edges (┌├└ / ┐┤┘) are included so a lattice interior is
 /// bracket-protected against cell/script splitting like any other pair.
 const OPEN_BRACKETS: &[char] = &[
-    '(', '⎛', '⎜', '⎝', '[', '⎡', '⎢', '⎣', '{', '⎧', '⎨', '⎩', '⟨', '⎸', '▏', '┌', '├', '└',
-    '┠',
+    '(', '⎛', '⎜', '⎝', '[', '⎡', '⎢', '⎣', '{', '⎧', '⎨', '⎩', '⟨', '⎸', '▏', '┌', '├', '└', '┠',
 ];
 const CLOSE_BRACKETS: &[char] = &[
-    ')', '⎞', '⎟', '⎠', ']', '⎤', '⎥', '⎦', '}', '⎫', '⎬', '⎭', '⟩', '⎹', '▕', '┐', '┤', '┘',
-    '┨',
+    ')', '⎞', '⎟', '⎠', ']', '⎤', '⎥', '⎦', '}', '⎫', '⎬', '⎭', '⟩', '⎹', '▕', '┐', '┤', '┘', '┨',
 ];
 
 /// Delimiter spec char for a glyph that can appear on the *baseline row*
@@ -202,7 +209,11 @@ fn fused_grid_markers(
                 return None;
             }
         }
-        seen.then(|| (col + 1..close).filter(|&c2| g.at(r, c2) == mark).collect::<Vec<_>>())
+        seen.then(|| {
+            (col + 1..close)
+                .filter(|&c2| g.at(r, c2) == mark)
+                .collect::<Vec<_>>()
+        })
     };
     let (mut t, mut b) = (top, bot);
     let mut cols_marks: Option<Vec<usize>> = None;
@@ -413,7 +424,15 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
                     return Ok((first + last) / 2);
                 }
             }
-            find_baseline(g, Rect { t: first, b: last, l: c + 1, r: rect.r })
+            find_baseline(
+                g,
+                Rect {
+                    t: first,
+                    b: last,
+                    l: c + 1,
+                    r: rect.r,
+                },
+            )
         }
         '(' => Ok(first),
         // Brace / angle columns carry their vertex on the baseline row.
@@ -424,7 +443,9 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
             // A fused grid whose baseline lands on a junction row shows ┠
             // there instead of the vertex; the grid centers on the extent.
             .or_else(|| {
-                (first..=last).any(|r| g.at(r, c) == '┠').then_some((first + last) / 2)
+                (first..=last)
+                    .any(|r| g.at(r, c) == '┠')
+                    .then_some((first + last) / 2)
             })
             .ok_or(())
             .or_else(|_| err("brace column without ⎨", first, c)),
@@ -438,15 +459,43 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
         '┌' | '├' | '└' => Ok((first + last) / 2),
         // Over/under brace corner: the argument owns the baseline on the
         // other side of the brace row.
-        '╭' => find_baseline(g, Rect { t: first + 1, b: rect.b, l: c, r: rect.r }),
-        '╰' if first > rect.t => {
-            find_baseline(g, Rect { t: rect.t, b: first - 1, l: c, r: rect.r })
-        }
+        '╭' => find_baseline(
+            g,
+            Rect {
+                t: first + 1,
+                b: rect.b,
+                l: c,
+                r: rect.r,
+            },
+        ),
+        '╰' if first > rect.t => find_baseline(
+            g,
+            Rect {
+                t: rect.t,
+                b: first - 1,
+                l: c,
+                r: rect.r,
+            },
+        ),
         // Sqrt: stem covers exactly the content rows; recurse into content.
-        '│' => find_baseline(g, Rect { t: first, b: last, l: c + 1, r: rect.r }),
-        ch if radical_index(ch).is_some() => {
-            find_baseline(g, Rect { t: first, b: last, l: c + 1, r: rect.r })
-        }
+        '│' => find_baseline(
+            g,
+            Rect {
+                t: first,
+                b: last,
+                l: c + 1,
+                r: rect.r,
+            },
+        ),
+        ch if radical_index(ch).is_some() => find_baseline(
+            g,
+            Rect {
+                t: first,
+                b: last,
+                l: c + 1,
+                r: rect.r,
+            },
+        ),
         _ => {
             if occupied.len() == 1 {
                 Ok(first)
@@ -496,7 +545,8 @@ fn parse_region(
         if !in_cancel && g.cancelled(bl, col) {
             let fully_struck = |l: usize, r: usize| {
                 (l..=r).all(|c| {
-                    rect.rows().all(|row| g.at(row, c) == ' ' || g.cancelled(row, c))
+                    rect.rows()
+                        .all(|row| g.at(row, c) == ' ' || g.cancelled(row, c))
                 })
             };
             let mut end = col;
@@ -542,7 +592,11 @@ fn parse_region(
                     break;
                 }
             }
-            let inner = Rect { l: col, r: end, ..rect };
+            let inner = Rect {
+                l: col,
+                r: end,
+                ..rect
+            };
             let arg = parse_region(g, inner, Some(bl), depth + 1, trace, true)?;
             out.push(Node::Cancel { arg });
             col = end + 1;
@@ -566,8 +620,9 @@ fn parse_region(
                 });
                 // A ╭ above (or ╰ below) the baseline in the run marks an
                 // over/under brace whose argument owns this baseline.
-                let brace_start = (col..=run_end)
-                    .find_map(|c| brace_at(g, rect, bl, c).map(|(r, over, right)| (c, r, over, right)));
+                let brace_start = (col..=run_end).find_map(|c| {
+                    brace_at(g, rect, bl, c).map(|(r, over, right)| (c, r, over, right))
+                });
                 let special = match (lattice_start, brace_start) {
                     (Some(l), Some((b, ..))) if l <= b => Some((l, None)),
                     (Some(l), None) => Some((l, None)),
@@ -578,7 +633,15 @@ fn parse_region(
                     Some((start, kind)) => {
                         if start > col {
                             parse_script_run(
-                                g, rect, bl, col, start - 1, depth, trace, in_cancel, &mut out,
+                                g,
+                                rect,
+                                bl,
+                                col,
+                                start - 1,
+                                depth,
+                                trace,
+                                in_cancel,
+                                &mut out,
                             )?;
                         }
                         let (node, right) = match kind {
@@ -607,20 +670,38 @@ fn parse_region(
                 // between (presence of the space is the disambiguator).
                 let run_end = scan_while(g, bl, col, rect.r, |c| c == FRAC_BAR);
                 if run_end < rect.r && matches!(g.at(bl, run_end + 1), '>' | '→') {
-                    let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end + 1 };
-                    let over = region_above(span, bl)
-                        .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
-                    let under = region_below(span, bl)
-                        .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
-                    out.push(Node::Arrow { op: '→', over, under });
+                    let span = Rect {
+                        t: rect.t,
+                        b: rect.b,
+                        l: col,
+                        r: run_end + 1,
+                    };
+                    let over = region_above(span, bl).map_or(Ok(vec![]), |r| {
+                        parse_region(g, r, None, depth + 1, trace, in_cancel)
+                    })?;
+                    let under = region_below(span, bl).map_or(Ok(vec![]), |r| {
+                        parse_region(g, r, None, depth + 1, trace, in_cancel)
+                    })?;
+                    out.push(Node::Arrow {
+                        op: '→',
+                        over,
+                        under,
+                    });
                     col = run_end + 2;
                     continue;
                 }
-                let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end };
-                let num = region_above(span, bl)
-                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
-                let den = region_below(span, bl)
-                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
+                let span = Rect {
+                    t: rect.t,
+                    b: rect.b,
+                    l: col,
+                    r: run_end,
+                };
+                let num = region_above(span, bl).map_or(Ok(vec![]), |r| {
+                    parse_region(g, r, None, depth + 1, trace, in_cancel)
+                })?;
+                let den = region_below(span, bl).map_or(Ok(vec![]), |r| {
+                    parse_region(g, r, None, depth + 1, trace, in_cancel)
+                })?;
                 out.push(Node::Frac { num, den });
                 col = run_end + 1;
             }
@@ -634,14 +715,33 @@ fn parse_region(
                 }
                 let mut base: Row = Vec::new();
                 for (l0, r0) in pieces {
-                    let prect = Rect { t: bl, b: bl, l: l0, r: r0 };
-                    base.extend(parse_region(g, prect, Some(bl), depth + 1, trace, in_cancel)?);
+                    let prect = Rect {
+                        t: bl,
+                        b: bl,
+                        l: l0,
+                        r: r0,
+                    };
+                    base.extend(parse_region(
+                        g,
+                        prect,
+                        Some(bl),
+                        depth + 1,
+                        trace,
+                        in_cancel,
+                    )?);
                 }
-                let span = Rect { t: rect.t, b: rect.b, l: col, r: end };
-                let upper = region_above(span, bl)
-                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
-                let lower = region_below(span, bl)
-                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
+                let span = Rect {
+                    t: rect.t,
+                    b: rect.b,
+                    l: col,
+                    r: end,
+                };
+                let upper = region_above(span, bl).map_or(Ok(vec![]), |r| {
+                    parse_region(g, r, None, depth + 1, trace, in_cancel)
+                })?;
+                let lower = region_below(span, bl).map_or(Ok(vec![]), |r| {
+                    parse_region(g, r, None, depth + 1, trace, in_cancel)
+                })?;
                 out.push(Node::BigOp { base, lower, upper });
                 col = end + 1;
             }
@@ -651,12 +751,23 @@ fn parse_region(
                 if run_end == rect.r || !matches!(g.at(bl, run_end + 1), '>' | '⇒') {
                     return err("═ run without a > head", bl, col);
                 }
-                let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end + 1 };
-                let over = region_above(span, bl)
-                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
-                let under = region_below(span, bl)
-                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
-                out.push(Node::Arrow { op: '⇒', over, under });
+                let span = Rect {
+                    t: rect.t,
+                    b: rect.b,
+                    l: col,
+                    r: run_end + 1,
+                };
+                let over = region_above(span, bl).map_or(Ok(vec![]), |r| {
+                    parse_region(g, r, None, depth + 1, trace, in_cancel)
+                })?;
+                let under = region_below(span, bl).map_or(Ok(vec![]), |r| {
+                    parse_region(g, r, None, depth + 1, trace, in_cancel)
+                })?;
+                out.push(Node::Arrow {
+                    op: '⇒',
+                    over,
+                    under,
+                });
                 col = run_end + 2;
             }
             '<' | '←' | '⇐'
@@ -667,11 +778,18 @@ fn parse_region(
                 // Left-pointing labeled arrow: head, then the body run.
                 let body = g.at(bl, col + 1);
                 let run_end = scan_while(g, bl, col + 1, rect.r, |c| c == body);
-                let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end };
-                let over = region_above(span, bl)
-                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
-                let under = region_below(span, bl)
-                    .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
+                let span = Rect {
+                    t: rect.t,
+                    b: rect.b,
+                    l: col,
+                    r: run_end,
+                };
+                let over = region_above(span, bl).map_or(Ok(vec![]), |r| {
+                    parse_region(g, r, None, depth + 1, trace, in_cancel)
+                })?;
+                let under = region_below(span, bl).map_or(Ok(vec![]), |r| {
+                    parse_region(g, r, None, depth + 1, trace, in_cancel)
+                })?;
                 let op = if body == DOUBLE_BODY { '⇐' } else { '←' };
                 out.push(Node::Arrow { op, over, under });
                 col = run_end + 1;
@@ -734,11 +852,12 @@ fn parse_region(
                     }
                 }
             }
-            ')' => {
-                // Unmatched close (LyX lets you type one): plain atom.
-                check_flat_columns(g, rect, bl, col, col, 0, 0)?;
-                out.push(Node::Sym(')'));
-                col += 1;
+            ')' | ']' | '}' | '⟩' => {
+                // Closing delimiters are never atoms: a `)` atom inside
+                // any delimiter would be captured by the mismatched-pair
+                // depth scan (`{y)}` would close at `)`), so a stray
+                // close is an error rather than a silently shifted read.
+                return err(format!("unmatched {}", ch), bl, col);
             }
             _ if open_spec_at(g, bl, col).is_some() => {
                 let (node, close_col) = parse_delim(g, rect, bl, col, depth, trace, in_cancel)?;
@@ -764,8 +883,16 @@ fn parse_region(
                 }
                 let index = radical_index(g.at(bot, col)).unwrap();
                 let w = scan_while(g, top - 1, col + 1, rect.r, |c| c == '_') - col;
-                let inner = Rect { t: top, b: bot, l: col + 1, r: col + w };
-                out.push(Node::Sqrt { arg: parse_region(g, inner, Some(bl), depth + 1, trace, in_cancel)?, index });
+                let inner = Rect {
+                    t: top,
+                    b: bot,
+                    l: col + 1,
+                    r: col + w,
+                };
+                out.push(Node::Sqrt {
+                    arg: parse_region(g, inner, Some(bl), depth + 1, trace, in_cancel)?,
+                    index,
+                });
                 col += w + 1;
             }
             _ if ch == PLACEHOLDER => {
@@ -797,23 +924,27 @@ fn parse_region(
                 // function, anything longer is a \mathrm text run, and a
                 // *lone* single letter is an italic variable — unless it
                 // is glued to another letter (d𝑦 = roman differential).
-                let run_end =
-                    scan_while_same_flag(g, bl, col, rect.r, |c| c.is_ascii_alphabetic());
+                let run_end = scan_while_same_flag(g, bl, col, rect.r, |c| c.is_ascii_alphabetic());
                 check_flat_columns(g, rect, bl, col, run_end, 0, 0)?;
                 let word: String = (col..=run_end).map(|c| g.at(bl, c)).collect();
                 if word.chars().count() == 1 {
                     let prev_letter = col > rect.l && g.at(bl, col - 1).is_alphabetic();
-                    let next_letter =
-                        run_end < rect.r && g.at(bl, run_end + 1).is_alphabetic();
+                    let next_letter = run_end < rect.r && g.at(bl, run_end + 1).is_alphabetic();
                     if prev_letter || next_letter {
-                        out.push(Node::Text { t: word, math: true });
+                        out.push(Node::Text {
+                            t: word,
+                            math: true,
+                        });
                     } else {
                         out.push(Node::Sym(ch));
                     }
                 } else if crate::symbols::is_func_name(&word) {
                     out.push(Node::Func(word));
                 } else {
-                    out.push(Node::Text { t: word, math: true });
+                    out.push(Node::Text {
+                        t: word,
+                        math: true,
+                    });
                 }
                 col = run_end + 1;
             }
@@ -824,7 +955,11 @@ fn parse_region(
                 check_flat_columns(g, rect, bl, col, col, overs.len(), unders.len())?;
                 let base = unstyle_char(ch);
                 if !overs.is_empty() || !unders.is_empty() {
-                    out.push(Node::Accent { overs, unders, base });
+                    out.push(Node::Accent {
+                        overs,
+                        unders,
+                        base,
+                    });
                 } else {
                     out.push(Node::Sym(base));
                 }
@@ -887,10 +1022,19 @@ fn parse_script_run(
     out: &mut Row,
 ) -> Result<()> {
     let mut parts: Vec<(usize, bool, Rect)> = Vec::new();
-    let run_span = Rect { t: rect.t, b: rect.b, l: from, r: to };
+    let run_span = Rect {
+        t: rect.t,
+        b: rect.b,
+        l: from,
+        r: to,
+    };
     for (side_rect, opposite, is_sup) in [
         (region_above(run_span, bl), region_below(run_span, bl), true),
-        (region_below(run_span, bl), region_above(run_span, bl), false),
+        (
+            region_below(run_span, bl),
+            region_above(run_span, bl),
+            false,
+        ),
     ] {
         let Some(side) = side_rect else { continue };
         let protected = protected_cols(g, side, None);
@@ -918,7 +1062,12 @@ fn parse_script_run(
             while i < occupied.len() && occupied[i] {
                 i += 1;
             }
-            let seg = Rect { t: side.t, b: side.b, l: from + start, r: from + i - 1 };
+            let seg = Rect {
+                t: side.t,
+                b: side.b,
+                l: from + start,
+                r: from + i - 1,
+            };
             if let Some(seg) = trim(g, seg) {
                 parts.push((seg.l, is_sup, seg));
             }
@@ -927,7 +1076,11 @@ fn parse_script_run(
     parts.sort_by_key(|&(l, _, _)| l);
     for (_, is_sup, r) in parts {
         let arg = parse_region(g, r, None, depth + 1, trace, in_cancel)?;
-        out.push(if is_sup { Node::Sup { arg } } else { Node::Sub { arg } });
+        out.push(if is_sup {
+            Node::Sup { arg }
+        } else {
+            Node::Sub { arg }
+        });
     }
     Ok(())
 }
@@ -972,7 +1125,11 @@ fn brace_at(g: &Grid, rect: Rect, bl: usize, c: usize) -> Option<(usize, bool, u
     let cand = (rect.t..bl)
         .find(|&r| g.at(r, c) == '╭')
         .map(|r| (r, true))
-        .or_else(|| (bl + 1..=rect.b).find(|&r| g.at(r, c) == '╰').map(|r| (r, false)));
+        .or_else(|| {
+            (bl + 1..=rect.b)
+                .find(|&r| g.at(r, c) == '╰')
+                .map(|r| (r, false))
+        });
     let (brow, over) = cand?;
     let run_end = scan_while(g, brow, c, rect.r, |c2| c2 == FRAC_BAR);
     let closer = if over { '╮' } else { '╯' };
@@ -980,7 +1137,9 @@ fn brace_at(g: &Grid, rect: Rect, bl: usize, c: usize) -> Option<(usize, bool, u
         return None;
     }
     let right = run_end + 1;
-    (c..=right).any(|c2| g.at(bl, c2) != ' ').then_some((brow, over, right))
+    (c..=right)
+        .any(|c2| g.at(bl, c2) != ' ')
+        .then_some((brow, over, right))
 }
 
 /// An over/under brace: a ╭──╮ (or ╰──╯) row at `brow`, argument block
@@ -1008,20 +1167,45 @@ fn parse_brace(
     let in_cancel = in_cancel || struck;
     let (arg_rect, label_rect) = if over {
         (
-            Rect { t: brow + 1, b: rect.b, l: cols.0, r: cols.1 },
-            (rect.t < brow).then(|| Rect { t: rect.t, b: brow - 1, l: cols.0, r: cols.1 }),
+            Rect {
+                t: brow + 1,
+                b: rect.b,
+                l: cols.0,
+                r: cols.1,
+            },
+            (rect.t < brow).then(|| Rect {
+                t: rect.t,
+                b: brow - 1,
+                l: cols.0,
+                r: cols.1,
+            }),
         )
     } else {
         (
-            Rect { t: rect.t, b: brow - 1, l: cols.0, r: cols.1 },
-            (brow < rect.b).then(|| Rect { t: brow + 1, b: rect.b, l: cols.0, r: cols.1 }),
+            Rect {
+                t: rect.t,
+                b: brow - 1,
+                l: cols.0,
+                r: cols.1,
+            },
+            (brow < rect.b).then(|| Rect {
+                t: brow + 1,
+                b: rect.b,
+                l: cols.0,
+                r: cols.1,
+            }),
         )
     };
     let arg = parse_region(g, arg_rect, Some(bl), depth + 1, trace, in_cancel)?;
-    let label = label_rect
-        .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
+    let label = label_rect.map_or(Ok(vec![]), |r| {
+        parse_region(g, r, None, depth + 1, trace, in_cancel)
+    })?;
     let node = Node::Brace { over, arg, label };
-    let node = if struck { Node::Cancel { arg: vec![node] } } else { node };
+    let node = if struck {
+        Node::Cancel { arg: vec![node] }
+    } else {
+        node
+    };
     Ok((node, right))
 }
 
@@ -1043,12 +1227,20 @@ fn check_flat_columns(
     for c in l..=r {
         for row in rect.t..bl - skip_over {
             if g.at(row, c) != ' ' {
-                return err("content stacked above a baseline token (not an accent)", row, c);
+                return err(
+                    "content stacked above a baseline token (not an accent)",
+                    row,
+                    c,
+                );
             }
         }
         for row in bl + skip_under + 1..=rect.b {
             if g.at(row, c) != ' ' {
-                return err("content stacked below a baseline token (not an accent)", row, c);
+                return err(
+                    "content stacked below a baseline token (not an accent)",
+                    row,
+                    c,
+                );
             }
         }
     }
@@ -1109,12 +1301,24 @@ fn parse_lattice(
         c += 1;
     }
     let (rows_n, cols_n) = (marker_rows.len() - 1, marker_cols.len() - 1);
-    let kind = |i: usize, n: usize| if i == 0 { 0 } else if i == n { 2 } else { 1 };
+    let kind = |i: usize, n: usize| {
+        if i == 0 {
+            0
+        } else if i == n {
+            2
+        } else {
+            1
+        }
+    };
     for (ri, &r) in marker_rows.iter().enumerate() {
         for (ci, &mc) in marker_cols.iter().enumerate() {
             let want = lattice_char(kind(ri, rows_n), kind(ci, cols_n));
             if g.at(r, mc) != want {
-                return err(format!("broken lattice (expected {} at a crossing)", want), r, mc);
+                return err(
+                    format!("broken lattice (expected {} at a crossing)", want),
+                    r,
+                    mc,
+                );
             }
         }
     }
@@ -1125,8 +1329,7 @@ fn parse_lattice(
     // Cancel merge in normalize reassembles the whole struck run (the
     // cancel-extent scan cannot anchor on the lattice's blank baseline).
     let struck = !in_cancel
-        && (top..=bot)
-            .all(|r| (col..=right).all(|c| g.at(r, c) == ' ' || g.cancelled(r, c)));
+        && (top..=bot).all(|r| (col..=right).all(|c| g.at(r, c) == ' ' || g.cancelled(r, c)));
     let in_cancel = in_cancel || struck;
     let (rows, cols) = (rows_n, cols_n);
     let mut cells = Vec::with_capacity(rows * cols);
@@ -1147,7 +1350,11 @@ fn parse_lattice(
         }
     }
     let node = Node::Array { rows, cols, cells };
-    let node = if struck { Node::Cancel { arg: vec![node] } } else { node };
+    let node = if struck {
+        Node::Cancel { arg: vec![node] }
+    } else {
+        node
+    };
     Ok((node, right))
 }
 
@@ -1209,15 +1416,31 @@ fn parse_delim(
                     cells.push(row);
                 }
             }
-            let array = Node::Array { rows: rows_n, cols: cols_n, cells };
-            let node =
-                Node::Delim { left, right, mids: vec![], segs: vec![vec![array]] };
+            let array = Node::Array {
+                rows: rows_n,
+                cols: cols_n,
+                cells,
+            };
+            let node = Node::Delim {
+                left,
+                right,
+                mids: vec![],
+                segs: vec![vec![array]],
+            };
             return Ok((node, close_col));
         }
     }
 
     let mid_cols = if close_col > col + 1 {
-        mid_columns(g, Rect { t: top, b: bot, l: col + 1, r: close_col - 1 })
+        mid_columns(
+            g,
+            Rect {
+                t: top,
+                b: bot,
+                l: col + 1,
+                r: close_col - 1,
+            },
+        )
     } else {
         vec![]
     };
@@ -1228,13 +1451,23 @@ fn parse_delim(
         let seg = if start >= m {
             vec![]
         } else {
-            let rect = Rect { t: top, b: bot, l: start, r: m - 1 };
+            let rect = Rect {
+                t: top,
+                b: bot,
+                l: start,
+                r: m - 1,
+            };
             parse_region(g, rect, Some(bl), depth + 1, trace, in_cancel)?
         };
         segs.push(seg);
         start = m + 1;
     }
-    let node = Node::Delim { left, right, mids: vec!['|'; mid_cols.len()], segs };
+    let node = Node::Delim {
+        left,
+        right,
+        mids: vec!['|'; mid_cols.len()],
+        segs,
+    };
     Ok((node, close_col))
 }
 
@@ -1245,9 +1478,7 @@ fn mid_columns(g: &Grid, interior: Rect) -> Vec<usize> {
     let protected = protected_cols(g, interior, None);
     interior
         .cols()
-        .filter(|&c| {
-            interior.rows().all(|r| g.at(r, c) == '│') && !protected[c - interior.l]
-        })
+        .filter(|&c| interior.rows().all(|r| g.at(r, c) == '│') && !protected[c - interior.l])
         .collect()
 }
 
@@ -1329,8 +1560,16 @@ pub fn parse_with_regions(text: &str) -> Result<(Row, Vec<RegionSpan>)> {
     for f in &mut flags {
         f.resize(width, false);
     }
-    let g = Grid { g: lines, cancel: flags };
-    let rect = Rect { t: 0, b: g.g.len() - 1, l: 0, r: width - 1 };
+    let g = Grid {
+        g: lines,
+        cancel: flags,
+    };
+    let rect = Rect {
+        t: 0,
+        b: g.g.len() - 1,
+        l: 0,
+        r: width - 1,
+    };
     let mut trace = Vec::new();
     match trim(&g, rect) {
         // Normalize: a script arg that mixes padded structures with atoms
@@ -1347,7 +1586,7 @@ mod tests {
     use super::*;
     use crate::ast::normalize;
     use crate::latex::row_to_latex;
-    use crate::render::{render_row, RenderCtx};
+    use crate::render::{RenderCtx, render_row};
 
     fn roundtrip(row: &Row) {
         // Canonical AA is defined on normal forms.
@@ -1374,11 +1613,28 @@ mod tests {
 
     #[test]
     fn roundtrips_structures() {
-        roundtrip(&vec![Node::Frac { num: syms("1"), den: syms("x+1") }]);
-        roundtrip(&vec![Node::Sqrt { arg: syms("2"), index: 2 }]);
-        roundtrip(&vec![Node::Sqrt { arg: syms("x+1"), index: 3 }]);
-        roundtrip(&vec![Node::Accent { overs: vec!['^'], unders: vec![], base: 'x' }]);
-        roundtrip(&vec![Node::Accent { overs: vec![], unders: vec!['‗'], base: 'y' }]);
+        roundtrip(&vec![Node::Frac {
+            num: syms("1"),
+            den: syms("x+1"),
+        }]);
+        roundtrip(&vec![Node::Sqrt {
+            arg: syms("2"),
+            index: 2,
+        }]);
+        roundtrip(&vec![Node::Sqrt {
+            arg: syms("x+1"),
+            index: 3,
+        }]);
+        roundtrip(&vec![Node::Accent {
+            overs: vec!['^'],
+            unders: vec![],
+            base: 'x',
+        }]);
+        roundtrip(&vec![Node::Accent {
+            overs: vec![],
+            unders: vec!['‗'],
+            base: 'y',
+        }]);
         roundtrip(&vec![Node::Func("sin".into()), Node::Sym('x')]);
         roundtrip(&vec![Node::Delim {
             left: '[',
@@ -1396,8 +1652,16 @@ mod tests {
             mids: vec![],
             segs: vec![syms("a+b")],
         }]);
-        roundtrip(&vec![Node::BigOp { base: vec![Node::Sym('∑')], lower: syms("i=0"), upper: syms("n") }]);
-        roundtrip(&vec![Node::BigOp { base: vec![Node::Sym('∫')], lower: vec![], upper: vec![] }]);
+        roundtrip(&vec![Node::BigOp {
+            base: vec![Node::Sym('∑')],
+            lower: syms("i=0"),
+            upper: syms("n"),
+        }]);
+        roundtrip(&vec![Node::BigOp {
+            base: vec![Node::Sym('∫')],
+            lower: vec![],
+            upper: vec![],
+        }]);
     }
 
     #[test]
@@ -1428,7 +1692,14 @@ mod tests {
         assert_eq!(parse("a ~ b").unwrap(), syms("a~b"));
         // A literal ~ still takes accents.
         let row = parse("^\n~").unwrap();
-        assert_eq!(row, vec![Node::Accent { overs: vec!['^'], unders: vec![], base: '~' }]);
+        assert_eq!(
+            row,
+            vec![Node::Accent {
+                overs: vec!['^'],
+                unders: vec![],
+                base: '~'
+            }]
+        );
     }
 
     #[test]
@@ -1437,11 +1708,19 @@ mod tests {
         let ast1 = vec![Node::BigOp {
             base: vec![Node::Sym('∑')],
             lower: syms("n=1"),
-            upper: vec![Node::BigOp { base: vec![Node::Sym('∫')], lower: vec![], upper: vec![] }],
+            upper: vec![Node::BigOp {
+                base: vec![Node::Sym('∫')],
+                lower: vec![],
+                upper: vec![],
+            }],
         }];
         let ast2 = vec![Node::BigOp {
             base: vec![Node::Sym('∫')],
-            lower: vec![Node::BigOp { base: vec![Node::Sym('∑')], lower: syms("n=1"), upper: vec![] }],
+            lower: vec![Node::BigOp {
+                base: vec![Node::Sym('∑')],
+                lower: syms("n=1"),
+                upper: vec![],
+            }],
             upper: vec![],
         }];
         let ctx = RenderCtx::canonical();

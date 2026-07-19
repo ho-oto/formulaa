@@ -13,6 +13,7 @@ use mascii::editor::{
     Editor, HL_CLOSE_BASE, HL_LEVELS, HL_OPEN_BASE, JUMP_CHAR_BASE, JUMP_LABELS, SEL_CLOSE,
     SEL_OPEN,
 };
+use mascii::input::{Effect, Key};
 use mascii::{ast, latex, parse, typst};
 
 const HELP: &str = "\\cmd  ^/_ ( ) insets  Tab exit  Space blank  Enter grid row  ←→↑↓ move  ⇧←→ select  ^G jump  ^B blocks  ^O structure  ^T italic  ^Y copy AA  ^S save  ^Q quit";
@@ -204,163 +205,59 @@ fn handle_key(
     mods: KeyModifiers,
     save_path: &str,
 ) -> bool {
-    // Jump mode: the next key picks a label (Esc cancels).
-    if ed.jump.is_some() {
-        match code {
-            KeyCode::Char(c) => ed.jump_to(c),
-            _ => {
-                ed.jump = None;
-                ed.message.clear();
+    // F-keys kept as terminal-specific aliases (^T/^B/^O are often
+    // captured by the terminal or OS).
+    let key = match code {
+        KeyCode::F(2) => {
+            ed.italic = !ed.italic;
+            return false;
+        }
+        KeyCode::F(4) => {
+            ed.highlight = !ed.highlight;
+            return false;
+        }
+        KeyCode::F(5) => {
+            ed.structure = !ed.structure;
+            return false;
+        }
+        KeyCode::Char(c) => Key::Char(c),
+        KeyCode::Left => Key::Left,
+        KeyCode::Right => Key::Right,
+        KeyCode::Up => Key::Up,
+        KeyCode::Down => Key::Down,
+        KeyCode::Home => Key::Home,
+        KeyCode::End => Key::End,
+        KeyCode::Enter => Key::Enter,
+        KeyCode::Backspace => Key::Backspace,
+        KeyCode::Delete => Key::Delete,
+        KeyCode::Esc => Key::Esc,
+        KeyCode::Tab => Key::Tab,
+        _ => return false,
+    };
+    let effect = ed.input(
+        key,
+        mods.contains(KeyModifiers::SHIFT),
+        mods.contains(KeyModifiers::CONTROL),
+    );
+    match effect {
+        Effect::Quit => return true,
+        Effect::SaveTex => {
+            let tex = latex::row_to_latex(&ed.root);
+            match fs::write(save_path, format!("{}\n", tex)) {
+                Ok(()) => ed.message = format!("saved LaTeX to {}", save_path),
+                Err(e) => ed.message = format!("save failed: {}", e),
             }
         }
-        return false;
-    }
-
-    // Minibuffer (`\command`) mode captures most keys.
-    if ed.minibuffer.is_some() {
-        match code {
-            KeyCode::Esc => {
-                ed.minibuffer = None;
-            }
-            KeyCode::Backspace => {
-                let buf = ed.minibuffer.as_mut().unwrap();
-                if buf.pop().is_none() {
-                    ed.minibuffer = None;
-                }
-            }
-            KeyCode::Enter | KeyCode::Char(' ') => {
-                let cmd = ed.minibuffer.take().unwrap();
-                ed.execute(&cmd);
-            }
-            // Graphic chars (not just alphanumerics): the extended symbol
-            // table has names like "->", "+-", "oo".
-            KeyCode::Char(c) if c.is_ascii_graphic() => {
-                ed.minibuffer.as_mut().unwrap().push(c);
-            }
-            _ => {}
-        }
-        return false;
-    }
-
-    if mods.contains(KeyModifiers::CONTROL) {
-        match code {
-            KeyCode::Char('q') | KeyCode::Char('c') => return true,
-            KeyCode::Char('g') => ed.start_jump(),
-            KeyCode::Char('t') => ed.italic = !ed.italic,
-            KeyCode::Char('b') => ed.highlight = !ed.highlight,
-            KeyCode::Char('o') => ed.structure = !ed.structure,
-            KeyCode::Char('s') => {
-                let tex = latex::row_to_latex(&ed.root);
-                match fs::write(save_path, format!("{}\n", tex)) {
-                    Ok(()) => ed.message = format!("saved LaTeX to {}", save_path),
-                    Err(e) => ed.message = format!("save failed: {}", e),
-                }
-            }
-            // Yank: canonical AA to the system clipboard.
-            KeyCode::Char('y') => {
-                let row = ast::normalize(&ed.root);
-                let aa = render_row(&row, None, false, &RenderCtx::canonical()).to_text();
-                match copy_to_clipboard(&aa) {
-                    Ok(cmd) => ed.message = format!("copied AA to clipboard ({})", cmd),
-                    Err(e) => ed.message = format!("copy failed: {}", e),
-                }
-            }
-            _ => {}
-        }
-        return false;
-    }
-
-    ed.message.clear();
-    match code {
-        KeyCode::Left if mods.contains(KeyModifiers::SHIFT) => ed.select_move(false),
-        KeyCode::Right if mods.contains(KeyModifiers::SHIFT) => ed.select_move(true),
-        KeyCode::Left => {
-            ed.select_anchor = None;
-            ed.left();
-        }
-        KeyCode::Right => {
-            ed.select_anchor = None;
-            ed.right();
-        }
-        KeyCode::Up => {
-            ed.select_anchor = None;
-            ed.vertical(true);
-        }
-        KeyCode::Down => {
-            ed.select_anchor = None;
-            ed.vertical(false);
-        }
-        KeyCode::Esc => ed.select_anchor = None,
-        KeyCode::Home => ed.home(),
-        KeyCode::End => ed.end(),
-        KeyCode::Backspace => {
-            if !ed.delete_selection() {
-                ed.backspace();
+        // Yank: canonical AA to the system clipboard.
+        Effect::CopyAa => {
+            let row = ast::normalize(&ed.root);
+            let aa = render_row(&row, None, false, &RenderCtx::canonical()).to_text();
+            match copy_to_clipboard(&aa) {
+                Ok(cmd) => ed.message = format!("copied AA to clipboard ({})", cmd),
+                Err(e) => ed.message = format!("copy failed: {}", e),
             }
         }
-        KeyCode::Delete => {
-            if !ed.delete_selection() {
-                ed.delete();
-            }
-        }
-        // F-keys kept as aliases (often captured by the terminal/OS).
-        KeyCode::F(2) => ed.italic = !ed.italic,
-        KeyCode::F(4) => ed.highlight = !ed.highlight,
-        KeyCode::F(5) => ed.structure = !ed.structure,
-        KeyCode::Char('\\') => ed.minibuffer = Some(String::new()),
-        KeyCode::Char('^') => {
-            if !ed.wrap_selection(|c| ast::Node::Sup { arg: c }) {
-                ed.insert_and_enter(ast::Node::Sup { arg: vec![] });
-            }
-        }
-        KeyCode::Char('_') => {
-            if !ed.wrap_selection(|c| ast::Node::Sub { arg: c }) {
-                ed.insert_and_enter(ast::Node::Sub { arg: vec![] });
-            }
-        }
-        KeyCode::Char('(') => {
-            if !ed.wrap_selection(|c| ast::Node::Delim {
-                left: '(',
-                right: ')',
-                mids: vec![],
-                segs: vec![c],
-            }) {
-                ed.insert_delim('(', ')', vec![]);
-            }
-        }
-        KeyCode::Char(')') => ed.close_paren(),
-        KeyCode::Char('{') => {
-            if !ed.wrap_selection(|c| ast::Node::Delim {
-                left: '{',
-                right: '}',
-                mids: vec![],
-                segs: vec![c],
-            }) {
-                ed.insert_delim('{', '}', vec![]);
-            }
-        }
-        KeyCode::Char('}') => ed.close_brace(),
-        KeyCode::Char('[') => {
-            ed.message = "[ ] are reserved for matrices; insert one with \\matrix".into()
-        }
-        KeyCode::Char('"') => {
-            ed.message = "\" is reserved for text runs; use \\rm<text> or \\text<text>".into()
-        }
-        KeyCode::Char(']') => ed.close_bracket(),
-        KeyCode::Tab => ed.exit_inset(),
-        // Enter inside a grid: new row below (like LyX table editing).
-        KeyCode::Enter => ed.add_row(),
-        // Space is a formatting space (Tab leaves insets; \space gives
-        // the semantic ␣ atom).
-        KeyCode::Char(' ') => {
-            ed.select_anchor = None;
-            ed.insert_spacer();
-        }
-        KeyCode::Char(c) if c.is_ascii_graphic() => {
-            ed.select_anchor = None;
-            ed.insert_sym(c);
-        }
-        _ => {}
+        Effect::None => {}
     }
     false
 }

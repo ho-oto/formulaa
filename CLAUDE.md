@@ -26,6 +26,9 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
    `symbols.rs` / `symbols_ext.rs` に原子として同じ文字が存在しないことを確認。
 3. `normalize`(ast.rs)は**冪等**でなければならない(合流後の再正規化)。
 4. 機能追加はまず `tests/roundtrip.rs` に実式を足してから実装する。
+   キー操作の変更は `tests/ui.rs`(キースクリプト)に足す。キーの意味は
+   `src/input.rs` の共有キーマップだけが決める — main.rs / wasm に
+   キー分岐を書き足してはならない(ドリフトの元)。
    ランダムプロパティテスト(2000件、`MASCII_PROP_N`/`MASCII_PROP_SEED` で
    増量可)が回帰を検出してくれる。
 5. TUI は毎編集後にラウンドトリップを自動検査し、失敗すると
@@ -42,11 +45,13 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
 | `src/render.rs` | AST → 2D ブロック(基線つき)。正準AAの生成側 |
 | `src/parse.rs` | AA → AST。領域+基線の再帰下降。正準AAの受理側+寛容入力 |
 | `src/editor.rs` | 構造エディタ(LyX 型カーソル、コマンド実行) |
+| `src/input.rs` | **共有キーマップ**(`Key`/`Effect`/`Editor::input`)。TUI と wasm は変換だけ |
 | `src/latex.rs` / `src/typst.rs` | AST → LaTeX / Typst |
 | `src/symbols.rs` | 厳選シンボル表・関数名辞書・アクセント表・LaTeX 逆引き |
 | `src/symbols_ext.rs` | **生成物**(ho-oto/mathematical-symbols 由来、4000+)。手編集しない |
 | `src/main.rs` | TUI(ratatui)+ CLI サブコマンド |
 | `tests/roundtrip.rs` | 実式コーパス + ランダムプロパティテスト |
+| `tests/ui.rs` | キー駆動 UI テスト(キースクリプト DSL + ランダムキー列。`MASCII_UI_PROP_N`/`_SEED`) |
 | `tools/merge_math_font.py` | JuliaMono から不足数式グリフを補う合成フォント生成(fontTools) |
 | `wasm/` | wasm-bindgen バインディング(変換 API + キー駆動 `MasciiEditor`) |
 | `editors/` | VSCode / Obsidian / Zed 統合(docs/editors.md 参照) |

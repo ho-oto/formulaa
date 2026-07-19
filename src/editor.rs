@@ -27,6 +27,10 @@ pub struct Editor {
     /// Selection anchor column in the current row (Shift+←/→). The selected
     /// node range is between the anchor and the cursor column.
     pub select_anchor: Option<usize>,
+    /// Path at the moment the anchor was set: a selection is only valid
+    /// while the cursor stays in that row (leaving the row would make the
+    /// anchor point into a different — possibly shorter — row).
+    select_path: Vec<(usize, Field)>,
 }
 
 /// Label keys for jump mode, most reachable first.
@@ -100,6 +104,7 @@ impl Editor {
             highlight: false,
             structure: false,
             select_anchor: None,
+            select_path: Vec::new(),
         }
     }
 
@@ -314,10 +319,12 @@ impl Editor {
         false
     }
 
-    /// `)` closes the innermost ( … ) inset, or inserts a literal atom.
+    /// `)` closes the innermost ( … ) inset. A literal `)` atom is not
+    /// allowed: it is indistinguishable from a closing delimiter, so a
+    /// mismatched-pair scan inside any delimiter would misread it.
     pub fn close_paren(&mut self) {
         if !self.close_delim(')') {
-            self.insert_sym(')');
+            self.message = "not inside a ( ) inset (( inserts one)".into();
         }
     }
 
@@ -484,8 +491,9 @@ impl Editor {
     // ----- selection (Shift+←/→ over sibling nodes) -----
 
     pub fn select_move(&mut self, right: bool) {
-        if self.select_anchor.is_none() {
+        if self.select_anchor.is_none() || self.select_path != self.path {
             self.select_anchor = Some(self.col);
+            self.select_path = self.path.clone();
         }
         if right {
             self.col = (self.col + 1).min(self.cur_row().len());
@@ -497,13 +505,19 @@ impl Editor {
         }
     }
 
-    /// Selected node index range [lo, hi) in the current row.
+    /// Selected node index range [lo, hi) in the current row. A stale
+    /// anchor — set in a different row, or beyond the row after it
+    /// shrank — yields no selection instead of a bogus range.
     pub fn selection(&self) -> Option<(usize, usize)> {
         let a = self.select_anchor?;
-        if a == self.col {
+        if a == self.col || self.select_path != self.path {
             return None;
         }
-        Some((a.min(self.col), a.max(self.col)))
+        let (lo, hi) = (a.min(self.col), a.max(self.col));
+        if hi > self.cur_row().len() {
+            return None;
+        }
+        Some((lo, hi))
     }
 
     /// Remove and return the selected nodes, leaving the cursor at the gap.

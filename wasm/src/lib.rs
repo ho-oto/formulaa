@@ -110,121 +110,30 @@ impl MasciiEditor {
 
     /// Handle one key. `key` uses KeyboardEvent.key names for specials
     /// ("ArrowLeft", "Backspace", "Enter", "Escape", "Home", "End",
-    /// "Delete", " ") and single characters otherwise. Mirrors the TUI
-    /// bindings (^ _ ( ) [ ] \ and selection with shift+arrows).
+    /// "Delete", "Tab", " ") and single characters otherwise. Dispatches
+    /// through the shared library keymap (`mascii::input`), so the
+    /// bindings cannot drift from the TUI. Host effects (save/copy/quit)
+    /// do not apply here and are ignored.
     pub fn key(&mut self, key: &str, shift: bool) {
-        use mascii::ast::Node;
-        let ed = &mut self.ed;
-
-        // Minibuffer captures input first.
-        if ed.minibuffer.is_some() {
-            match key {
-                "Escape" => ed.minibuffer = None,
-                "Backspace" => {
-                    let buf = ed.minibuffer.as_mut().unwrap();
-                    if buf.pop().is_none() {
-                        ed.minibuffer = None;
-                    }
-                }
-                "Enter" | " " => {
-                    let cmd = ed.minibuffer.take().unwrap();
-                    ed.execute(&cmd);
-                }
-                k if k.chars().count() == 1 => {
-                    let c = k.chars().next().unwrap();
-                    if c.is_ascii_graphic() {
-                        ed.minibuffer.as_mut().unwrap().push(c);
-                    }
-                }
-                _ => {}
-            }
-            return;
-        }
-
-        ed.message.clear();
-        match key {
-            "ArrowLeft" if shift => ed.select_move(false),
-            "ArrowRight" if shift => ed.select_move(true),
-            "ArrowLeft" => {
-                ed.select_anchor = None;
-                ed.left();
-            }
-            "ArrowRight" => {
-                ed.select_anchor = None;
-                ed.right();
-            }
-            "ArrowUp" => {
-                ed.select_anchor = None;
-                ed.vertical(true);
-            }
-            "ArrowDown" => {
-                ed.select_anchor = None;
-                ed.vertical(false);
-            }
-            "Escape" => ed.select_anchor = None,
-            "Home" => ed.home(),
-            "End" => ed.end(),
-            "Backspace" => {
-                if !ed.delete_selection() {
-                    ed.backspace();
-                }
-            }
-            "Delete" => {
-                if !ed.delete_selection() {
-                    ed.delete();
-                }
-            }
-            "\\" => ed.minibuffer = Some(String::new()),
-            "^" => {
-                if !ed.wrap_selection(|c| Node::Sup { arg: c }) {
-                    ed.insert_and_enter(Node::Sup { arg: vec![] });
-                }
-            }
-            "_" => {
-                if !ed.wrap_selection(|c| Node::Sub { arg: c }) {
-                    ed.insert_and_enter(Node::Sub { arg: vec![] });
-                }
-            }
-            "(" => {
-                if !ed.wrap_selection(|c| Node::Delim {
-                    left: '(',
-                    right: ')',
-                    mids: vec![],
-                    segs: vec![c],
-                }) {
-                    ed.insert_delim('(', ')', vec![]);
-                }
-            }
-            ")" => ed.close_paren(),
-            "{" => {
-                if !ed.wrap_selection(|c| Node::Delim {
-                    left: '{',
-                    right: '}',
-                    mids: vec![],
-                    segs: vec![c],
-                }) {
-                    ed.insert_delim('{', '}', vec![]);
-                }
-            }
-            "}" => ed.close_brace(),
-            "[" => ed.message = "[ ] are reserved for matrices; use \\matrix".into(),
-            "\"" => ed.message = "\" is reserved for text runs; use \\rm<text>".into(),
-            "]" => ed.close_bracket(),
-            "Tab" => ed.exit_inset(),
-            "Enter" => ed.add_row(),
-            " " => {
-                ed.select_anchor = None;
-                ed.insert_spacer();
-            }
-            k if k.chars().count() == 1 => {
-                let c = k.chars().next().unwrap();
-                if c.is_ascii_graphic() {
-                    ed.select_anchor = None;
-                    ed.insert_sym(c);
-                }
-            }
-            _ => {}
-        }
+        use mascii::input::Key;
+        let key = match key {
+            "ArrowLeft" => Key::Left,
+            "ArrowRight" => Key::Right,
+            "ArrowUp" => Key::Up,
+            "ArrowDown" => Key::Down,
+            "Home" => Key::Home,
+            "End" => Key::End,
+            "Enter" => Key::Enter,
+            "Backspace" => Key::Backspace,
+            "Delete" => Key::Delete,
+            "Escape" => Key::Esc,
+            "Tab" => Key::Tab,
+            k => match k.chars().next() {
+                Some(c) if k.chars().count() == 1 => Key::Char(c),
+                _ => return,
+            },
+        };
+        let _ = self.ed.input(key, shift, false);
     }
 }
 
