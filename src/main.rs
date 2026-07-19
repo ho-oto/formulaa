@@ -19,13 +19,42 @@ use mascii::{ast, latex, parse, typst};
 const HELP: &str = "\\cmd  ^/_ ( ) insets  Tab exit  Space blank  Enter grid row  ←→↑↓ move  ⇧←→ select  ^G jump  ^B blocks  ^O structure  ^T italic  ^Y copy AA  ^S save  ^Q quit";
 
 const USAGE: &str = "\
-usage: mascii [SAVE_PATH]          interactive TUI editor (default: formula.tex)
+usage: mascii [--session] [SAVE_PATH]  interactive TUI editor (default: formula.tex)
        mascii aa2tex   [FILE]     AA formula (file or stdin) -> LaTeX
        mascii aa2typst [FILE]     AA formula (file or stdin) -> Typst
-       mascii fmt      [FILE]     AA formula -> canonical AA (normalize)";
+       mascii fmt      [FILE]     AA formula -> canonical AA (normalize)
+
+--session: persist the formula to .mascii-session after every edit and
+restore it on startup — survives restarts, e.g. cargo watch -x 'run -- --session'";
+
+/// Session file for `--session` (canonical AA; formatting spacers are
+/// lost on restore because reparsing drops them).
+const SESSION_FILE: &str = ".mascii-session";
+
+/// Load the session formula, if a valid one is on disk.
+fn load_session() -> Option<ast::Row> {
+    let text = fs::read_to_string(SESSION_FILE).ok()?;
+    if text.trim().is_empty() {
+        return None;
+    }
+    parse::parse(&text).ok()
+}
+
+/// Best-effort write of the current formula (empty formula = no file).
+fn save_session(ed: &Editor) {
+    let row = ast::normalize(&ed.root);
+    if row.is_empty() {
+        let _ = fs::remove_file(SESSION_FILE);
+    } else {
+        let aa = render_row(&row, None, false, &RenderCtx::canonical()).to_text();
+        let _ = fs::write(SESSION_FILE, format!("{}\n", aa));
+    }
+}
 
 fn main() -> std::io::Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let session = args.iter().any(|a| a == "--session");
+    args.retain(|a| a != "--session");
     match args.first().map(String::as_str) {
         Some("aa2tex") | Some("aa2typst") | Some("fmt") => {
             let rest: Vec<&str> = args[1..].iter().map(String::as_str).collect();
@@ -45,6 +74,13 @@ fn main() -> std::io::Result<()> {
     let mut terminal = ratatui::init();
     let mut ed = Editor::new();
     ed.message = format!("mascii — LyX-like math editor (saves to {})", save_path);
+    if session {
+        if let Some(row) = load_session() {
+            ed.col = row.len();
+            ed.root = row;
+            ed.message = format!("session restored from {}", SESSION_FILE);
+        }
+    }
 
     let mut guard = RoundtripGuard::default();
     let result = loop {
@@ -57,6 +93,9 @@ fn main() -> std::io::Result<()> {
                     break Ok(());
                 }
                 guard.check(&mut ed);
+                if session {
+                    save_session(&ed);
+                }
             }
             Ok(_) => {}
             Err(e) => break Err(e),

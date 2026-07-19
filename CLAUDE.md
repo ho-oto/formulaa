@@ -10,6 +10,7 @@ cargo check -p mascii-wasm --target wasm32-unknown-unknown  # wasm 側
 cargo clippy --all-targets     # 警告ゼロを維持
 cargo fmt                      # コミット前に必ず整形(リポジトリ全体が rustfmt 準拠)
 cargo run                      # TUI エディタ
+cargo watch -x 'run -- --session'  # UI 開発: 再起動しても数式が復元される(.mascii-session)
 cargo run --example demo       # レンダリングのサンプル出力(TUI なし)
 cargo run --example ambig      # バンド記法が解決した曖昧性の回帰デモ
 echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)

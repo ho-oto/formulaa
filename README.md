@@ -26,6 +26,10 @@ mascii aa2typst formula.txt     # AA → Typst
 mascii fmt      formula.txt     # AA → 正準AA(手書きAAの正規化・整形)
 
 cargo run --example demo        # レンダリングのサンプルを表示
+
+# UI 開発: --session で編集内容を .mascii-session に自動保存・起動時復元。
+# cargo-watch と組めば「保存→再起動」しても数式が残る(ホットリロード風)
+cargo watch -x 'run -- --session'
 ```
 
 手書きAAもある程度受理します(ASCII の `x+1`、`E=m c²` など。英字は
