@@ -15,7 +15,7 @@ use mascii::editor::{
 };
 use mascii::{ast, latex, parse, typst};
 
-const HELP: &str = "\\cmd  ^/_ ( ) insets  Tab exit  Space blank  ←→↑↓ move  ⇧←→ select  ^G jump  ^B blocks  ^O structure  ^T italic  ^Y copy AA  ^S save  ^Q quit";
+const HELP: &str = "\\cmd  ^/_ ( ) insets  Tab exit  Space blank  Enter grid row  ←→↑↓ move  ⇧←→ select  ^G jump  ^B blocks  ^O structure  ^T italic  ^Y copy AA  ^S save  ^Q quit";
 
 const USAGE: &str = "\
 usage: mascii [SAVE_PATH]          interactive TUI editor (default: formula.tex)

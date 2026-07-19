@@ -44,10 +44,12 @@ pub const SYMBOLS: &[(&str, char)] = &[
 
 /// Structure-reserved glyphs: never valid as atoms (see docs/aa-spec.md §2).
 /// `symbol_by_name` filters these so no symbol table entry can inject one.
+/// Accent marks, the √ overline `_`, and the inline super/subscript
+/// codepoints are reserved too — they read back as structure, not atoms.
 pub fn is_reserved_glyph(c: char) -> bool {
     matches!(
         c,
-        '─' | '┄' | '╌' | '√' | '∛' | '∜' | '│' | '⬚' | '▌' | '"'
+        '─' | '┄' | '═' | '√' | '∛' | '∜' | '│' | '⬚' | '▌' | '"' | '_'
             | '⎛' | '⎜' | '⎝' | '⎞' | '⎟' | '⎠'
             | '⎡' | '⎢' | '⎣' | '⎤' | '⎥' | '⎦'
             | '{' | '}' | '⟨' | '⟩'
@@ -55,7 +57,10 @@ pub fn is_reserved_glyph(c: char) -> bool {
             | '╱' | '╲' | '⎸' | '⎹' | '▏' | '▕'
             | '┌' | '┬' | '┐' | '├' | '┼' | '┤' | '└' | '┴' | '┘' | '┠' | '┨'
             | '╭' | '╮' | '╰' | '╯'
-    )
+    ) || is_over_mark(c)
+        || is_under_mark(c)
+        || crate::render::unsuperscript_char(c).is_some()
+        || crate::render::unsubscript_char(c).is_some()
 }
 
 /// Accent marks: (command name, mark char, is_under, latex command).

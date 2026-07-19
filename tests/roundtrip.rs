@@ -2,8 +2,9 @@
 //! physics and statistics, plus a randomized property test.
 //!
 //! Invariant: for any AST x,
-//!     parse(render(normalize(x))) == normalize(x)
-//!     render(parse(aa)) == aa           for canonical aa
+//!     parse(render(normalize(x))) == normalize(strip_spacers(normalize(x)))
+//! (render(parse(aa)) == aa is NOT required — AA is source code and the
+//! accepted set is wider than the canonical form; fmt tightens it.)
 //!
 //! The corpus includes the three formulas from MDN's MathML tutorial
 //! "Three famous mathematical formulas" (Cardano, Cauchy–Schwarz,
@@ -74,7 +75,7 @@ fn array(rows: usize, cols: usize, cells: Vec<Row>) -> Node {
     Node::Array { rows, cols, cells }
 }
 
-/// A [ ] matrix (grid wrapped in brackets, the old Matrix node).
+/// A [ ] matrix: a grid wrapped in bracket delimiters.
 fn mat(rows: usize, cols: usize, cells: Vec<Row>) -> Node {
     delim('[', ']', vec![], vec![vec![array(rows, cols, cells)]])
 }
@@ -118,6 +119,15 @@ fn roundtrip(name: &str, row: &Row) {
     }
 }
 
+/// Hand-written input stacking non-accent content directly above/below a
+/// baseline token is a parse error — never silently dropped.
+#[test]
+fn stray_stacked_content_is_an_error() {
+    // The fraction pins the baseline; y sits right on top of / below x.
+    assert!(parse("1   y\n─ + x\n2").is_err());
+    assert!(parse("1\n─ + x\n2   y").is_err());
+}
+
 // ----- MDN: three famous mathematical formulas -----
 
 /// ∛(−q/2 + √(q²/4 + p³/27)) + ∛(−q/2 − √(q²/4 + p³/27))
@@ -146,8 +156,8 @@ fn cardano_formula() {
 }
 
 /// (∑_{k=1}^{n} u_k v̄_k)² ≤ (∑_{k=1}^{n} u_k²)(∑_{k=1}^{n} v_k²)
-/// (MDN's Cauchy–Bunyakovsky–Schwarz inequality; |·| written with parens
-/// since vertical-bar delimiters are not supported yet.)
+/// (MDN's Cauchy–Bunyakovsky–Schwarz inequality, kept with parens as in
+/// the original corpus entry; |·| delimiters exist too — see \abs.)
 #[test]
 fn cauchy_schwarz_inequality() {
     let sum = |body: Row| n(bigop('∑', s("k=1"), s("n"))).into_iter().chain(body).collect::<Row>();

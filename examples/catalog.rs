@@ -116,8 +116,8 @@ fn cardano_formula() {
 }
 
 /// (∑_{k=1}^{n} u_k v̄_k)² ≤ (∑_{k=1}^{n} u_k²)(∑_{k=1}^{n} v_k²)
-/// (MDN's Cauchy–Bunyakovsky–Schwarz inequality; |·| written with parens
-/// since vertical-bar delimiters are not supported yet.)
+/// (MDN's Cauchy–Bunyakovsky–Schwarz inequality, kept with parens as in
+/// the original corpus entry; |·| delimiters exist too — see \abs.)
 fn cauchy_schwarz_inequality() {
     let sum = |body: Row| n(bigop('∑', s("k=1"), s("n"))).into_iter().chain(body).collect::<Row>();
     let row = cat(&[

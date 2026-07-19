@@ -28,9 +28,9 @@ mascii fmt      formula.txt     # AA → 正準AA(手書きAAの正規化・整�
 cargo run --example demo        # レンダリングのサンプルを表示
 ```
 
-手書きAAもある程度受理します(ASCII の `x+1`、`E=m c²`、`┄` の代わりの
-`~∑~` バンドなど。英字は単独1文字=イタリック変数、2文字以上のランは
-辞書語なら関数・それ以外は \mathrm)。
+手書きAAもある程度受理します(ASCII の `x+1`、`E=m c²` など。英字は
+単独1文字=イタリック変数、2文字以上のランは辞書語なら関数・それ以外は
+\mathrm)。
 
 TUI は毎編集後に AA→AST の逆変換を自動検査し、ラウンドトリップが壊れる
 編集を見つけると `mascii_debug/roundtrip-N.txt` にレポートを保存します
@@ -60,19 +60,22 @@ TUI は毎編集後に AA→AST の逆変換を自動検査し、ラウンドト
 
 ## コマンド(抜粋)
 
-- 構造: `\frac` `\sqrt` `\cbrt`(∛) `\matrix`(2×2。`\matrix34` で 3行×4列、
+- 構造: `\frac` `\sqrt` `\cbrt`(∛)`\qdrt`(∜) `\matrix`(2×2。`\matrix34` で 3行×4列、
   各 *matrix/cases/array 共通。Enter/\addcol などで後から増減も可)
 - デリミタ: `\pmatrix` `\Bmatrix` `\vmatrix` `\array`(裸グリッド)`\cases`
   `\abs` `\langle` `\braket`(⟨·|·⟩)`\set`({·|·})`\mid`(セグメント分割)
   `\delim<left><right>[mids]`(例 `\delim(]`、`< >` は ⟨ ⟩ の別名)
 - 大型演算子: `\sum` `\prod` `\int` `\oint` `\bigcup` …(挿入直後は下極限、
   `↑` で上極限へ)。`\lim` `\max` `\inf` `\det` `\Pr` なども同じバンドで
-  下極限に入る(`┄lim┄`)
+  下極限に入る(`┄lim┄`)。`\argmax` `\argmin` は複数ピースの
+  `┄arg┄max┄`(基底の自由編集は今後の UI 課題)
 - 関数名: `\sin` `\cos` `\log` `\lim` …(立体で表示)
 - アクセント: `\hat` `\vec` `\bar` `\dot` `\tilde` `\underline`
   (直前の1文字に付く。続けて実行すると縦に重ね掛け)
 - 伸縮矢印: `\xto` `\xfrom`(→ ←)、`\xTo` `\xFrom`(⇒ ⇐)— 上下にラベル
-- テキスト: `\rmdx` → `"dx"`(\mathrm)、`\text...`(空白入りは AA 上 ␣)
+  (`\xrightarrow` などフルネームも可)
+- テキスト: `\rmdx` → `dx`(裸の \mathrm。単独1文字は `'d'`)、
+  `\text...` → `"…"`(\text。空白入りは AA 上 ␣)
 - ブレース: `\overbrace` `\underbrace`(選択があれば選択を引数にしてラベルへ)
 - 記号: 厳選テーブル + [ho-oto/mathematical-symbols](https://github.com/ho-oto/mathematical-symbols)
   由来の 4000+ エントリ(`\bbR`→ℝ, `\->`→→, `\oo`→∞ など)
@@ -107,9 +110,11 @@ AA 数式を構造エディタで編集する拡張のプロトタイプを `edi
 ## 設計
 
 内部表現は TeX 文字列ではなく**数式 AST**。構造編集・AA 描画・LaTeX/Typst
-出力のすべてが AST から導出されます。AA は AST と一対一対応する正準形式で、
-ラウンドトリップ性(`parse ∘ render == id`)を実式コーパスとランダム生成
-2000 ケースのプロパティテストで保証しています。
+出力のすべてが AST から導出されます。AA はソースコードで、正準形の
+ラウンドトリップ契約(`parse(render(normalize(x))) ==
+normalize(strip_spacers(normalize(x)))`)を実式コーパスとランダム生成
+2000 ケースのプロパティテストで保証しています(`fmt` が受理形を正準形に
+整えます)。
 
 - `docs/aa-spec.md` — 正準AA形式の仕様(予約グリフ・レイアウト)
 - `docs/parse-model.md` — パースモデル仕様(読み手視点: 基線復元→走査→再帰)
@@ -128,5 +133,6 @@ src/main.rs     ratatui TUI + CLI
 
 ## ロードマップ
 
-docs/design.md 参照。直近: 縦棒デリミタ(|x|・行列式)、可変幅アクセント
-(`\overline{x+y}`)、`\lim` の下極限、LaTeX パーサ(逆方向)、MathML 出力。
+docs/design.md 参照。直近: undo/redo・ペースト、可変幅アクセント
+(`\overline{x+y}`)、BigOp 基底の自由編集(現状 `\argmax` 等は定型)、
+LaTeX パーサ(逆方向)、MathML 出力。

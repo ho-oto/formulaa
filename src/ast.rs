@@ -44,9 +44,10 @@ pub enum Node {
     /// a ╭──╮ / ╰──╯ row hugging the argument block, with an optional
     /// label beyond it. Same range-row idea as Frac, anchored off-baseline.
     Brace { over: bool, arg: Row, label: Row },
-    /// Stretchy labeled arrow (\xrightarrow / \xleftarrow): a ╌ body with
-    /// the head char (→ or ←) at the pointing end, labels over/under
-    /// spanning its extent (same range-band idea as ┄).
+    /// Stretchy labeled arrow (\xrightarrow / \xleftarrow and the ⇒/⇐
+    /// doubles): a ─ (or ═) body with an ASCII head (< or >) at the
+    /// pointing end, labels over/under spanning its extent (same
+    /// range-band idea as ┄). `op` is → ← ⇒ or ⇐.
     Arrow { op: char, over: Row, under: Row },
     /// Auto-scaling delimiter block. `left`/`right`/`mids` hold delimiter
     /// *spec* chars: ( ) [ ] { } ⟨ ⟩ | and '.' (null delimiter, drawn as

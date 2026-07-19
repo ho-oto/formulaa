@@ -689,6 +689,7 @@ fn parse_region(
                 let Some(close) = close else {
                     return err("unclosed \"", bl, col);
                 };
+                check_flat_columns(g, rect, bl, col, close, 0, 0)?;
                 let t: String = (col + 1..close)
                     .map(|c2| match g.at(bl, c2) {
                         '␣' => ' ',
@@ -716,6 +717,7 @@ fn parse_region(
                     });
                 match quoted {
                     Some(close) => {
+                        check_flat_columns(g, rect, bl, col, close, 0, 0)?;
                         let t: String = (col + 1..close)
                             .map(|c2| match g.at(bl, c2) {
                                 '␣' => ' ',
@@ -726,6 +728,7 @@ fn parse_region(
                         col = close + 1;
                     }
                     None => {
+                        check_flat_columns(g, rect, bl, col, col, 0, 0)?;
                         out.push(Node::Sym('\''));
                         col += 1;
                     }
@@ -733,6 +736,7 @@ fn parse_region(
             }
             ')' => {
                 // Unmatched close (LyX lets you type one): plain atom.
+                check_flat_columns(g, rect, bl, col, col, 0, 0)?;
                 out.push(Node::Sym(')'));
                 col += 1;
             }
@@ -764,10 +768,14 @@ fn parse_region(
                 out.push(Node::Sqrt { arg: parse_region(g, inner, Some(bl), depth + 1, trace, in_cancel)?, index });
                 col += w + 1;
             }
-            _ if ch == PLACEHOLDER => col += 1,
+            _ if ch == PLACEHOLDER => {
+                check_flat_columns(g, rect, bl, col, col, 0, 0)?;
+                col += 1;
+            }
             _ if unsuperscript_char(ch).is_some() => {
                 let run_end =
                     scan_while_same_flag(g, bl, col, rect.r, |c| unsuperscript_char(c).is_some());
+                check_flat_columns(g, rect, bl, col, run_end, 0, 0)?;
                 let arg = (col..=run_end)
                     .map(|c| Node::Sym(unsuperscript_char(g.at(bl, c)).unwrap()))
                     .collect();
@@ -777,6 +785,7 @@ fn parse_region(
             _ if unsubscript_char(ch).is_some() => {
                 let run_end =
                     scan_while_same_flag(g, bl, col, rect.r, |c| unsubscript_char(c).is_some());
+                check_flat_columns(g, rect, bl, col, run_end, 0, 0)?;
                 let arg = (col..=run_end)
                     .map(|c| Node::Sym(unsubscript_char(g.at(bl, c)).unwrap()))
                     .collect();
@@ -790,6 +799,7 @@ fn parse_region(
                 // is glued to another letter (d𝑦 = roman differential).
                 let run_end =
                     scan_while_same_flag(g, bl, col, rect.r, |c| c.is_ascii_alphabetic());
+                check_flat_columns(g, rect, bl, col, run_end, 0, 0)?;
                 let word: String = (col..=run_end).map(|c| g.at(bl, c)).collect();
                 if word.chars().count() == 1 {
                     let prev_letter = col > rect.l && g.at(bl, col - 1).is_alphabetic();
@@ -811,6 +821,7 @@ fn parse_region(
                 // Marks in the cells directly above/below an atom are an
                 // accent stack; those cells are otherwise always blank.
                 let (overs, unders) = accent_stacks(g, rect, bl, col);
+                check_flat_columns(g, rect, bl, col, col, overs.len(), unders.len())?;
                 let base = unstyle_char(ch);
                 if !overs.is_empty() || !unders.is_empty() {
                     out.push(Node::Accent { overs, unders, base });
@@ -1016,6 +1027,34 @@ fn parse_brace(
 
 /// Accent-mark stacks in the cells directly above/below (bl, col),
 /// innermost first. Returns (overs, unders).
+/// A flat baseline token (atom, letter/text run, inline script chars…)
+/// owns its columns entirely: apart from the accent marks it consumed,
+/// the cells above and below it must be blank. Hand-written input that
+/// stacks anything else there would otherwise be dropped silently.
+fn check_flat_columns(
+    g: &Grid,
+    rect: Rect,
+    bl: usize,
+    l: usize,
+    r: usize,
+    skip_over: usize,
+    skip_under: usize,
+) -> Result<()> {
+    for c in l..=r {
+        for row in rect.t..bl - skip_over {
+            if g.at(row, c) != ' ' {
+                return err("content stacked above a baseline token (not an accent)", row, c);
+            }
+        }
+        for row in bl + skip_under + 1..=rect.b {
+            if g.at(row, c) != ' ' {
+                return err("content stacked below a baseline token (not an accent)", row, c);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn accent_stacks(g: &Grid, rect: Rect, bl: usize, col: usize) -> (Vec<char>, Vec<char>) {
     let mut overs = Vec::new();
     let mut r = bl;

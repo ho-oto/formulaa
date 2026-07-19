@@ -682,7 +682,7 @@ impl Editor {
                 }
             }
             "abs" => self.insert_delim('|', '|', vec![]),
-            "langle" | "angle" => self.insert_delim('⟨', '⟩', vec![]),
+            "langle" => self.insert_delim('⟨', '⟩', vec![]),
             "braket" => self.insert_delim('⟨', '⟩', vec!['|']),
             "set" => self.insert_delim('{', '}', vec!['|']),
             "mid" => self.insert_mid(),
@@ -711,6 +711,16 @@ impl Editor {
             "xLeftarrow" | "xFrom" => {
                 self.insert_and_enter(Node::Arrow { op: '⇐', over: vec![], under: vec![] })
             }
+            // Multi-piece limit operators (┄arg┄max┄). Hardcoded for now;
+            // arbitrary bases need OpBase editing (roadmap).
+            "argmax" | "argmin" => {
+                let f = if cmd == "argmax" { "max" } else { "min" };
+                self.insert_and_enter(Node::BigOp {
+                    base: vec![Node::Func("arg".into()), Node::Func(f.into())],
+                    lower: vec![],
+                    upper: vec![],
+                });
+            }
             "addrow" => self.add_row(),
             "addcol" => self.add_col(),
             "delrow" => self.del_row(),
@@ -727,12 +737,16 @@ impl Editor {
                     })
                     .collect();
                 let valid = |c: &char| crate::ast::DELIM_SPECS.contains(c);
-                if specs.len() >= 2 && specs.iter().all(valid) {
+                if specs.len() >= 2
+                    && specs.iter().all(valid)
+                    && specs[2..].iter().all(|&c| c == '|')
+                {
                     let (l, r) = (specs[0], specs[1]);
                     self.insert_delim(l, r, specs[2..].to_vec());
                 } else {
                     self.message =
-                        "usage: \\delim<left><right>[mids] with chars ()[]{}<>|.".into();
+                        "usage: \\delim<left><right>[|s] with chars ()[]{}<>|. (mids: | only)"
+                            .into();
                 }
             }
             _ => {
@@ -823,6 +837,33 @@ mod tests {
         ed.left();
         assert_eq!(ed.path.last().unwrap().1, Field::FracDen);
         assert_eq!(ed.col, 1);
+    }
+
+    #[test]
+    fn delim_mids_are_pipe_only() {
+        let mut ed = Editor::new();
+        ed.execute("delim(][");
+        assert!(ed.root.is_empty(), "\\delim(][ must be rejected, got {:?}", ed.root);
+        ed.execute("delim(]|");
+        assert!(matches!(ed.root[0], Node::Delim { ref mids, .. } if mids == &['|']));
+    }
+
+    #[test]
+    fn angle_is_the_symbol_not_the_delimiter() {
+        let mut ed = Editor::new();
+        ed.execute("angle");
+        assert_eq!(ed.root, vec![Node::Sym('∠')]);
+    }
+
+    #[test]
+    fn argmax_makes_a_two_piece_bigop() {
+        let mut ed = Editor::new();
+        ed.execute("argmax");
+        // Cursor lands in the lower limit.
+        assert_eq!(ed.path.last().unwrap().1, Field::OpLower);
+        ed.insert_sym('x');
+        ed.exit_inset();
+        assert_eq!(row_to_latex(&ed.root), "\\arg \\max _{x}");
     }
 
     #[test]
