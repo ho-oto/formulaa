@@ -16,10 +16,12 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
 
 ## 最重要ルール
 
-1. **`render.rs` と `parse.rs` は正準AA仕様(docs/aa-spec.md)の表と裏。**
+1. **`render.rs` と `parse.rs` は仕様(docs/parse-model.md / aa-spec.md)の表と裏。**
    片方だけ変更してはならない。変更したら `cargo test` で
-   ラウンドトリップ不変条件を確認:
-   `parse(render(normalize(x))) == normalize(x)` / `render(parse(aa)) == aa`
+   ラウンドトリップ契約を確認:
+   `parse(render(normalize(x))) == normalize(strip_spacers(normalize(x)))`
+   (`render(parse(aa)) == aa` は要求ではない — AA はソースコードで、
+   受理は正準形より広い。fmt が整える)
 2. 新しい描画グリフを導入するときは docs/aa-spec.md の予約グリフ表を更新し、
    `symbols.rs` / `symbols_ext.rs` に原子として同じ文字が存在しないことを確認。
 3. `normalize`(ast.rs)は**冪等**でなければならない(合流後の再正規化)。
@@ -53,7 +55,8 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
 
 ## 設計文書
 
-- `docs/aa-spec.md` — 正準AA形式の仕様(グリフ・レイアウト規則・パース規則)
+- `docs/aa-spec.md` — 正準AA形式の仕様(グリフ・ノード別レイアウト規則)
+- `docs/parse-model.md` — パースモデル仕様(基線復元→走査→再帰の視点。契約と fuse 表)
 - `docs/design.md` — 設計判断の経緯とロードマップ。**着手前に必読**
 
 ## ハマりどころ
@@ -68,11 +71,11 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
 - `Sqrt` は `index: u8`(2/3/4 = √∛∜)を持つ。`Node::Accent` の base は
   1 文字(Row ではない)。
 - 括弧は `Node::Delim{left,right,mids,segs}` に統一(旧 Paren/Matrix は廃止)。
-  `Node::Array`(素のグリッド)は **Delim の単一 seg 直下のみ**有効 —
-  それ以外は normalize がヌルデリミタ `▏…▕` で包む。素の `[ ]` の中身は
-  常にグリッド。グリッド判定の閾値は「全幅空白行 or 全高空白4列」
-  (素の行は最大3列までしか連続空白を作れない)。
-- Space は ␣ 挿入、インセット脱出は Tab。Enter はグリッド内で行追加。
+  `Node::Array` はどこでも格子(裸なら ┌┬┐ フルフレーム、デリミタの単独 seg
+  なら最小マーカーの融合形 — ┼ 区切り行 / ┬┴ 行 / ┠┨ 接合)。空白の個数に
+  依存する規則は存在しない(docs/parse-model.md §0)。
+- Space は整形スペーサ(再パースで消える)、`\space`=␣、脱出は Tab、
+  Enter はグリッド内で行追加、Ctrl+Y で AA をクリップボードへ。
 - ratatui は feature "tui"(bin 専用)。ライブラリ本体に TUI 依存を
   持ち込まない(wasm ビルドが壊れる)。
 - ratatui のイベントは `KeyEventKind::Press` のみ処理(Windows の重複対策)。
