@@ -86,7 +86,10 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
   なら最小マーカーの融合形 — ┼ 区切り行 / ┬┴ 行 / ┠┨ 接合)。空白の個数に
   依存する規則は存在しない(docs/parse-model.md §0)。
 - Space は整形スペーサ(再パースで消える)、`\space`=␣、脱出は Tab、
-  Enter はグリッド内で行追加、Ctrl+Y で AA をクリップボードへ。
+  Enter はグリッド内で行追加・トップレベルで数式改行(`Node::Break`、
+  行間に `┄` 単体の区切り行)、Ctrl+Y で AA をクリップボードへ。
+  トップレベルの描画入口は `render_root`(Break 分割+縦積み)——
+  ルート行を描くときに `render_row` を直接呼ばない。
 - ratatui は feature "tui"(bin 専用)。ライブラリ本体に TUI 依存を
   持ち込まない(wasm ビルドが壊れる)。
 - ratatui のイベントは `KeyEventKind::Press` のみ処理(Windows の重複対策)。

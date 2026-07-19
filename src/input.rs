@@ -241,8 +241,15 @@ impl Editor {
             // `//` makes a fraction (a lone `/` stays the slash atom).
             Key::Char('/') => self.slash(),
             Key::Tab => self.exit_inset(),
-            // Enter inside a grid: new row below (like LyX table editing).
-            Key::Enter => self.add_row(),
+            // Enter inside a grid: new row below (like LyX table
+            // editing); at the top level: a formula line break.
+            Key::Enter => {
+                if self.path.is_empty() {
+                    self.break_line();
+                } else {
+                    self.add_row();
+                }
+            }
             // Space is a formatting space (Tab leaves insets; \space gives
             // the semantic ␣ atom).
             Key::Char(' ') => {

@@ -14,7 +14,7 @@ use mascii::editor::Editor;
 use mascii::input::{Effect, Key};
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
-use mascii::render::{RenderCtx, render_row};
+use mascii::render::{RenderCtx, render_root};
 
 fn named(tok: &str) -> Option<Key> {
     Some(match tok {
@@ -66,7 +66,7 @@ fn latex(ed: &Editor) -> String {
 }
 
 fn aa(ed: &Editor) -> String {
-    render_row(&normalize(&ed.root), None, false, &RenderCtx::canonical()).to_text()
+    render_root(&normalize(&ed.root), None, &RenderCtx::canonical()).to_text()
 }
 
 #[test]
@@ -118,6 +118,24 @@ fn esc_cancels_modes_before_quitting() {
     assert!(ed.minibuffer.is_none());
     // … and with nothing left to cancel it quits.
     assert_eq!(ed.input(Key::Esc, false, false), Effect::Quit);
+}
+
+#[test]
+fn enter_at_top_level_breaks_the_line() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, "a+b Enter =c");
+    assert_eq!(latex(&ed), "a+b \\\\ =c");
+    let pic = aa(&ed);
+    assert!(
+        pic.lines().nth(1).is_some_and(|l| l.trim_end() == "┄"),
+        "separator row:\n{}",
+        pic
+    );
+    // ↑/↓ move between the lines; Backspace at a line start merges.
+    type_script(&mut ed, "Up");
+    assert!(ed.col < 4, "moved to line 1, col {}", ed.col);
+    type_script(&mut ed, "Down Home Backspace");
+    assert_eq!(latex(&ed), "a+b=c");
 }
 
 #[test]
@@ -332,7 +350,7 @@ impl Rng {
 fn assert_roundtrip(ed: &Editor, history: &[String]) {
     let (droot, cursor) = ed.decorated();
     if let Some((p, c)) = cursor {
-        let b = render_row(&droot, Some((&p[..], c)), false, &RenderCtx::canonical());
+        let b = render_root(&droot, Some((&p[..], c)), &RenderCtx::canonical());
         assert!(
             b.caret.is_some(),
             "caret lost\n--- keys ---\n{}",
@@ -343,7 +361,7 @@ fn assert_roundtrip(ed: &Editor, history: &[String]) {
     if row.is_empty() {
         return;
     }
-    let aa = render_row(&row, None, false, &RenderCtx::canonical()).to_text();
+    let aa = render_root(&row, None, &RenderCtx::canonical()).to_text();
     let expected = normalize(&strip_spacers(&row));
     let parsed = parse(&aa).unwrap_or_else(|e| {
         panic!(

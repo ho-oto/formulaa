@@ -15,6 +15,12 @@ pub enum Node {
     /// the roundtrip contract is parse∘render == strip_spacers∘normalize.
     /// (Use the ␣ atom, \space, for a *semantic* space.)
     Spacer,
+    /// Line break of a multi-line formula (top-level row only). Renders
+    /// as a vertical stack: the continuation line starts with the `┄ `
+    /// marker at its baseline (a lone ┄ has no other reading — a band
+    /// always sandwiches its pieces without spaces). LaTeX: `\\`,
+    /// Typst: `\ `.
+    Break,
     /// Named function/operator rendered upright (sin, cos, log, ...).
     /// Only names from `symbols::FUNCS` are valid (parse relies on this).
     Func(String),
@@ -135,6 +141,7 @@ impl Node {
         match self {
             Node::Sym(_)
             | Node::Spacer
+            | Node::Break
             | Node::Func(_)
             | Node::Text { .. }
             | Node::Accent { .. } => {
@@ -234,9 +241,23 @@ pub fn normalize(row: &Row) -> Row {
     let mut out: Row = Vec::with_capacity(pre.len());
     for node in pre {
         // Leading spacers are dropped: they would rob a row-initial script
-        // of its explicit ⬚ base (and trim eats them anyway).
-        if out.is_empty() && matches!(node, Node::Spacer) {
+        // of its explicit ⬚ base (and trim eats them anyway). A Break
+        // starts a new line, so the same applies at every line edge —
+        // without this a line-initial script chunk sits on a spacer base
+        // and its baseline row renders fully blank (unparseable).
+        if out.is_empty() && matches!(node, Node::Spacer | Node::Break) {
             continue;
+        }
+        if matches!(node, Node::Spacer) && matches!(out.last(), Some(Node::Break)) {
+            continue;
+        }
+        if matches!(node, Node::Break) {
+            while matches!(out.last(), Some(Node::Spacer)) {
+                out.pop();
+            }
+            if out.is_empty() {
+                continue;
+            }
         }
         // Empty scripts/cancels do not exist in normal form: their lone ⬚
         // placeholder fuses with neighbouring script blocks in the picture,
@@ -307,7 +328,7 @@ pub fn normalize(row: &Row) -> Row {
     // Trailing spacers pad nothing visible (and a trailing one inside a
     // \cancel argument would meet the ragged-cancel spacer and fake a cell
     // gap); spacers are only meaningful *between* siblings.
-    while matches!(out.last(), Some(Node::Spacer)) {
+    while matches!(out.last(), Some(Node::Spacer | Node::Break)) {
         out.pop();
     }
     out
@@ -321,6 +342,7 @@ fn strip_cancels(row: &Row) -> Row {
             Node::Cancel { arg } => out.extend(strip_cancels(arg)),
             Node::Sym(_)
             | Node::Spacer
+            | Node::Break
             | Node::Func(_)
             | Node::Text { .. }
             | Node::Accent { .. } => out.push(n.clone()),
@@ -382,9 +404,11 @@ pub fn strip_spacers(row: &Row) -> Row {
     for n in row {
         match n {
             Node::Spacer => {}
-            Node::Sym(_) | Node::Func(_) | Node::Text { .. } | Node::Accent { .. } => {
-                out.push(n.clone())
-            }
+            Node::Sym(_)
+            | Node::Break
+            | Node::Func(_)
+            | Node::Text { .. }
+            | Node::Accent { .. } => out.push(n.clone()),
             Node::Frac { num, den } => out.push(Node::Frac {
                 num: strip_spacers(num),
                 den: strip_spacers(den),
@@ -449,9 +473,12 @@ fn normalize_node(node: &Node) -> Node {
             let _ = (overs, unders);
             Node::Sym(*base)
         }
-        Node::Sym(_) | Node::Spacer | Node::Func(_) | Node::Text { .. } | Node::Accent { .. } => {
-            node.clone()
-        }
+        Node::Sym(_)
+        | Node::Spacer
+        | Node::Break
+        | Node::Func(_)
+        | Node::Text { .. }
+        | Node::Accent { .. } => node.clone(),
         Node::Frac { num, den } => Node::Frac {
             num: normalize(num),
             den: normalize(den),

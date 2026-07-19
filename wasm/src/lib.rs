@@ -12,7 +12,7 @@ use mascii::editor::{
 };
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
-use mascii::render::{render_row, RenderCtx, CURSOR_CHAR};
+use mascii::render::{render_root, RenderCtx, CURSOR_CHAR};
 use mascii::typst::row_to_typst;
 use wasm_bindgen::prelude::*;
 
@@ -36,7 +36,7 @@ pub fn aa_to_typst(text: &str) -> Result<String, JsError> {
 #[wasm_bindgen]
 pub fn aa_format(text: &str) -> Result<String, JsError> {
     let row = parse_or_err(text)?;
-    Ok(render_row(&row, None, false, &RenderCtx::canonical()).to_text())
+    Ok(render_root(&row, None, &RenderCtx::canonical()).to_text())
 }
 
 /// Quick validity check (empty string on success, message on error).
@@ -79,7 +79,7 @@ impl MasciiEditor {
         let ctx = RenderCtx {
             italic: self.ed.italic,
         };
-        let block = render_row(&root, cursor_ref, false, &ctx);
+        let block = render_root(&root, cursor_ref, &ctx);
         // Caret and decorations are zero-width metadata; the text screen
         // draws them over the glyphs (▌ caret, ⟦ ⟧ selection ends,
         // a/s/d… jump and block labels).
@@ -137,7 +137,7 @@ impl MasciiEditor {
     /// Canonical AA (what should be written back into the document).
     pub fn aa(&self) -> String {
         let row = normalize(&self.ed.root);
-        render_row(&row, None, false, &RenderCtx::canonical()).to_text()
+        render_root(&row, None, &RenderCtx::canonical()).to_text()
     }
 
     pub fn latex(&self) -> String {

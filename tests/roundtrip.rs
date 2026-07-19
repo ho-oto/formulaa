@@ -13,7 +13,7 @@
 use mascii::ast::{Node, Row, normalize, strip_spacers};
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
-use mascii::render::{RenderCtx, render_row};
+use mascii::render::{RenderCtx, render_root};
 use mascii::typst::row_to_typst;
 
 // ----- tiny DSL for building formulas -----
@@ -110,7 +110,7 @@ fn cat(parts: &[Row]) -> Row {
 fn roundtrip(name: &str, row: &Row) {
     let row = normalize(row);
     let ctx = RenderCtx::canonical();
-    let aa = render_row(&row, None, false, &ctx).to_text();
+    let aa = render_root(&row, None, &ctx).to_text();
     // Formatting spacers survive in the AA but are invisible to the
     // parser, so the roundtrip target is the spacer-free normal form.
     let expected = normalize(&strip_spacers(&row));
@@ -126,7 +126,7 @@ fn roundtrip(name: &str, row: &Row) {
         row_to_latex(&parsed)
     );
     // Spacer-free output is a parse fixpoint.
-    let aa2 = render_row(&parsed, None, false, &ctx).to_text();
+    let aa2 = render_root(&parsed, None, &ctx).to_text();
     let reparsed = parse(&aa2)
         .unwrap_or_else(|e| panic!("[{}] re-parse failed: {}\n--- AA ---\n{}", name, e, aa2));
     assert_eq!(reparsed, parsed, "[{}] re-render mismatch", name);
@@ -166,6 +166,40 @@ fn operatorname_star_band() {
     assert_eq!(
         row_to_latex(&normalize(&row)),
         "\\operatorname*{esssup}_{x}f\\left(x\\right)"
+    );
+}
+
+/// Multi-line formula: Breaks stack the lines with a lone-┄ continuation
+/// marker on each following baseline.
+#[test]
+fn multi_line_formula() {
+    let row = cat(&[
+        s("y="),
+        n(paren(cat(&[s("x+1")]))),
+        n(sup(s("2"))),
+        n(Node::Break),
+        s("=x"),
+        n(sup(s("2"))),
+        s("+2x+1"),
+        n(Node::Break),
+        n(frac(s("a"), s("b"))),
+    ]);
+    roundtrip("multi-line", &row);
+    let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
+    assert_eq!(
+        aa.lines().filter(|l| l.trim_end() == "┄").count(),
+        2,
+        "two separator rows:\n{}",
+        aa
+    );
+    assert!(
+        row_to_latex(&normalize(&row)).contains("\\\\"),
+        "latex line break"
+    );
+    // Empty middle line is legal.
+    roundtrip(
+        "empty-line",
+        &cat(&[s("a"), n(Node::Break), n(Node::Break), s("b")]),
     );
 }
 
@@ -973,7 +1007,13 @@ fn property_random_asts_roundtrip() {
     let mut rng = Rng(seed);
     for i in 0..n {
         let depth = 1 + rng.below(4);
-        let row = gen_row(&mut rng, depth, 5);
+        let mut row = gen_row(&mut rng, depth, 5);
+        // Multi-line roots: occasionally append further segments.
+        for _ in 0..rng.below(3) {
+            row.push(Node::Break);
+            let d = 1 + rng.below(3);
+            row.extend(gen_row(&mut rng, d, 4));
+        }
         roundtrip(&format!("random-{}", i), &row);
     }
 }

@@ -58,6 +58,8 @@ fn accent_fn(mark: char) -> &'static str {
 fn node_to_typst(node: &Node) -> String {
     match node {
         Node::Spacer => String::new(),
+        // Math line break.
+        Node::Break => "\\ ".into(),
         Node::Sym(c) => match c {
             '\'' => "'".into(),
             '␣' => "space".into(),

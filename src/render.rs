@@ -588,6 +588,103 @@ pub fn render_row(
     hcat(&spaced)
 }
 
+/// Top-level entry: a root row may contain `Node::Break`s splitting the
+/// formula into display lines. Lines are stacked left-aligned with one
+/// blank row between them; every continuation line carries the `┄ `
+/// marker at its baseline (col 0) — a lone ┄ has no other reading, and
+/// it hands the parser the line's baseline for free. Rows without
+/// Breaks render exactly as render_row.
+pub fn render_root(row: &Row, cursor: Option<CursorRef>, ctx: &RenderCtx) -> Block {
+    if !row.iter().any(|n| matches!(n, Node::Break)) {
+        return render_row(row, cursor, false, ctx);
+    }
+    // Split at the Breaks; the cursor belongs to exactly one segment.
+    let mut segments: Vec<Block> = Vec::new();
+    let mut start = 0usize;
+    let cursor_col = match cursor {
+        Some(([], col)) => Some(col),
+        _ => None,
+    };
+    let bounds: Vec<usize> = row
+        .iter()
+        .enumerate()
+        .filter_map(|(i, n)| matches!(n, Node::Break).then_some(i))
+        .chain([row.len()])
+        .collect();
+    for &end in bounds.iter() {
+        let seg = &row[start..end];
+        // Rebase the cursor (path first step / top-level column) onto
+        // the segment that contains it.
+        let rebased: Option<(Vec<(usize, Field)>, usize)> = match cursor {
+            Some((path, col)) => match path.first() {
+                Some(&(i, f)) if (start..end).contains(&i) => {
+                    let mut p = path.to_vec();
+                    p[0] = (i - start, f);
+                    Some((p, col))
+                }
+                None if cursor_col.is_some_and(|c| (start..=end).contains(&c)) => {
+                    // Column boundary: attach to this segment unless it
+                    // belongs to the next one (col == end == a Break —
+                    // put the caret before the break, i.e. line end).
+                    Some((Vec::new(), cursor_col.unwrap() - start))
+                }
+                _ => None,
+            },
+            None => None,
+        };
+        let seg_vec: Row = seg.to_vec();
+        let cur_ref = rebased.as_ref().map(|(p, c)| (p.as_slice(), *c));
+        segments.push(render_row(&seg_vec, cur_ref, false, ctx));
+        start = end + 1;
+    }
+    vstack(&segments)
+}
+
+/// Stack blocks vertically, left-aligned, a lone-┄ separator row
+/// between lines; the result's baseline is the first block's. All
+/// annotations translate.
+fn vstack(blocks: &[Block]) -> Block {
+    let width = blocks.iter().map(|b| b.width()).max().unwrap_or(0);
+    let mut lines: Vec<Vec<char>> = Vec::new();
+    let mut cancel = Vec::new();
+    let mut caret = None;
+    let mut marks = Vec::new();
+    let mut baseline = 0;
+    for (i, b) in blocks.iter().enumerate() {
+        if i > 0 {
+            let mut sep = vec![' '; width];
+            sep[0] = OP_BAND;
+            lines.push(sep);
+        }
+        let y0 = lines.len();
+        if i == 0 {
+            baseline = b.baseline.min(b.height().saturating_sub(1));
+        }
+        // An empty line still occupies one (blank) row so the marker of
+        // the following line keeps its distance.
+        if b.is_empty() {
+            lines.push(vec![' '; width]);
+        }
+        for line in &b.lines {
+            let mut l = line.clone();
+            l.resize(width, ' ');
+            lines.push(l);
+        }
+        cancel.extend(b.cancel.iter().map(|&(r, c)| (y0 + r, c)));
+        if let Some((r, c)) = b.caret {
+            caret = Some((y0 + r.min(b.height().saturating_sub(1)), c));
+        }
+        marks.extend(b.marks.iter().map(|&(r, c, ch)| (y0 + r, c, ch)));
+    }
+    Block {
+        lines,
+        baseline,
+        cancel,
+        caret,
+        marks,
+    }
+}
+
 fn l_placeholder(cursor: Option<(Field, CursorRef)>) -> bool {
     cursor.is_some()
 }
@@ -603,6 +700,9 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
 
     match node {
         Node::Spacer => Block::from_chars(vec![' ']),
+        // Breaks are handled by render_root; one reaching a nested row
+        // renders as nothing.
+        Node::Break => Block::empty(),
         // No automatic spacing anywhere (operators included): spacing is
         // the user's, via formatting Spacers or the semantic ␣ atom.
         // Display markers (jump/block labels, selection ends) are

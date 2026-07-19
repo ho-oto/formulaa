@@ -360,7 +360,7 @@ impl Editor {
     /// Coordinates in the *display* geometry: ghost rows materialized,
     /// probes only on visible positions (invisible ones get None).
     fn display_coords(&self, cands: &[JumpCand]) -> Vec<Option<(usize, usize)>> {
-        use crate::render::{RenderCtx, render_row};
+        use crate::render::{RenderCtx, render_root};
         let n = cands.len().min(0x800);
         let mut root = self.root.clone();
         // Ghosts first (deepest rows first), then the probes with their
@@ -380,7 +380,7 @@ impl Editor {
             let mark = char::from_u32(PROBE_BASE + idx as u32).unwrap();
             row_at_mut(&mut root, &p2).insert(c2, Node::Sym(mark));
         }
-        let b = render_row(&root, None, false, &RenderCtx::canonical());
+        let b = render_root(&root, None, &RenderCtx::canonical());
         let mut out = vec![None; cands.len()];
         for &(y, x, ch) in &b.marks {
             let u = ch as u32;
@@ -418,7 +418,7 @@ impl Editor {
     }
 
     pub fn free_move(&mut self, dx: i32, dy: i32) {
-        use crate::render::{RenderCtx, render_row};
+        use crate::render::{RenderCtx, render_root};
         let Some(f) = &self.free else {
             return;
         };
@@ -496,7 +496,7 @@ impl Editor {
         }
         // Clamp to the display frame (ghosts included).
         let (droot, _) = self.decorated();
-        let b = render_row(&droot, None, false, &RenderCtx::canonical());
+        let b = render_root(&droot, None, &RenderCtx::canonical());
         let (h, w) = (b.height().max(1), b.width().max(1));
         at.0 = at.0.min(h - 1);
         at.1 = at.1.min(w);
@@ -527,6 +527,14 @@ impl Editor {
         self.select_anchor = None;
         self.path.clear();
         self.col = 0;
+    }
+
+    /// Enter at the top level: start a new formula line (Node::Break).
+    pub fn break_line(&mut self) {
+        self.select_anchor = None;
+        let col = self.col;
+        self.cur_row_mut().insert(col, Node::Break);
+        self.col += 1;
     }
 
     /// Insert a structure node and move the cursor into its first field.
@@ -679,6 +687,47 @@ impl Editor {
                 let f = if up { Field::OpUpper } else { Field::OpLower };
                 self.path.push((col, f));
                 self.col = 0;
+                return;
+            }
+        }
+        // Multi-line formulas: with no vertical target in the enclosing
+        // structure, ↑/↓ move between formula lines (whatever the
+        // nesting depth), keeping the horizontal position close.
+        if self.root.iter().any(|n| matches!(n, Node::Break)) {
+            let seg_of = |steps: &[Node]| steps.iter().filter(|n| matches!(n, Node::Break)).count();
+            let top = self.path.first().map_or(self.col, |&(i, _)| i);
+            let cur_seg = seg_of(&self.root[..top]);
+            let max_seg = seg_of(&self.root);
+            let target = if up {
+                cur_seg.checked_sub(1)
+            } else {
+                (cur_seg < max_seg).then_some(cur_seg + 1)
+            };
+            let Some(target) = target else { return };
+            let cands = self.jump_candidates();
+            let coords = self.display_coords(&cands);
+            let Some(my) = cands
+                .iter()
+                .position(|c| c.is_cursor)
+                .and_then(|i| coords[i])
+            else {
+                return;
+            };
+            let seg_of_pos = |pos: &CursorPos| {
+                let top = pos.0.first().map_or(pos.1, |&(i, _)| i);
+                self.root[..top]
+                    .iter()
+                    .filter(|n| matches!(n, Node::Break))
+                    .count()
+            };
+            let best = (0..cands.len())
+                .filter(|&i| !cands[i].is_cursor && seg_of_pos(&cands[i].pos) == target)
+                .filter_map(|i| coords[i].map(|xy| (i, xy)))
+                .min_by_key(|&(_, (y, x))| x.abs_diff(my.1) * 10 + y.abs_diff(my.0));
+            if let Some((i, _)) = best {
+                let (p, c) = cands[i].pos.clone();
+                self.path = p;
+                self.col = c;
             }
         }
     }
@@ -690,12 +739,23 @@ impl Editor {
         }
     }
 
+    /// Start of the current formula line (Breaks bound lines at the
+    /// top level; inside insets it is the row start).
     pub fn home(&mut self) {
-        self.col = 0;
+        let row = self.cur_row();
+        self.col = row[..self.col]
+            .iter()
+            .rposition(|n| matches!(n, Node::Break))
+            .map_or(0, |i| i + 1);
     }
 
+    /// End of the current formula line (before the next Break).
     pub fn end(&mut self) {
-        self.col = self.cur_row().len();
+        let row = self.cur_row();
+        self.col = row[self.col..]
+            .iter()
+            .position(|n| matches!(n, Node::Break))
+            .map_or(row.len(), |i| self.col + i);
     }
 
     // ----- deletion -----
@@ -1152,14 +1212,14 @@ impl Editor {
     /// probe mark — the geometry (and thus every coordinate) is
     /// identical to the displayed render.
     fn position_coords(&self, positions: &[&CursorPos]) -> Vec<Option<(usize, usize)>> {
-        use crate::render::{RenderCtx, render_row};
+        use crate::render::{RenderCtx, render_root};
         let n = positions.len().min(0x800);
         let mut root = self.root.clone();
         for (idx, (p, c)) in positions.iter().take(n).enumerate().rev() {
             let mark = char::from_u32(PROBE_BASE + idx as u32).unwrap();
             row_at_mut(&mut root, p).insert(*c, Node::Sym(mark));
         }
-        let b = render_row(&root, None, false, &RenderCtx::canonical());
+        let b = render_root(&root, None, &RenderCtx::canonical());
         let mut out = vec![None; positions.len()];
         for &(y, x, ch) in &b.marks {
             let u = ch as u32;
@@ -1328,10 +1388,10 @@ impl Editor {
     /// Live cell coordinates of the current jump markers, decoded from
     /// the decorated render (rank chars carry their identity).
     fn jump_marker_coords(&self) -> Vec<(usize, (usize, usize))> {
-        use crate::render::{RenderCtx, render_row};
+        use crate::render::{RenderCtx, render_root};
         let (root, cursor) = self.decorated();
         let cur = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
-        let b = render_row(&root, cur, false, &RenderCtx::canonical());
+        let b = render_root(&root, cur, &RenderCtx::canonical());
         b.marks
             .iter()
             .filter_map(|&(y, x, ch)| {
@@ -1438,11 +1498,11 @@ impl Editor {
     /// the char grid alone cannot tell a block's rows apart from other
     /// content (e.g. a denominator centered under the same columns).
     pub fn marker_extents(&self) -> Vec<(usize, usize, usize)> {
-        use crate::render::{RenderCtx, render_row};
+        use crate::render::{RenderCtx, render_root};
         let extent =
             |slice: &[Node], cursor: Option<(Vec<(usize, Field)>, usize)>, depth: usize| {
                 let cur = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
-                let b = render_row(&slice.to_vec(), cur, false, &RenderCtx::canonical());
+                let b = render_root(&slice.to_vec(), cur, &RenderCtx::canonical());
                 let (h, bl) = (b.height(), b.baseline);
                 (bl.min(h), h.saturating_sub(bl + 1), depth)
             };

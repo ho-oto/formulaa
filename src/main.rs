@@ -16,7 +16,7 @@ use mascii::editor::{
 };
 use mascii::input::{Effect, Key};
 use mascii::parse::RegionSpan;
-use mascii::render::{RenderCtx, render_row};
+use mascii::render::{RenderCtx, render_root};
 use mascii::{ast, latex, parse, typst};
 
 const HELP: &str = "\\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ^A start  ⇧←→/⇧↑ select  ^B select block  ^F free move  ^C/^X/^V copy/cut/paste  ^G jump  ^O structure  ^T italic  ^Y copy AA  ^S save  Esc/^Q quit";
@@ -64,7 +64,7 @@ fn save_session(ed: &Editor) {
     if row.is_empty() {
         let _ = fs::remove_file(SESSION_FILE);
     } else {
-        let aa = render_row(&row, None, false, &RenderCtx::canonical()).to_text();
+        let aa = render_root(&row, None, &RenderCtx::canonical()).to_text();
         let _ = fs::write(SESSION_FILE, format!("{}\n", aa));
     }
 }
@@ -147,7 +147,7 @@ fn convert(mode: &str, file: Option<&str>) -> std::io::Result<()> {
         "aa2tex" => println!("{}", latex::row_to_latex(&row)),
         "aa2typst" => println!("{}", typst::row_to_typst(&row)),
         _ => {
-            let block = render_row(&row, None, false, &RenderCtx::canonical());
+            let block = render_root(&row, None, &RenderCtx::canonical());
             println!("{}", block.to_text());
         }
     }
@@ -202,15 +202,15 @@ impl RoundtripGuard {
             return;
         }
         let ctx = RenderCtx::canonical();
-        let aa = render_row(&row, None, false, &ctx).to_text();
+        let aa = render_root(&row, None, &ctx).to_text();
         // Formatting spacers survive in the AA but vanish on reparse.
         let row = ast::normalize(&ast::strip_spacers(&row));
         let (kind, parsed): (String, Option<ast::Row>) = match parse::parse(&aa) {
             Err(e) => (format!("parse error: {}", e), None),
             Ok(p) if p != row => ("AST mismatch".into(), Some(p)),
             Ok(p) => {
-                let aa2 = render_row(&p, None, false, &ctx).to_text();
-                if aa2 == render_row(&row, None, false, &ctx).to_text() {
+                let aa2 = render_root(&p, None, &ctx).to_text();
+                if aa2 == render_root(&row, None, &ctx).to_text() {
                     return; // roundtrip holds
                 }
                 ("re-render mismatch".into(), Some(p))
@@ -254,7 +254,7 @@ fn write_report(
             let _ = writeln!(
                 report,
                 "\n--- re-rendered AA from parsed ---\n{}",
-                render_row(p, None, false, &RenderCtx::canonical()).to_text()
+                render_root(p, None, &RenderCtx::canonical()).to_text()
             );
             let _ = writeln!(
                 report,
@@ -320,7 +320,7 @@ fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers, save_path: &st
         // Yank: canonical AA to the system clipboard.
         Effect::CopyAa => {
             let row = ast::normalize(&ed.root);
-            let aa = render_row(&row, None, false, &RenderCtx::canonical()).to_text();
+            let aa = render_root(&row, None, &RenderCtx::canonical()).to_text();
             match copy_to_clipboard(&aa) {
                 Ok(cmd) => ed.message = format!("copied AA to clipboard ({})", cmd),
                 Err(e) => ed.message = format!("copy failed: {}", e),
@@ -397,7 +397,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
     // Structure view: cursor-free canonical render, re-parsed to recover
     // every block's rectangle, painted by nesting depth.
     if ed.structure {
-        let block = render_row(&ed.root, None, false, &RenderCtx::canonical());
+        let block = render_root(&ed.root, None, &RenderCtx::canonical());
         let lines = block.to_strings();
         let regions = mascii::parse::parse_with_regions(&block.to_text())
             .map(|(_, r)| r)
@@ -408,7 +408,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
 
     let (root, cursor) = ed.decorated();
     let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
-    let block = render_row(&root, cursor_ref, false, &ctx);
+    let block = render_root(&root, cursor_ref, &ctx);
     let (lines, mut bg, mut cursor_cell) = marker_boxes(
         &block.to_strings(),
         &ed.marker_extents(),
@@ -751,7 +751,7 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let ctx = RenderCtx { italic: true };
-        let block = render_row(&root, cursor_ref, false, &ctx);
+        let block = render_root(&root, cursor_ref, &ctx);
         let (lines, _, _) = marker_boxes(
             &block.to_strings(),
             &ed.marker_extents(),
@@ -818,7 +818,7 @@ mod tests {
         ed.input(Key::Down, false, false);
         ed.input(Key::Char('2'), false, false);
         let ctx = RenderCtx { italic: true };
-        let plain: Vec<String> = render_row(&ed.root, None, false, &ctx)
+        let plain: Vec<String> = render_root(&ed.root, None, &ctx)
             .to_strings()
             .iter()
             .map(|l| l.trim_end().to_string())

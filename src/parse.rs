@@ -1564,21 +1564,62 @@ pub fn parse_with_regions(text: &str) -> Result<(Row, Vec<RegionSpan>)> {
         g: lines,
         cancel: flags,
     };
-    let rect = Rect {
-        t: 0,
-        b: g.g.len() - 1,
-        l: 0,
-        r: width - 1,
+    // Multi-line formulas: a row whose only glyph is a single ┄ is a
+    // line separator (a band always sandwiches its pieces, so a lone ┄
+    // never occurs inside one formula). Each segment between separators
+    // is an ordinary formula, read with the usual baseline inference;
+    // segments are joined with Break. Blank rows next to separators are
+    // formatting; a blank row splitting a segment without a separator
+    // is an error (a canonical block never contains one).
+    let h = g.g.len();
+    let blank_row = |r: usize| g.g[r].iter().all(|&c| c == ' ');
+    let sep_row = |r: usize| {
+        let mut glyphs = g.g[r].iter().filter(|&&c| c != ' ');
+        glyphs.next() == Some(&OP_BAND) && glyphs.next().is_none()
     };
-    let mut trace = Vec::new();
-    match trim(&g, rect) {
-        // Normalize: a script arg that mixes padded structures with atoms
-        // parses as adjacent script chunks; merging them restores the
-        // canonical single node (render is only defined on normal forms).
-        Some(rect) => parse_region(&g, rect, None, 0, &mut trace, false)
-            .map(|row| (crate::ast::normalize(&row), trace)),
-        None => Ok((vec![], trace)),
+    // Trimmed inclusive row ranges; None = an empty line.
+    let mut segments: Vec<Option<(usize, usize)>> = Vec::new();
+    let mut t = 0;
+    for r in 0..=h {
+        if r < h && !sep_row(r) {
+            continue;
+        }
+        let (mut a, mut b) = (t, r); // rows t..r, b exclusive
+        while a < b && blank_row(a) {
+            a += 1;
+        }
+        while b > a && blank_row(b - 1) {
+            b -= 1;
+        }
+        segments.push((a < b).then(|| (a, b - 1)));
+        t = r + 1;
     }
+    let mut trace = Vec::new();
+    let mut out: Row = Vec::new();
+    for (k, seg) in segments.iter().enumerate() {
+        if k > 0 {
+            out.push(Node::Break);
+        }
+        let Some(&(t, b)) = seg.as_ref() else {
+            continue; // empty line
+        };
+        if (t..=b).any(blank_row) {
+            return err("stacked formula lines need a lone ┄ separator row", t, 0);
+        }
+        let rect = Rect {
+            t,
+            b,
+            l: 0,
+            r: width - 1,
+        };
+        if let Some(rect) = trim(&g, rect) {
+            out.extend(parse_region(&g, rect, None, 0, &mut trace, false)?)
+        }
+    }
+    // Normalize: a script arg that mixes padded structures with atoms
+    // parses as adjacent script chunks; merging them restores the
+    // canonical single node (render is only defined on normal forms).
+    Ok((crate::ast::normalize(&out), trace))
 }
 
 #[cfg(test)]
