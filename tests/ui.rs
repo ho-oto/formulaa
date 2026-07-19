@@ -178,6 +178,25 @@ fn ctrl_a_jumps_to_document_start() {
 }
 
 #[test]
+fn click_moves_the_cursor() {
+    // Flat row: clicking between a and + lands the cursor at col 1.
+    let mut ed = Editor::new();
+    type_script(&mut ed, "a+b");
+    ed.click(1, 0);
+    assert!(ed.path.is_empty());
+    assert_eq!(ed.col, 1);
+    // Clicking the denominator row of a fraction enters it.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"x + \frac 1 Down 22 Tab");
+    ed.click(4, 2);
+    assert!(
+        matches!(ed.path.last(), Some((_, mascii::ast::Field::FracDen))),
+        "path: {:?}",
+        ed.path
+    );
+}
+
+#[test]
 fn shift_up_selects_enclosing_structure() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"x + \frac 1 Down 2 S-Up Backspace");
@@ -313,8 +332,15 @@ fn property_random_key_sequences_roundtrip() {
                     false,
                     true,
                 )
-            } else {
+            } else if r < 98 {
                 (Key::Char(*rng.pick(&chars)), true, false)
+            } else {
+                // Occasional mouse click (not a key; roundtrip-checked too).
+                let (x, y) = ((rng.next() % 24) as usize, (rng.next() % 8) as usize);
+                history.push(format!("Click({},{})", x, y));
+                ed.click(x, y);
+                assert_roundtrip(&ed, &history);
+                continue;
             };
             history.push(format!(
                 "{}{}{:?}",

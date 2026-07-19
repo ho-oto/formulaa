@@ -1,7 +1,11 @@
 use std::fs;
 
 use ratatui::Frame;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::crossterm;
+use ratatui::crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+    MouseButton, MouseEventKind,
+};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -13,7 +17,7 @@ use mascii::parse::RegionSpan;
 use mascii::render::{CURSOR_CHAR, RenderCtx, render_row};
 use mascii::{ast, latex, parse, typst};
 
-const HELP: &str = "\\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓ move  ^A start  ⇧←→/⇧↑ select  ^B select block  ^C/^X/^V copy/cut/paste  ^G jump  ^O structure  ^T italic  ^Y copy AA  ^S save  Esc/^Q quit";
+const HELP: &str = "\\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ^A start  ⇧←→/⇧↑ select  ^B select block  ^C/^X/^V copy/cut/paste  ^G jump  ^O structure  ^T italic  ^Y copy AA  ^S save  Esc/^Q quit";
 
 /// Context-sensitive last line: generic keys normally, the relevant
 /// commands when the cursor is inside a grid cell or a delimiter.
@@ -84,6 +88,7 @@ fn main() -> std::io::Result<()> {
         .cloned()
         .unwrap_or_else(|| "formula.tex".into());
     let mut terminal = ratatui::init();
+    let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
     let mut ed = Editor::new();
     ed.message = format!("mascii — LyX-like math editor (saves to {})", save_path);
     if session && let Some(row) = load_session() {
@@ -93,8 +98,9 @@ fn main() -> std::io::Result<()> {
     }
 
     let mut guard = RoundtripGuard::default();
+    let mut origin = (0u16, 0u16);
     let result = loop {
-        if let Err(e) = terminal.draw(|f| draw(f, &ed)) {
+        if let Err(e) = terminal.draw(|f| origin = draw(f, &ed)) {
             break Err(e);
         }
         match event::read() {
@@ -107,11 +113,17 @@ fn main() -> std::io::Result<()> {
                     save_session(&ed);
                 }
             }
+            Ok(Event::Mouse(m)) if m.kind == MouseEventKind::Down(MouseButton::Left) => {
+                if !ed.structure && m.column >= origin.0 && m.row >= origin.1 {
+                    ed.click((m.column - origin.0) as usize, (m.row - origin.1) as usize);
+                }
+            }
             Ok(_) => {}
             Err(e) => break Err(e),
         }
     };
 
+    let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     result
 }
@@ -317,7 +329,9 @@ fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers, save_path: &st
     false
 }
 
-fn draw(f: &mut Frame, ed: &Editor) {
+/// Draw the whole UI; returns the screen coordinates of the formula's
+/// top-left cell (for mouse hit-testing).
+fn draw(f: &mut Frame, ed: &Editor) -> (u16, u16) {
     let [canvas_area, tex_area, status_area, help_area] = Layout::vertical([
         Constraint::Min(3),
         Constraint::Length(1),
@@ -326,7 +340,7 @@ fn draw(f: &mut Frame, ed: &Editor) {
     ])
     .areas(f.area());
 
-    draw_canvas(f, canvas_area, ed);
+    let origin = draw_canvas(f, canvas_area, ed);
 
     let tex = latex::row_to_latex(&ed.root);
     f.render_widget(
@@ -365,9 +379,11 @@ fn draw(f: &mut Frame, ed: &Editor) {
         )),
         help_area,
     );
+    origin
 }
 
-fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) {
+/// Returns the screen position of the formula's top-left cell.
+fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
     let border = UiBlock::default()
         .borders(Borders::ALL)
         .title(" mascii ")
@@ -385,7 +401,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) {
             .map(|(_, r)| r)
             .unwrap_or_default();
         draw_structure(f, inner, &lines, &regions);
-        return;
+        return (inner.x, inner.y);
     }
 
     let (root, cursor) = ed.decorated();
@@ -409,6 +425,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) {
         text.push(Line::from(spans));
     }
     f.render_widget(Paragraph::new(text), inner);
+    (inner.x + left, inner.y + top)
 }
 
 /// Selection box background (replaces the old ⟦ ⟧ bracket display).

@@ -208,6 +208,43 @@ impl Editor {
         }
     }
 
+    /// Mouse click at canvas cell (x, y): move the cursor to the
+    /// nearest boundary. Probe-based: each candidate position is laid
+    /// out with its cursor and the rendered ▌ cell is compared against
+    /// the click point (the displayed grid differs from a probe grid by
+    /// at most a column around the two cursors, so nearest-match lands
+    /// on the intended or an adjacent boundary).
+    pub fn click(&mut self, x: usize, y: usize) {
+        use crate::render::{CURSOR_CHAR, RenderCtx, render_row};
+        self.jump = None;
+        self.block = None;
+        self.select_anchor = None;
+        let ctx = RenderCtx {
+            italic: self.italic,
+        };
+        let mut candidates = self.jump_targets();
+        candidates.push(((self.path.clone(), self.col), false, false));
+        let mut best: Option<(usize, CursorPos)> = None;
+        for ((p, c), _, _) in candidates {
+            let block = render_row(&self.root, Some((&p[..], c)), false, &ctx);
+            let Some((cy, cx)) = block.lines.iter().enumerate().find_map(|(row, line)| {
+                line.iter()
+                    .position(|&ch| ch == CURSOR_CHAR)
+                    .map(|col| (row, col))
+            }) else {
+                continue;
+            };
+            let score = cy.abs_diff(y) * 1000 + cx.abs_diff(x);
+            if best.as_ref().is_none_or(|(s, _)| score < *s) {
+                best = Some((score, (p, c)));
+            }
+        }
+        if let Some((_, (p, c))) = best {
+            self.path = p;
+            self.col = c;
+        }
+    }
+
     /// Ctrl+A: jump to the very start of the whole formula.
     pub fn document_start(&mut self) {
         self.select_anchor = None;
@@ -316,6 +353,32 @@ impl Editor {
                 };
                 self.path.push((i, t));
                 self.col = self.col.min(len);
+                return;
+            }
+        }
+        // Bare big operator to the left of the cursor: promote it to a
+        // band and enter the limit. Needed to reopen the limits of a
+        // normalized formula — an empty-limit BigOp does not survive the
+        // canonical form (e.g. a --session restore), so a plain ∑ / lim
+        // atom must be liftable back from the UI.
+        if self.col > 0 {
+            let col = self.col - 1;
+            let promotable = match &self.cur_row()[col] {
+                Node::Sym(c) => bigop_by_char(*c),
+                Node::Func(name) => LIMIT_FUNCS.contains(&name.as_str()),
+                _ => false,
+            };
+            if promotable {
+                let row = self.cur_row_mut();
+                let base = vec![row[col].clone()];
+                row[col] = Node::BigOp {
+                    base,
+                    lower: vec![],
+                    upper: vec![],
+                };
+                let f = if up { Field::OpUpper } else { Field::OpLower };
+                self.path.push((col, f));
+                self.col = 0;
             }
         }
     }
@@ -1510,6 +1573,32 @@ mod tests {
         assert!(ed.path.is_empty());
         assert_eq!(ed.col, 1);
         assert_eq!(row_to_latex(&ed.root), "\\left(x\\right)");
+    }
+
+    #[test]
+    fn vertical_promotes_a_bare_big_operator() {
+        // A --session restore normalizes an empty-limit band to a bare
+        // atom; ↑/↓ next to it must reopen the limits.
+        let mut ed = Editor::new();
+        ed.root = vec![Node::Sym('∑')];
+        ed.col = 1;
+        ed.vertical(false); // ↓ = lower limit
+        assert_eq!(ed.path.last().unwrap().1, Field::OpLower);
+        ed.insert_sym('n');
+        ed.exit_inset();
+        assert_eq!(row_to_latex(&ed.root), "\\sum _{n}");
+        // Same for limit-taking functions (┄lim┄).
+        let mut ed = Editor::new();
+        ed.root = vec![Node::Func("lim".into())];
+        ed.col = 1;
+        ed.vertical(true); // ↑ = upper limit
+        assert_eq!(ed.path.last().unwrap().1, Field::OpUpper);
+        // Plain atoms are not promoted.
+        let mut ed = Editor::new();
+        ed.root = vec![Node::Sym('x')];
+        ed.col = 1;
+        ed.vertical(false);
+        assert!(ed.path.is_empty());
     }
 
     #[test]

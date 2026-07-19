@@ -88,6 +88,12 @@ impl MasciiEditor {
             .collect()
     }
 
+    /// Mouse click at cell (x, y) of the rendered screen: moves the
+    /// cursor to the nearest position (probe-based nearest match).
+    pub fn click(&mut self, x: usize, y: usize) {
+        self.ed.click(x, y);
+    }
+
     /// Canonical AA (what should be written back into the document).
     pub fn aa(&self) -> String {
         let row = normalize(&self.ed.root);
