@@ -6,6 +6,8 @@ use crate::ast::{Field, Node, Row, row_at, row_at_mut};
 
 /// A cursor position: path into nested rows plus a column.
 pub type CursorPos = (Vec<(usize, Field)>, usize);
+/// A block-select target: (parent row path, node index).
+pub type BlockRef = (Vec<(usize, Field)>, usize);
 use crate::symbols::{accent_by_name, bigop_by_char, bigop_by_name, is_func_name, symbol_by_name};
 
 pub struct Editor {
@@ -16,10 +18,14 @@ pub struct Editor {
     pub minibuffer: Option<String>,
     pub message: String,
     pub italic: bool,
-    /// EasyMotion-style jump: Some(targets) while waiting for a label key.
-    pub jump: Option<Vec<CursorPos>>,
-    /// Highlight the enclosing blocks of the cursor (Ctrl+B).
-    pub highlight: bool,
+    /// EasyMotion-style jump: Some(targets) while waiting for a label
+    /// key. Document-ordered (needed for marker insertion); each entry
+    /// carries its label rank (0 = key 'a' = closest to the cursor).
+    pub jump: Option<Vec<(usize, CursorPos)>>,
+    /// Block-select mode (Ctrl+B): Some(targets) while waiting for a
+    /// label key; each target is (parent row path, node index) of a
+    /// structure node, and picking one selects the whole block.
+    pub block: Option<Vec<BlockRef>>,
     /// Structure view: paint every block's background by nesting depth (Ctrl+O).
     pub structure: bool,
     /// Selection anchor column in the current row (Shift+←/→). The selected
@@ -29,6 +35,8 @@ pub struct Editor {
     /// while the cursor stays in that row (leaving the row would make the
     /// anchor point into a different — possibly shorter — row).
     select_path: Vec<(usize, Field)>,
+    /// Editor-internal clipboard (^C/^X/^V), a sibling-node slice.
+    clip: Row,
 }
 
 /// Label keys for jump mode, most reachable first.
@@ -36,14 +44,12 @@ pub const JUMP_LABELS: &str = "asdfghjklqwertyuiopzxcvbnmASDFGHJKLQWERTYUIOPZXCV
 /// Private-use chars used as display-time markers (never in a real AST):
 /// jump label placeholders …
 pub const JUMP_CHAR_BASE: u32 = 0xE000;
-/// … and per-level open/close markers around the cursor's enclosing blocks
-/// (level 0 = innermost).
-pub const HL_OPEN_BASE: u32 = 0xE0E0;
-pub const HL_CLOSE_BASE: u32 = 0xE0E8;
-pub const HL_LEVELS: usize = 3;
-/// Selection range markers (displayed as ⟦ ⟧).
+/// Selection range markers (drawn as a background-colored box).
 pub const SEL_OPEN: char = '\u{E0F0}';
 pub const SEL_CLOSE: char = '\u{E0F1}';
+/// End-of-block marker paired with a ^B label (display only, like the
+/// labels themselves; the TUI turns the pair into a colored box).
+pub const BLK_CLOSE: char = '\u{E0F2}';
 
 impl Default for Editor {
     fn default() -> Self {
@@ -56,6 +62,57 @@ impl Default for Editor {
 const LIMIT_FUNCS: &[&str] = &[
     "lim", "liminf", "limsup", "max", "min", "sup", "inf", "det", "gcd", "Pr",
 ];
+
+/// `\lr…` / `\delim…` (Typst-style) delimiter spec, read in *visual
+/// order*: first token = left, interior tokens = middles ('|' only),
+/// last token = right. A token is one spec char — `( ) [ ] { } | .`
+/// with `<` `>` aliasing ⟨ ⟩ — or a `\name` (\langle, \vert, \none …),
+/// so `\lr(]`, `\lr{|}` and `\lr\langle||\rangle` all read like the
+/// picture. None when the string is not a delimiter spec (a `\lr…`
+/// symbol name like \lrcorner then resolves normally).
+fn lr_spec(cmd: &str) -> Option<(char, char, Vec<char>)> {
+    let spec = cmd
+        .strip_prefix("delim")
+        .or_else(|| cmd.strip_prefix("lr"))?;
+    let mut tokens = Vec::new();
+    let mut it = spec.chars().peekable();
+    while let Some(c) = it.next() {
+        let tok = match c {
+            '\\' => {
+                let mut name = String::new();
+                while it.peek().is_some_and(|c| c.is_ascii_alphabetic()) {
+                    name.push(it.next().unwrap());
+                }
+                match name.as_str() {
+                    "langle" => '⟨',
+                    "rangle" => '⟩',
+                    "lparen" => '(',
+                    "rparen" => ')',
+                    "lbrack" => '[',
+                    "rbrack" => ']',
+                    "lbrace" => '{',
+                    "rbrace" => '}',
+                    "vert" | "mid" => '|',
+                    "dot" | "none" => '.',
+                    _ => return None,
+                }
+            }
+            '<' => '⟨',
+            '>' => '⟩',
+            c => c,
+        };
+        tokens.push(tok);
+    }
+    if tokens.len() < 2 || !tokens.iter().all(|c| crate::ast::DELIM_SPECS.contains(c)) {
+        return None;
+    }
+    let (left, right) = (tokens[0], *tokens.last().unwrap());
+    let mids = tokens[1..tokens.len() - 1].to_vec();
+    if !mids.iter().all(|&c| c == '|') {
+        return None;
+    }
+    Some((left, right, mids))
+}
 
 /// Delimiter pair of a grid command (None = bare lattice array).
 type GridDelims = Option<(char, char)>;
@@ -101,10 +158,11 @@ impl Editor {
             message: String::new(),
             italic: true,
             jump: None,
-            highlight: false,
+            block: None,
             structure: false,
             select_anchor: None,
             select_path: Vec::new(),
+            clip: Vec::new(),
         }
     }
 
@@ -130,6 +188,31 @@ impl Editor {
         let col = self.col;
         self.cur_row_mut().insert(col, Node::Spacer);
         self.col += 1;
+    }
+
+    /// `/` key: a second `/` right after a `/` atom replaces it with an
+    /// empty fraction (`//` shorthand for \frac — for a literal `//`,
+    /// type `/ /` and delete the spacer).
+    pub fn slash(&mut self) {
+        if self.col > 0 && matches!(self.cur_row()[self.col - 1], Node::Sym('/')) {
+            self.col -= 1;
+            let col = self.col;
+            self.cur_row_mut().remove(col);
+            self.insert_and_enter(Node::Frac {
+                num: vec![],
+                den: vec![],
+            });
+        } else {
+            self.select_anchor = None;
+            self.insert_sym('/');
+        }
+    }
+
+    /// Ctrl+A: jump to the very start of the whole formula.
+    pub fn document_start(&mut self) {
+        self.select_anchor = None;
+        self.path.clear();
+        self.col = 0;
     }
 
     /// Insert a structure node and move the cursor into its first field.
@@ -342,7 +425,7 @@ impl Editor {
             self.path.truncate(k);
             self.col = i + 1;
         } else {
-            self.message = "not inside a matrix ([ ] are reserved; use \\matrix)".into();
+            self.message = "not inside a [ ] block ([ inserts one; \\matrix for grids)".into();
         }
     }
 
@@ -560,6 +643,57 @@ impl Editor {
         self.take_selection().is_some()
     }
 
+    /// Copy the selection into the editor clipboard (kept on selection).
+    pub fn copy_selection(&mut self) {
+        match self.selection() {
+            Some((lo, hi)) => {
+                self.clip = self.cur_row()[lo..hi].to_vec();
+                self.message = format!("copied {} node(s)", hi - lo);
+            }
+            None => self.message = "nothing selected (⇧←/→ or ⇧↑)".into(),
+        }
+    }
+
+    /// Cut the selection into the editor clipboard.
+    pub fn cut_selection(&mut self) {
+        match self.take_selection() {
+            Some(content) => {
+                self.message = format!("cut {} node(s)", content.len());
+                self.clip = content;
+            }
+            None => self.message = "nothing selected (⇧←/→ or ⇧↑)".into(),
+        }
+    }
+
+    /// Paste the editor clipboard at the cursor.
+    pub fn paste(&mut self) {
+        if self.clip.is_empty() {
+            self.message = "clipboard is empty (^C copies, ^X cuts)".into();
+            return;
+        }
+        self.select_anchor = None;
+        let clip = self.clip.clone();
+        let col = self.col;
+        let row = self.cur_row_mut();
+        row.splice(col..col, clip.iter().cloned());
+        self.col += clip.len();
+    }
+
+    /// Widen the selection to the enclosing structure (Shift+↑): select
+    /// the parent node the cursor is in; at the top level, select the
+    /// whole formula. Repeated presses climb further out.
+    pub fn select_parent(&mut self) {
+        if let Some((i, _)) = self.path.pop() {
+            self.select_anchor = Some(i);
+            self.select_path = self.path.clone();
+            self.col = i + 1;
+        } else if !self.cur_row().is_empty() {
+            self.select_anchor = Some(0);
+            self.select_path = self.path.clone();
+            self.col = self.cur_row().len();
+        }
+    }
+
     /// Replace the selection with `build(selection)`, cursor after the node.
     pub fn wrap_selection(&mut self, build: impl FnOnce(Row) -> Node) -> bool {
         match self.take_selection() {
@@ -576,14 +710,150 @@ impl Editor {
 
     // ----- jump mode (EasyMotion-style) -----
 
-    /// All cursor positions in the document, in document order (a row's
-    /// columns first, then its children), excluding the current position.
-    pub fn jump_targets(&self) -> Vec<CursorPos> {
-        fn walk(row: &Row, path: &mut Vec<(usize, Field)>, out: &mut Vec<CursorPos>) {
-            for col in 0..=row.len() {
-                out.push((path.clone(), col));
+    /// Jump candidates in true document order (column, then that
+    /// node's children, then the next column): every cursor position,
+    /// flagged as (position, is_empty_slot, is_cell_end). `start_jump`
+    /// thins this out; the order doubles as the distance metric.
+    #[allow(clippy::type_complexity)]
+    pub fn jump_targets(&self) -> Vec<(CursorPos, bool, bool)> {
+        fn walk(
+            row: &Row,
+            path: &mut Vec<(usize, Field)>,
+            in_cell: bool,
+            out: &mut Vec<(CursorPos, bool, bool)>,
+        ) {
+            if row.is_empty() {
+                out.push(((path.clone(), 0), true, in_cell));
+                return;
             }
             for (i, node) in row.iter().enumerate() {
+                out.push(((path.clone(), i), false, false));
+                for f in node.fields() {
+                    path.push((i, f));
+                    walk(node.field(f), path, matches!(f, Field::Cell(_)), out);
+                    path.pop();
+                }
+            }
+            out.push(((path.clone(), row.len()), false, in_cell));
+        }
+        let mut out = Vec::new();
+        walk(&self.root, &mut Vec::new(), false, &mut out);
+        out.retain(|((p, c), _, _)| !(p == &self.path && *c == self.col));
+        out
+    }
+
+    /// Max number of jump labels shown at once.
+    pub const JUMP_MAX: usize = 16;
+
+    pub fn start_jump(&mut self) {
+        let targets = self.jump_targets();
+        if targets.is_empty() {
+            self.message = "no jump targets".into();
+            return;
+        }
+        let cursor_seq = targets
+            .iter()
+            .enumerate()
+            .filter(|(_, ((p, _), _, _))| p == &self.path)
+            .min_by_key(|(_, ((_, c), _, _))| c.abs_diff(self.col))
+            .map(|(k, _)| k)
+            .unwrap_or(0);
+        // Unfilled slots first (nearest first, capped at half the budget
+        // so movement anchors keep their share) …
+        let mut picked_idx: Vec<usize> = Vec::new();
+        let mut empties: Vec<usize> = (0..targets.len()).filter(|&k| targets[k].1).collect();
+        empties.sort_by_key(|&k| k.abs_diff(cursor_seq));
+        let taken_empties = empties.len().min(Self::JUMP_MAX / 2);
+        picked_idx.extend(empties.drain(..taken_empties));
+        // … then grid cells: editing the neighbour of a matrix/vector
+        // entry is common, so each cell's end gets an early anchor,
+        // the cursor's own grid first (a few slots stay reserved for
+        // the distance anchors below).
+        let grid_key = |p: &[(usize, Field)]| -> Option<(usize, Vec<(usize, Field)>)> {
+            let k = p.iter().rposition(|(_, f)| matches!(f, Field::Cell(_)))?;
+            Some((p[k].0, p[..k].to_vec()))
+        };
+        let cursor_grid = grid_key(&self.path);
+        let mut cells: Vec<usize> = (0..targets.len())
+            .filter(|&k| targets[k].2 && !targets[k].1 && !picked_idx.contains(&k))
+            .collect();
+        cells.sort_by_key(|&k| {
+            let same = cursor_grid.is_some() && grid_key(&targets[k].0.0) == cursor_grid;
+            (!same, k.abs_diff(cursor_seq))
+        });
+        let reserve = 4;
+        cells.truncate((Self::JUMP_MAX - picked_idx.len()).saturating_sub(reserve));
+        picked_idx.extend(cells);
+        // … then movement anchors: per side of the cursor, halving
+        // distances from the far end (L, L/2, …, 1) so the far end, the
+        // middle grounds and the vicinity are all one keystroke away.
+        let budget = Self::JUMP_MAX - picked_idx.len();
+        let free = |k: usize| !targets[k].1 && !picked_idx.contains(&k);
+        let left: Vec<usize> = (0..cursor_seq).rev().filter(|&k| free(k)).collect();
+        let right: Vec<usize> = (cursor_seq..targets.len()).filter(|&k| free(k)).collect();
+        let halving = |list: &[usize]| -> Vec<usize> {
+            let mut out = Vec::new();
+            let mut d = list.len();
+            while d >= 1 {
+                out.push(list[d - 1]);
+                if d == 1 {
+                    break;
+                }
+                d /= 2;
+            }
+            out
+        };
+        let mut anchors: Vec<usize> = halving(&left).into_iter().chain(halving(&right)).collect();
+        anchors.sort_by_key(|&k| k.abs_diff(cursor_seq));
+        anchors.dedup();
+        // Over budget: drop the most redundant middle anchors — the
+        // nearest and the farthest always survive.
+        while anchors.len() > budget && anchors.len() > 2 {
+            let (mut worst, mut gap) = (1, usize::MAX);
+            for i in 1..anchors.len() - 1 {
+                let g = anchors[i + 1].abs_diff(cursor_seq) - anchors[i - 1].abs_diff(cursor_seq);
+                if g < gap {
+                    gap = g;
+                    worst = i;
+                }
+            }
+            anchors.remove(worst);
+        }
+        anchors.truncate(budget);
+        picked_idx.extend(anchors);
+        // Ranks follow pick order ('a' = best); markers need doc order.
+        let mut picked: Vec<(usize, CursorPos)> = picked_idx
+            .iter()
+            .enumerate()
+            .map(|(rank, &k)| (rank, targets[k].0.clone()))
+            .collect();
+        picked.sort_by_key(|&(rank, _)| picked_idx[rank]);
+        self.message = "jump: press a label key (Esc cancels)".into();
+        self.jump = Some(picked);
+    }
+
+    pub fn jump_to(&mut self, label: char) {
+        if let Some(targets) = self.jump.take() {
+            if let Some(idx) = JUMP_LABELS.chars().position(|c| c == label)
+                && let Some((_, (p, c))) = targets.iter().find(|(rank, _)| *rank == idx)
+            {
+                self.path = p.clone();
+                self.col = *c;
+            }
+            self.message.clear();
+        }
+    }
+
+    // ----- block-select mode (Ctrl+B: labels on structure blocks) -----
+
+    /// All structure nodes (anything with cursor fields) in document
+    /// order: (parent row path, node index).
+    pub fn block_targets(&self) -> Vec<BlockRef> {
+        fn walk(row: &Row, path: &mut Vec<(usize, Field)>, out: &mut Vec<BlockRef>) {
+            for (i, node) in row.iter().enumerate() {
+                if !node.fields().is_empty() {
+                    out.push((path.clone(), i));
+                }
                 for f in node.fields() {
                     path.push((i, f));
                     walk(node.field(f), path, out);
@@ -593,39 +863,67 @@ impl Editor {
         }
         let mut out = Vec::new();
         walk(&self.root, &mut Vec::new(), &mut out);
-        out.retain(|(p, c)| !(p == &self.path && *c == self.col));
         out
     }
 
-    pub fn start_jump(&mut self) {
-        let mut targets = self.jump_targets();
+    pub fn start_block_select(&mut self) {
+        let mut targets = self.block_targets();
         if targets.is_empty() {
-            self.message = "no jump targets".into();
+            self.message = "no blocks to select".into();
             return;
         }
         let max = JUMP_LABELS.chars().count();
         if targets.len() > max {
             targets.truncate(max);
-            self.message = "jump: press a label key (some targets unlabeled)".into();
+            self.message = "block: press a label key (some blocks unlabeled)".into();
         } else {
-            self.message = "jump: press a label key (Esc cancels)".into();
+            self.message = "block: press a label key (Esc cancels)".into();
         }
-        self.jump = Some(targets);
+        self.block = Some(targets);
     }
 
-    pub fn jump_to(&mut self, label: char) {
-        if let Some(targets) = self.jump.take() {
-            if let Some(idx) = JUMP_LABELS.chars().position(|c| c == label) {
-                if let Some((p, c)) = targets.get(idx) {
-                    self.path = p.clone();
-                    self.col = *c;
-                }
+    /// Pick a labeled block: the whole node becomes the selection, ready
+    /// for ^C/^X, wrapping or deletion.
+    pub fn block_to(&mut self, label: char) {
+        if let Some(targets) = self.block.take() {
+            if let Some(idx) = JUMP_LABELS.chars().position(|c| c == label)
+                && let Some((p, i)) = targets.get(idx)
+            {
+                self.path = p.clone();
+                self.select_anchor = Some(*i);
+                self.select_path = p.clone();
+                self.col = i + 1;
             }
             self.message.clear();
         }
     }
 
-    // ----- display decoration (jump labels / block highlight) -----
+    /// Vertical extents (rows above / below the marker's baseline row)
+    /// of the boxes the display should paint: one entry for the active
+    /// selection, or one per ^B target in ascending-open-column
+    /// (= document) order. Computed by laying out the covered slice —
+    /// the char grid alone cannot tell a block's rows apart from other
+    /// content (e.g. a denominator centered under the same columns).
+    pub fn marker_extents(&self) -> Vec<(usize, usize)> {
+        use crate::render::{RenderCtx, render_row};
+        let extent = |slice: &[Node]| -> (usize, usize) {
+            let b = render_row(&slice.to_vec(), None, false, &RenderCtx::canonical());
+            let (h, bl) = (b.height(), b.baseline);
+            (bl.min(h), h.saturating_sub(bl + 1))
+        };
+        if let Some(targets) = &self.block {
+            targets
+                .iter()
+                .map(|(p, i)| extent(&row_at(&self.root, p)[*i..*i + 1]))
+                .collect()
+        } else if let Some((lo, hi)) = self.selection() {
+            vec![extent(&self.cur_row()[lo..hi])]
+        } else {
+            Vec::new()
+        }
+    }
+
+    // ----- display decoration (jump labels / selection) -----
 
     /// A copy of the AST with display markers inserted, plus the cursor
     /// adjusted for the insertions (None while jump mode hides it).
@@ -635,13 +933,25 @@ impl Editor {
         let mut root = self.root.clone();
         if let Some(targets) = &self.jump {
             // Reverse document order keeps not-yet-inserted positions valid.
-            for (idx, (p, c)) in targets.iter().enumerate().rev() {
-                let mark = char::from_u32(JUMP_CHAR_BASE + idx as u32).unwrap();
+            for (rank, (p, c)) in targets.iter().rev() {
+                let mark = char::from_u32(JUMP_CHAR_BASE + *rank as u32).unwrap();
                 row_at_mut(&mut root, p).insert(*c, Node::Sym(mark));
             }
             return (root, None);
         }
-        let mut path = self.path.clone();
+        if let Some(targets) = &self.block {
+            // Label sits immediately left of its block and a close marker
+            // right after it, so the display can paint the block's extent
+            // (reverse document order keeps positions valid).
+            for (idx, (p, i)) in targets.iter().enumerate().rev() {
+                let mark = char::from_u32(JUMP_CHAR_BASE + idx as u32).unwrap();
+                let row = row_at_mut(&mut root, p);
+                row.insert(i + 1, Node::Sym(BLK_CLOSE));
+                row.insert(*i, Node::Sym(mark));
+            }
+            return (root, None);
+        }
+        let path = self.path.clone();
         let mut col = self.col;
         if let Some((lo, hi)) = self.selection() {
             let row = row_at_mut(&mut root, &path);
@@ -654,21 +964,6 @@ impl Editor {
             } else {
                 col
             };
-        }
-        if self.highlight && !path.is_empty() {
-            let n = path.len();
-            // Outermost shown level first, so deeper lookups see the
-            // already-adjusted indices.
-            for d in n.saturating_sub(HL_LEVELS)..n {
-                let level = (n - 1 - d) as u32;
-                let open = char::from_u32(HL_OPEN_BASE + level).unwrap();
-                let close = char::from_u32(HL_CLOSE_BASE + level).unwrap();
-                let i = path[d].0;
-                let row = row_at_mut(&mut root, &path[..d]);
-                row.insert(i + 1, Node::Sym(close));
-                row.insert(i, Node::Sym(open));
-                path[d].0 += 1;
-            }
         }
         (root, Some((path, col)))
     }
@@ -803,29 +1098,9 @@ impl Editor {
             "addcol" => self.add_col(),
             "delrow" => self.del_row(),
             "delcol" => self.del_col(),
-            _ if cmd.starts_with("delim") && cmd.len() > "delim".len() => {
-                // \delim<spec chars>: left, right, then middles, e.g.
-                // \delim(] or \delim{}| or \delim.. ; < > alias ⟨ ⟩.
-                let specs: Vec<char> = cmd["delim".len()..]
-                    .chars()
-                    .map(|c| match c {
-                        '<' => '⟨',
-                        '>' => '⟩',
-                        c => c,
-                    })
-                    .collect();
-                let valid = |c: &char| crate::ast::DELIM_SPECS.contains(c);
-                if specs.len() >= 2
-                    && specs.iter().all(valid)
-                    && specs[2..].iter().all(|&c| c == '|')
-                {
-                    let (l, r) = (specs[0], specs[1]);
-                    self.insert_delim(l, r, specs[2..].to_vec());
-                } else {
-                    self.message =
-                        "usage: \\delim<left><right>[|s] with chars ()[]{}<>|. (mids: | only)"
-                            .into();
-                }
+            _ if lr_spec(cmd).is_some() => {
+                let (l, r, mids) = lr_spec(cmd).unwrap();
+                self.insert_delim(l, r, mids);
             }
             _ => {
                 if let Some(op) = bigop_by_name(cmd) {
@@ -857,11 +1132,40 @@ impl Editor {
                     } else {
                         self.insert_sym(c);
                     }
+                } else if let Some(t) = cmd
+                    .strip_prefix("operatorname*")
+                    .or_else(|| cmd.strip_prefix("op*"))
+                    .filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric()))
+                {
+                    // \op*<name> (\operatorname*): upright operator that
+                    // takes under-limits — a ┄band┄ with a Text base.
+                    self.insert_and_enter(Node::BigOp {
+                        base: vec![Node::Text {
+                            t: t.to_string(),
+                            math: true,
+                        }],
+                        lower: vec![],
+                        upper: vec![],
+                    });
                 } else if let Some((t, math)) = cmd
                     .strip_prefix("rm")
                     .map(|t| (t, true))
+                    .or_else(|| cmd.strip_prefix("operatorname").map(|t| (t, true)))
+                    .or_else(|| cmd.strip_prefix("op").map(|t| (t, true)))
                     .or_else(|| cmd.strip_prefix("text").map(|t| (t, false)))
-                    .filter(|(t, _)| !t.is_empty() && !t.contains('"') && !t.contains('\''))
+                    .filter(|(t, math)| {
+                        // \mathrm content must survive the quoted form
+                        // '…', which only reads ASCII alphanumerics —
+                        // anything else would break the roundtrip
+                        // (\op* alone used to make a Text{"*"}). \text
+                        // ("…") reads any glyph except the quotes.
+                        !t.is_empty()
+                            && if *math {
+                                t.chars().all(|c| c.is_ascii_alphanumeric())
+                            } else {
+                                !t.contains('"') && !t.contains('\'')
+                            }
+                    })
                 {
                     // \rm<chars> = \mathrm, \text<chars> = \text.
                     let col = self.col;
@@ -873,6 +1177,10 @@ impl Editor {
                         },
                     );
                     self.col += 1;
+                } else if cmd.starts_with("delim") || cmd.starts_with("lr") {
+                    self.message =
+                        "usage: \\lr<left>[|s]<right> in visual order, e.g. \\lr(] \\lr{|} \\lr\\langle||\\rangle"
+                            .into();
                 } else {
                     self.message = format!("unknown command: \\{}", cmd);
                 }
@@ -925,14 +1233,41 @@ mod tests {
     #[test]
     fn delim_mids_are_pipe_only() {
         let mut ed = Editor::new();
-        ed.execute("delim(][");
+        ed.execute("delim([]");
         assert!(
             ed.root.is_empty(),
-            "\\delim(][ must be rejected, got {:?}",
+            "\\delim([] (bracket mid) must be rejected, got {:?}",
             ed.root
         );
-        ed.execute("delim(]|");
-        assert!(matches!(ed.root[0], Node::Delim { ref mids, .. } if mids == &['|']));
+        // Visual order: left ( mid | right ].
+        ed.execute("delim(|]");
+        assert!(matches!(ed.root[0],
+            Node::Delim { left: '(', right: ']', ref mids, .. } if mids == &['|']));
+    }
+
+    #[test]
+    fn lr_spec_reads_visually_and_accepts_names() {
+        let mut ed = Editor::new();
+        ed.execute("lr(]");
+        assert!(matches!(
+            ed.root[0],
+            Node::Delim {
+                left: '(',
+                right: ']',
+                ..
+            }
+        ));
+        // Named tokens: \lr\langle||\rangle = ⟨ · | · | · ⟩.
+        let mut ed = Editor::new();
+        ed.execute("lr\\langle||\\rangle");
+        assert!(matches!(ed.root[0],
+            Node::Delim { left: '⟨', right: '⟩', ref mids, ref segs }
+                if mids == &['|', '|'] && segs.len() == 3));
+        // A non-spec `lr…` name falls through to the symbol table
+        // (bare \lr is the ↔ arrow in the extended table).
+        let mut ed = Editor::new();
+        ed.execute("lr");
+        assert_eq!(ed.root, vec![Node::Sym('↔')]);
     }
 
     #[test]
@@ -940,6 +1275,43 @@ mod tests {
         let mut ed = Editor::new();
         ed.execute("angle");
         assert_eq!(ed.root, vec![Node::Sym('∠')]);
+    }
+
+    #[test]
+    fn op_and_op_star() {
+        // \op<name> = arbitrary \mathrm (same AST as \rm).
+        let mut ed = Editor::new();
+        ed.execute("opvol");
+        assert_eq!(row_to_latex(&ed.root), "\\mathrm{vol}");
+        // \op*<name> = operator band taking under-limits.
+        let mut ed = Editor::new();
+        ed.execute("op*esssup");
+        assert_eq!(ed.path.last().unwrap().1, Field::OpLower);
+        ed.insert_sym('x');
+        ed.exit_inset();
+        assert_eq!(row_to_latex(&ed.root), "\\operatorname*{esssup}_{x}");
+    }
+
+    #[test]
+    fn rm_and_op_arguments_are_alphanumeric_only() {
+        // `\op*` alone: the `*` must not become the \op argument —
+        // Text{math} with non-alphanumeric content cannot roundtrip
+        // (the '…' quoted form only reads ASCII alphanumerics).
+        for cmd in ["op*", "op*)", "rm*", "opα"] {
+            let mut ed = Editor::new();
+            ed.execute(cmd);
+            assert!(
+                ed.root.is_empty(),
+                "\\{} must be rejected, got {:?}",
+                cmd,
+                ed.root
+            );
+            assert!(!ed.message.is_empty());
+        }
+        // \text keeps the wider charset (only quotes are excluded).
+        let mut ed = Editor::new();
+        ed.execute("text(a)");
+        assert_eq!(row_to_latex(&ed.root), "\\text{(a)}");
     }
 
     #[test]
@@ -973,44 +1345,118 @@ mod tests {
         ed.vertical(false);
         ed.insert_sym('2');
         ed.exit_inset();
-        // top row: cols 0..=3 minus current (3) = 3; num row: 0..=1; den: 0..=1
+        // Every position, in document order, minus the cursor's own:
+        // top row (0, 1, 2; 3 = cursor), num (0, 1), den (0, 1).
         let targets = ed.jump_targets();
-        assert_eq!(targets.len(), 3 + 2 + 2);
+        assert_eq!(targets.len(), 7);
+        assert!(targets.iter().all(|(_, empty, _)| !empty));
         ed.start_jump();
         assert!(ed.jump.is_some());
-        // Third label ('d') is top-row col 2 (before the fraction).
-        ed.jump_to('d');
-        assert!(ed.jump.is_none());
-        assert!(ed.path.is_empty());
-        assert_eq!(ed.col, 2);
-        // First label ('a') would be col 0.
-        ed.start_jump();
+        // 'a' = nearest anchor: top-row col 2, right before the fraction.
         ed.jump_to('a');
-        assert_eq!((ed.path.len(), ed.col), (0, 0));
+        assert!(ed.jump.is_none());
+        assert_eq!((ed.path.len(), ed.col), (0, 2));
     }
 
     #[test]
-    fn decorated_highlight_wraps_ancestors() {
+    fn jump_anchors_balance_near_and_far() {
         let mut ed = Editor::new();
-        ed.execute("frac");
-        ed.execute("sqrt"); // cursor inside sqrt inside frac numerator
+        // Twelve filled fractions; cursor back at the far left.
+        for _ in 0..12 {
+            ed.execute("frac");
+            ed.insert_sym('1');
+            ed.vertical(false);
+            ed.insert_sym('2');
+            ed.exit_inset();
+        }
+        ed.home();
+        ed.start_jump();
+        let targets = ed.jump.as_ref().unwrap();
+        assert!(targets.len() <= Editor::JUMP_MAX);
+        // Anchors must reach both the vicinity and the far end (top-row
+        // node index of the target path as a rough position).
+        let pos = |p: &Vec<(usize, Field)>, c: usize| p.first().map_or(c, |&(i, _)| i);
+        assert!(
+            targets.iter().any(|(_, (p, c))| pos(p, *c) >= 8),
+            "no far anchor: {:?}",
+            targets
+        );
+        assert!(
+            targets.iter().any(|(_, (p, c))| pos(p, *c) <= 2),
+            "no near anchor: {:?}",
+            targets
+        );
+    }
+
+    #[test]
+    fn jump_anchors_cover_grid_cells() {
+        let mut ed = Editor::new();
+        ed.execute("pmatrix");
+        for c in "abcd".chars() {
+            ed.insert_sym(c);
+            ed.right(); // next cell (and finally out of the matrix)
+        }
+        ed.start_jump();
+        let cell_targets = ed
+            .jump
+            .as_ref()
+            .unwrap()
+            .iter()
+            .filter(|(_, (p, _))| matches!(p.last(), Some((_, Field::Cell(_)))))
+            .count();
+        assert!(cell_targets >= 3, "only {} cell anchors", cell_targets);
+    }
+
+    #[test]
+    fn jump_prefers_empty_slots_and_caps_labels() {
+        let mut ed = Editor::new();
+        // A fraction with an empty denominator, cursor back at top level.
         ed.insert_sym('x');
-        ed.highlight = true;
-        let (root, cursor) = ed.decorated();
-        let (path, col) = cursor.unwrap();
-        // Markers shift both ancestor indices by one.
-        assert_eq!(path[0].0, 1, "frac shifted by its open marker");
-        assert_eq!(path[1].0, 1, "sqrt shifted by its open marker");
-        assert_eq!(col, 1);
-        // Top row: open(level1), frac, close(level1)
-        let open1 = char::from_u32(HL_OPEN_BASE + 1).unwrap();
-        assert_eq!(root[0], Node::Sym(open1));
-        assert!(matches!(root[1], Node::Frac { .. }));
-        // Inside the numerator: open(level0), sqrt, close(level0)
-        let num = root[1].field(Field::FracNum);
-        let open0 = char::from_u32(HL_OPEN_BASE).unwrap();
-        assert_eq!(num[0], Node::Sym(open0));
-        assert!(matches!(num[1], Node::Sqrt { .. }));
+        ed.execute("frac");
+        ed.insert_sym('1');
+        ed.exit_inset();
+        ed.start_jump();
+        // 'a' goes to the unfilled denominator slot.
+        ed.jump_to('a');
+        assert_eq!(ed.path.last().unwrap().1, Field::FracDen);
+        assert_eq!(ed.cur_row().len(), 0);
+        // Label count never exceeds JUMP_MAX.
+        let mut ed = Editor::new();
+        for _ in 0..20 {
+            ed.execute("frac");
+            ed.exit_inset();
+            ed.right();
+        }
+        ed.start_jump();
+        assert!(ed.jump.as_ref().unwrap().len() <= Editor::JUMP_MAX);
+    }
+
+    #[test]
+    fn copy_cut_paste_and_parent_selection() {
+        let mut ed = Editor::new();
+        for c in "ab".chars() {
+            ed.insert_sym(c);
+        }
+        ed.execute("frac");
+        ed.insert_sym('x');
+        // Shift+↑ from inside the numerator selects the whole fraction.
+        ed.select_parent();
+        assert_eq!(ed.selection(), Some((2, 3)));
+        ed.copy_selection();
+        ed.paste(); // paste after the selection: a b frac frac
+        assert_eq!(ed.root.len(), 4);
+        assert!(matches!(ed.root[3], Node::Frac { .. }));
+        // Cut one node and paste it elsewhere (= move).
+        ed.select_move(false);
+        ed.cut_selection();
+        assert_eq!(ed.root.len(), 3);
+        ed.home();
+        ed.paste();
+        assert!(matches!(ed.root[0], Node::Frac { .. }));
+        assert_eq!(ed.col, 1);
+        // Shift+↑ at top level selects everything.
+        ed.select_parent();
+        assert_eq!(ed.selection(), Some((0, 4)));
     }
 
     #[test]

@@ -86,7 +86,9 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
 - ratatui は feature "tui"(bin 専用)。ライブラリ本体に TUI 依存を
   持ち込まない(wasm ビルドが壊れる)。
 - ratatui のイベントは `KeyEventKind::Press` のみ処理(Windows の重複対策)。
-- ジャンプ(Ctrl+G)・ブロック強調(Ctrl+B)は私用領域文字のマーカー原子を
-  表示用クローン AST に挿入する方式(editor.rs `decorated`)。U+E000–E0FF は
-  表示マーカー予約。構造ビュー(Ctrl+O)は正準描画を `parse_with_regions` に
-  通して矩形+深さを回収し背景色を塗る(main.rs `draw_structure`)。
+- ジャンプ(Ctrl+G)・ブロック選択(Ctrl+B)・選択範囲は私用領域文字の
+  マーカー原子を表示用クローン AST に挿入する方式(editor.rs `decorated`)。
+  U+E000–E0FF は表示マーカー予約。TUI 側はマーカー対を列ごと除去して
+  背景色ボックスに変換する(main.rs `marker_boxes`)。構造ビュー(Ctrl+O)
+  は正準描画を `parse_with_regions` に通して矩形+深さを回収し背景色を
+  塗る(main.rs `draw_structure`)。

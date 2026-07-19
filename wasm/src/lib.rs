@@ -7,7 +7,7 @@
 //!   webviews (see editors/ in the repository).
 
 use mascii::ast::normalize;
-use mascii::editor::{Editor, SEL_CLOSE, SEL_OPEN};
+use mascii::editor::{Editor, BLK_CLOSE, SEL_CLOSE, SEL_OPEN};
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
 use mascii::render::{render_row, RenderCtx};
@@ -82,6 +82,7 @@ impl MasciiEditor {
             .map(|c| match c {
                 SEL_OPEN => '⟦',
                 SEL_CLOSE => '⟧',
+                BLK_CLOSE => '⟧',
                 c => c,
             })
             .collect()
@@ -117,6 +118,13 @@ impl MasciiEditor {
     /// bindings cannot drift from the TUI. Host effects (save/copy/quit)
     /// do not apply here and are ignored.
     pub fn key(&mut self, key: &str, shift: bool) {
+        self.key_with(key, shift, false)
+    }
+
+    /// Like `key`, with a ctrl flag for the editing chords (^C/^X/^V
+    /// copy/cut/paste, ^B block select, ^G jump, ^T italic, ^O structure). Host effects
+    /// (save/copy-AA/quit) are ignored here.
+    pub fn key_with(&mut self, key: &str, shift: bool, ctrl: bool) {
         use mascii::input::Key;
         let key = match key {
             "ArrowLeft" => Key::Left,
@@ -135,7 +143,7 @@ impl MasciiEditor {
                 _ => return,
             },
         };
-        let _ = self.ed.input(key, shift, false);
+        let _ = self.ed.input(key, shift, ctrl);
     }
 }
 

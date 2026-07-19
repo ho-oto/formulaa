@@ -106,6 +106,21 @@ fn ctrl_keys_return_host_effects() {
 }
 
 #[test]
+fn esc_cancels_modes_before_quitting() {
+    let mut ed = Editor::new();
+    // With a selection, Esc only clears it …
+    type_script(&mut ed, "a S-Left");
+    assert_eq!(ed.input(Key::Esc, false, false), Effect::None);
+    assert_eq!(ed.selection(), None);
+    // … in the minibuffer it closes that …
+    assert_eq!(ed.input(Key::Char('\\'), false, false), Effect::None);
+    assert_eq!(ed.input(Key::Esc, false, false), Effect::None);
+    assert!(ed.minibuffer.is_none());
+    // … and with nothing left to cancel it quits.
+    assert_eq!(ed.input(Key::Esc, false, false), Effect::Quit);
+}
+
+#[test]
 fn enter_adds_a_grid_row() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"\pmatrix a Enter");
@@ -115,13 +130,58 @@ fn enter_adds_a_grid_row() {
 }
 
 #[test]
-fn reserved_keys_explain_themselves() {
+fn brackets_insert_a_delimiter_pair() {
     let mut ed = Editor::new();
-    type_script(&mut ed, "[");
-    assert!(ed.message.contains("matri"), "message: {}", ed.message);
+    type_script(&mut ed, "[ x ]");
+    assert_eq!(latex(&ed), "\\left[x\\right]");
+    // `"` stays reserved (text runs).
     type_script(&mut ed, "\"");
     assert!(ed.message.contains("text"), "message: {}", ed.message);
-    assert!(ed.root.is_empty());
+}
+
+#[test]
+fn double_slash_makes_a_fraction() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, "a // 1 Down 2 Tab");
+    assert_eq!(latex(&ed), "a\\frac{1}{2}");
+    // A lone slash stays an atom.
+    let mut ed = Editor::new();
+    type_script(&mut ed, "a / b");
+    assert_eq!(latex(&ed), "a/b");
+}
+
+#[test]
+fn copy_cut_paste_by_keys() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, "a+b S-Left S-Left C-c End C-v");
+    assert_eq!(latex(&ed), "a+b+b");
+    type_script(&mut ed, "S-Left S-Left C-x Home C-v");
+    assert_eq!(latex(&ed), "+ba+b");
+}
+
+#[test]
+fn arrows_collapse_selection_to_its_ends() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, "a+b S-Left S-Left Left x");
+    assert_eq!(latex(&ed), "ax+b");
+    let mut ed = Editor::new();
+    type_script(&mut ed, "a+b S-Left S-Left Right y");
+    assert_eq!(latex(&ed), "a+by");
+}
+
+#[test]
+fn ctrl_a_jumps_to_document_start() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a // 1 Down 2 C-a x");
+    assert_eq!(latex(&ed), "xa\\frac{1}{2}");
+    assert!(ed.path.is_empty());
+}
+
+#[test]
+fn shift_up_selects_enclosing_structure() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"x + \frac 1 Down 2 S-Up Backspace");
+    assert_eq!(latex(&ed), "x+");
 }
 
 #[test]
@@ -140,6 +200,28 @@ fn selection_does_not_survive_leaving_the_row() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"\frac ab S-Left Tab ^ x");
     assert_eq!(latex(&ed), "\\frac{ab}{}^{x}");
+}
+
+#[test]
+fn block_select_mode_selects_a_structure() {
+    let mut ed = Editor::new();
+    // 1 + a fraction; ^B labels the fraction 'a', picking it selects it.
+    type_script(&mut ed, r"1 // 2 Down 3 Tab C-b");
+    // The label marker must actually appear in the decorated view
+    // (this display path once silently missed the block branch).
+    let (root, cursor) = ed.decorated();
+    assert!(cursor.is_none(), "cursor hidden while labels are shown");
+    assert!(
+        root.iter().any(
+            |n| matches!(n, mascii::ast::Node::Sym(c) if (0xE000..0xE100).contains(&(*c as u32)))
+        ),
+        "label marker missing: {:?}",
+        root
+    );
+    type_script(&mut ed, "a");
+    assert_eq!(ed.selection(), Some((1, 2)));
+    type_script(&mut ed, "Backspace");
+    assert_eq!(latex(&ed), "1");
 }
 
 // ----- random key sequences: never panic, always roundtrip -----
@@ -197,7 +279,7 @@ fn property_random_key_sequences_roundtrip() {
         .unwrap_or(0xDEC0DE);
     let mut rng = Rng(seed);
 
-    let chars: Vec<char> = "abxyn12+=-*.,<>|'~αβ∑∫()^_{}[]\\\" ".chars().collect();
+    let chars: Vec<char> = "abxyn12+=-*/.,<>|'~αβ∑∫()^_{}[]\\\" ".chars().collect();
     let named_pool = [
         Key::Left,
         Key::Right,

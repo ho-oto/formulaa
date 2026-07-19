@@ -7,16 +7,28 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block as UiBlock, Borders, Paragraph};
 
-use mascii::editor::{
-    Editor, HL_CLOSE_BASE, HL_LEVELS, HL_OPEN_BASE, JUMP_CHAR_BASE, JUMP_LABELS, SEL_CLOSE,
-    SEL_OPEN,
-};
+use mascii::editor::{BLK_CLOSE, Editor, JUMP_CHAR_BASE, JUMP_LABELS, SEL_CLOSE, SEL_OPEN};
 use mascii::input::{Effect, Key};
 use mascii::parse::RegionSpan;
 use mascii::render::{CURSOR_CHAR, RenderCtx, render_row};
 use mascii::{ast, latex, parse, typst};
 
-const HELP: &str = "\\cmd  ^/_ ( ) insets  Tab exit  Space blank  Enter grid row  ←→↑↓ move  ⇧←→ select  ^G jump  ^B blocks  ^O structure  ^T italic  ^Y copy AA  ^S save  ^Q quit";
+const HELP: &str = "\\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓ move  ^A start  ⇧←→/⇧↑ select  ^B select block  ^C/^X/^V copy/cut/paste  ^G jump  ^O structure  ^T italic  ^Y copy AA  ^S save  Esc/^Q quit";
+
+/// Context-sensitive last line: generic keys normally, the relevant
+/// commands when the cursor is inside a grid cell or a delimiter.
+fn help_line(ed: &Editor) -> &'static str {
+    use mascii::ast::Field;
+    match ed.path.last() {
+        Some((_, Field::Cell(_))) => {
+            "grid: Enter add row  \\addrow \\addcol \\delrow \\delcol  ] exit  (then ^/_ etc. as usual)"
+        }
+        Some((_, Field::Seg(_))) => {
+            "delim: \\mid adds a │ segment  ) ] } close  \\lr<spec> visual pairs (\\lr(] \\lr{|}, . = none)"
+        }
+        _ => HELP,
+    }
+}
 
 const USAGE: &str = "\
 usage: mascii [--session] [SAVE_PATH]  interactive TUI editor (default: formula.tex)
@@ -74,12 +86,10 @@ fn main() -> std::io::Result<()> {
     let mut terminal = ratatui::init();
     let mut ed = Editor::new();
     ed.message = format!("mascii — LyX-like math editor (saves to {})", save_path);
-    if session {
-        if let Some(row) = load_session() {
-            ed.col = row.len();
-            ed.root = row;
-            ed.message = format!("session restored from {}", SESSION_FILE);
-        }
+    if session && let Some(row) = load_session() {
+        ed.col = row.len();
+        ed.root = row;
+        ed.message = format!("session restored from {}", SESSION_FILE);
     }
 
     let mut guard = RoundtripGuard::default();
@@ -261,10 +271,6 @@ fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers, save_path: &st
             ed.italic = !ed.italic;
             return false;
         }
-        KeyCode::F(4) => {
-            ed.highlight = !ed.highlight;
-            return false;
-        }
         KeyCode::F(5) => {
             ed.structure = !ed.structure;
             return false;
@@ -354,7 +360,7 @@ fn draw(f: &mut Frame, ed: &Editor) {
 
     f.render_widget(
         Line::from(Span::styled(
-            format!(" {}", HELP),
+            format!(" {}", help_line(ed)),
             Style::default().fg(Color::DarkGray),
         )),
         help_area,
@@ -385,9 +391,9 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) {
     let (root, cursor) = ed.decorated();
     let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
     let block = render_row(&root, cursor_ref, false, &ctx);
-    let lines = block.to_strings();
+    let (lines, bg) = marker_boxes(&block.to_strings(), &ed.marker_extents());
 
-    let width = block.width() as u16;
+    let width = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0) as u16;
     let height = lines.len() as u16;
     let left = inner.width.saturating_sub(width) / 2;
     let top = inner.height.saturating_sub(height) / 2;
@@ -397,20 +403,156 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) {
         text.push(Line::raw(""));
     }
     let pad = " ".repeat(left as usize);
-    for l in &lines {
+    for (l, bgrow) in lines.iter().zip(&bg) {
         let mut spans = vec![Span::raw(pad.clone())];
-        spans.extend(decorate_line(l));
+        spans.extend(decorate_line(l, bgrow));
         text.push(Line::from(spans));
     }
     f.render_widget(Paragraph::new(text), inner);
 }
 
-/// Colors for the enclosing-block markers, innermost first.
-const HL_COLORS: [Color; HL_LEVELS] = [Color::Yellow, Color::Cyan, Color::DarkGray];
+/// Selection box background (replaces the old ⟦ ⟧ bracket display).
+const SELECTION_BG: Color = Color::Indexed(89);
+
+/// Convert marker atoms into colored boxes and overlaid labels: every
+/// marker column (selection pair, ^G/^B labels, ^B closes) is removed
+/// from the text so the geometry stays put, box interiors get a
+/// background color (selection in SELECTION_BG, blocks in the
+/// structure-view depth palette), and each label glyph is drawn *over*
+/// the character that follows it instead of occupying a column.
+fn marker_boxes(
+    lines: &[String],
+    extents: &[(usize, usize)],
+) -> (Vec<String>, Vec<Vec<Option<Color>>>) {
+    let grid: Vec<Vec<char>> = lines.iter().map(|l| l.chars().collect()).collect();
+    let labels = JUMP_LABELS.chars().count() as u32;
+    let is_label = |c: char| (JUMP_CHAR_BASE..JUMP_CHAR_BASE + labels).contains(&(c as u32));
+    // Markers in column order (every marker owns its own column).
+    let mut marks: Vec<(usize, usize, char)> = Vec::new();
+    for (y, row) in grid.iter().enumerate() {
+        for (x, &c) in row.iter().enumerate() {
+            if c == SEL_OPEN || c == SEL_CLOSE || c == BLK_CLOSE || is_label(c) {
+                marks.push((x, y, c));
+            }
+        }
+    }
+    marks.sort_unstable();
+    // Pair opens with closes (properly nested by construction). A lone
+    // label (jump mode) has no close and yields no box.
+    let mut stack: Vec<(usize, usize, char)> = Vec::new();
+    // (open col, open row, close col, depth, color, open char)
+    #[allow(clippy::type_complexity)]
+    let mut boxes: Vec<(usize, usize, usize, usize, Color, char)> = Vec::new();
+    let mut overlays: Vec<(usize, usize, char)> = Vec::new(); // (row, orig col, label)
+    for &(x, y, c) in &marks {
+        if c == SEL_CLOSE || c == BLK_CLOSE {
+            if let Some((o, oy, oc)) = stack.pop() {
+                let depth = stack.len() + 1;
+                let color = if oc == SEL_OPEN {
+                    SELECTION_BG
+                } else {
+                    DEPTH_BG[(depth - 1) % DEPTH_BG.len()]
+                };
+                boxes.push((o, oy, x, depth, color, oc));
+            }
+        } else {
+            if is_label(c) {
+                overlays.push((y, x, c));
+            }
+            stack.push((x, y, c));
+        }
+    }
+    // A marker column may only be removed when every row is blank, a
+    // marker, or a stretchy filler there (bars shrink consistently) —
+    // centered content in *other* rows can sit under a marker column,
+    // and deleting it would corrupt that row. Unremovable markers are
+    // blanked in place instead (a one-cell gap, but alignment is exact).
+    let filler = |ch: char| matches!(ch, ' ' | '─' | '═' | '┄' | '_');
+    let is_marker = |ch: char| ch == SEL_OPEN || ch == SEL_CLOSE || ch == BLK_CLOSE || is_label(ch);
+    let strip: Vec<usize> = marks
+        .iter()
+        .map(|&(x, _, _)| x)
+        .filter(|&x| {
+            grid.iter()
+                .all(|row| row.get(x).is_none_or(|&ch| filler(ch) || is_marker(ch)))
+        })
+        .collect();
+    let shift = |x: usize| x - strip.iter().take_while(|&&s| s < x).count();
+
+    let mut bg: Vec<Vec<Option<Color>>> = grid
+        .iter()
+        .map(|row| vec![None; row.len() - strip.iter().filter(|&&s| s < row.len()).count()])
+        .collect();
+    // Exact vertical extents come from the editor; a ^B label char
+    // encodes its target index, the selection has a single entry. The
+    // char grid alone cannot separate a block's rows from other content
+    // sharing its columns.
+    let extent_of = |oc: char| {
+        if oc == SEL_OPEN {
+            extents.first().copied()
+        } else {
+            extents.get((oc as u32 - JUMP_CHAR_BASE) as usize).copied()
+        }
+    };
+    // Outer boxes first so nested ones paint over them.
+    boxes.sort_by_key(|&(_, _, _, d, _, _)| d);
+    for &(o, oy, close, _, color, oc) in &boxes {
+        let (t, b) = match extent_of(oc) {
+            Some((above, below)) => (
+                oy.saturating_sub(above),
+                (oy + below).min(grid.len().saturating_sub(1)),
+            ),
+            // Fallback: rows showing content between the markers.
+            None => {
+                let rows: Vec<usize> = (0..grid.len())
+                    .filter(|&y| {
+                        (o + 1..close).any(|x| grid[y].get(x).is_some_and(|&ch| ch != ' '))
+                    })
+                    .collect();
+                match (rows.first(), rows.last()) {
+                    (Some(&t), Some(&b)) => (t, b),
+                    _ => continue,
+                }
+            }
+        };
+        for row in bg.iter_mut().take(b + 1).skip(t) {
+            for x in o + 1..close {
+                if strip.binary_search(&x).is_err() {
+                    let sx = shift(x);
+                    if sx < row.len() {
+                        row[sx] = Some(color);
+                    }
+                }
+            }
+        }
+    }
+    let mut stripped: Vec<Vec<char>> = grid
+        .iter()
+        .map(|row| {
+            row.iter()
+                .enumerate()
+                .filter(|(x, _)| strip.binary_search(x).is_err())
+                .map(|(_, &c)| if is_marker(c) { ' ' } else { c })
+                .collect()
+        })
+        .collect();
+    // Labels sit on top of the glyph that followed them.
+    for &(y, x, label) in &overlays {
+        let sx = shift(x);
+        let row = &mut stripped[y];
+        if sx < row.len() {
+            row[sx] = label;
+        } else {
+            row.push(label);
+        }
+    }
+    (stripped.into_iter().map(String::from_iter).collect(), bg)
+}
 
 /// Turn a rendered line into spans: private-use marker chars become
-/// colored jump labels / block brackets, the cursor glyph blinks.
-fn decorate_line(line: &str) -> Vec<Span<'static>> {
+/// colored jump/block labels, the cursor glyph blinks, and box
+/// backgrounds from `marker_boxes` are applied to plain glyphs.
+fn decorate_line(line: &str, bg: &[Option<Color>]) -> Vec<Span<'static>> {
     let cursor_style = Style::default()
         .fg(Color::Cyan)
         .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK);
@@ -421,58 +563,51 @@ fn decorate_line(line: &str) -> Vec<Span<'static>> {
 
     let mut spans = Vec::new();
     let mut buf = String::new();
-    let flush = |buf: &mut String, spans: &mut Vec<Span<'static>>| {
+    let mut buf_bg: Option<Color> = None;
+    let flush = |buf: &mut String, buf_bg: Option<Color>, spans: &mut Vec<Span<'static>>| {
         if !buf.is_empty() {
-            spans.push(Span::raw(std::mem::take(buf)));
+            let s = std::mem::take(buf);
+            spans.push(match buf_bg {
+                Some(color) => Span::styled(s, Style::default().bg(color)),
+                None => Span::raw(s),
+            });
         }
     };
-    for c in line.chars() {
+    for (i, c) in line.chars().enumerate() {
         let u = c as u32;
+        let cell_bg = bg.get(i).copied().flatten();
         if c == CURSOR_CHAR {
-            flush(&mut buf, &mut spans);
-            spans.push(Span::styled(CURSOR_CHAR.to_string(), cursor_style));
+            flush(&mut buf, buf_bg, &mut spans);
+            let style = match cell_bg {
+                Some(color) => cursor_style.bg(color),
+                None => cursor_style,
+            };
+            spans.push(Span::styled(CURSOR_CHAR.to_string(), style));
         } else if c == '␣' {
             // Explicit space atom: keep visible but unobtrusive.
-            flush(&mut buf, &mut spans);
-            spans.push(Span::styled("␣", Style::default().fg(Color::DarkGray)));
+            flush(&mut buf, buf_bg, &mut spans);
+            let mut style = Style::default().fg(Color::DarkGray);
+            if let Some(color) = cell_bg {
+                style = style.bg(color);
+            }
+            spans.push(Span::styled("␣", style));
         } else if (JUMP_CHAR_BASE..JUMP_CHAR_BASE + JUMP_LABELS.chars().count() as u32).contains(&u)
         {
             let label = JUMP_LABELS
                 .chars()
                 .nth((u - JUMP_CHAR_BASE) as usize)
                 .unwrap();
-            flush(&mut buf, &mut spans);
+            flush(&mut buf, buf_bg, &mut spans);
             spans.push(Span::styled(label.to_string(), label_style));
-        } else if c == SEL_OPEN || c == SEL_CLOSE {
-            let glyph = if c == SEL_OPEN { '⟦' } else { '⟧' };
-            flush(&mut buf, &mut spans);
-            spans.push(Span::styled(
-                glyph.to_string(),
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        } else if (HL_OPEN_BASE..HL_OPEN_BASE + HL_LEVELS as u32).contains(&u)
-            || (HL_CLOSE_BASE..HL_CLOSE_BASE + HL_LEVELS as u32).contains(&u)
-        {
-            let (glyph, level) = if u >= HL_CLOSE_BASE {
-                ('⟩', (u - HL_CLOSE_BASE) as usize)
-            } else {
-                ('⟨', (u - HL_OPEN_BASE) as usize)
-            };
-            flush(&mut buf, &mut spans);
-            spans.push(Span::styled(
-                glyph.to_string(),
-                Style::default()
-                    .fg(HL_COLORS[level])
-                    .add_modifier(Modifier::BOLD),
-            ));
         } else {
+            if cell_bg != buf_bg {
+                flush(&mut buf, buf_bg, &mut spans);
+                buf_bg = cell_bg;
+            }
             buf.push(c);
         }
     }
-    flush(&mut buf, &mut spans);
+    flush(&mut buf, buf_bg, &mut spans);
     spans
 }
 
@@ -535,5 +670,67 @@ fn styled_depth(s: String, depth: usize) -> Span<'static> {
             s,
             Style::default().bg(DEPTH_BG[(depth - 1) % DEPTH_BG.len()]),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn marker_boxes_strip_markers_and_paint_cells() {
+        // One-line selection: ⟦ab⟧ → markers vanish, a/b get the bg.
+        let lines = vec![format!(" {}ab{} ", SEL_OPEN, SEL_CLOSE)];
+        let (stripped, bg) = marker_boxes(&lines, &[(0, 0)]);
+        assert_eq!(stripped, vec![" ab ".to_string()]);
+        assert_eq!(
+            bg[0],
+            vec![None, Some(SELECTION_BG), Some(SELECTION_BG), None]
+        );
+    }
+
+    #[test]
+    fn marker_boxes_cover_multiline_content() {
+        // A selected fraction: the box spans all three rows.
+        let lines = vec![
+            "  1  ".to_string(),
+            format!("{}───{}", SEL_OPEN, SEL_CLOSE),
+            "  2  ".to_string(),
+        ];
+        let (stripped, bg) = marker_boxes(&lines, &[(1, 1)]);
+        assert_eq!(stripped[1], "───");
+        assert!(bg.iter().all(|row| row.iter().all(|c| c.is_some())));
+    }
+
+    #[test]
+    fn unsafe_marker_columns_are_blanked_not_removed() {
+        // The ⟧ column carries the denominator's `2` in another row —
+        // removing that column would delete the 2. It must be kept,
+        // with the marker cell blanked (exact alignment, 1-cell gap).
+        let lines = vec![
+            format!("{}ab{}", SEL_OPEN, SEL_CLOSE),
+            "────".to_string(),
+            "   2".to_string(),
+        ];
+        let (stripped, bg) = marker_boxes(&lines, &[(0, 0)]);
+        assert_eq!(stripped[0], "ab ");
+        assert_eq!(stripped[1], "───");
+        assert_eq!(stripped[2], "  2", "denominator content must survive");
+        assert_eq!(bg[0], vec![Some(SELECTION_BG), Some(SELECTION_BG), None]);
+        // The box must not leak into the bar/denominator rows even
+        // though they have content under the same columns.
+        assert!(bg[1].iter().all(|c| c.is_none()), "bar row painted");
+        assert!(bg[2].iter().all(|c| c.is_none()), "den row painted");
+    }
+
+    #[test]
+    fn jump_labels_overlay_without_shifting() {
+        let label = char::from_u32(JUMP_CHAR_BASE).unwrap();
+        // Label before 'x': the label column vanishes and the label is
+        // drawn over 'x' — the line keeps its original width.
+        let lines = vec![format!("{}xy", label)];
+        let (stripped, bg) = marker_boxes(&lines, &[]);
+        assert_eq!(stripped[0].chars().collect::<Vec<_>>(), vec![label, 'y']);
+        assert!(bg[0].iter().all(|c| c.is_none()));
     }
 }

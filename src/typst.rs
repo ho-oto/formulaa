@@ -83,10 +83,11 @@ fn node_to_typst(node: &Node) -> String {
         Node::Sup { arg } => format!("^{}", grouped(arg)),
         Node::Sub { arg } => format!("_{}", grouped(arg)),
         Node::BigOp { base, lower, upper } => {
-            let mut s = if base.len() == 1 {
-                row_to_typst(base)
-            } else {
-                format!("limits({})", row_to_typst(base))
+            let mut s = match &base[..] {
+                // \op*<name>: an upright operator with under-limits.
+                [Node::Text { t, math: true }] => format!("op(\"{}\", limits: #true)", t),
+                [_] => row_to_typst(base),
+                _ => format!("limits({})", row_to_typst(base)),
             };
             if !lower.is_empty() {
                 s.push_str(&format!("_{}", grouped(lower)));
@@ -141,36 +142,33 @@ fn node_to_typst(node: &Node) -> String {
             mids,
             segs,
         } => {
-            if mids.is_empty() {
-                if let [seg] = &segs[..] {
-                    if let [Node::Array { cols, cells, .. }] = &seg[..] {
-                        let body = mat_body(*cols, cells);
-                        return match (left, right) {
-                            ('{', '.') => {
-                                // cases(): one argument per grid row.
-                                let rows = cells
-                                    .chunks(*cols)
-                                    .map(|row| {
-                                        row.iter().map(row_to_typst).collect::<Vec<_>>().join(" & ")
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join(", ");
-                                format!("cases({})", rows)
-                            }
-                            ('(', ')') => format!("mat(delim: \"(\", {})", body),
-                            ('[', ']') => format!("mat(delim: \"[\", {})", body),
-                            ('{', '}') => format!("mat(delim: \"{{\", {})", body),
-                            ('|', '|') => format!("mat(delim: \"|\", {})", body),
-                            ('.', '.') => format!("mat(delim: #none, {})", body),
-                            _ => format!(
-                                "lr({} mat(delim: #none, {}) {})",
-                                delim_typst(*left),
-                                body,
-                                delim_typst(*right)
-                            ),
-                        };
+            if mids.is_empty()
+                && let [seg] = &segs[..]
+                && let [Node::Array { cols, cells, .. }] = &seg[..]
+            {
+                let body = mat_body(*cols, cells);
+                return match (left, right) {
+                    ('{', '.') => {
+                        // cases(): one argument per grid row.
+                        let rows = cells
+                            .chunks(*cols)
+                            .map(|row| row.iter().map(row_to_typst).collect::<Vec<_>>().join(" & "))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!("cases({})", rows)
                     }
-                }
+                    ('(', ')') => format!("mat(delim: \"(\", {})", body),
+                    ('[', ']') => format!("mat(delim: \"[\", {})", body),
+                    ('{', '}') => format!("mat(delim: \"{{\", {})", body),
+                    ('|', '|') => format!("mat(delim: \"|\", {})", body),
+                    ('.', '.') => format!("mat(delim: #none, {})", body),
+                    _ => format!(
+                        "lr({} mat(delim: #none, {}) {})",
+                        delim_typst(*left),
+                        body,
+                        delim_typst(*right)
+                    ),
+                };
             }
             let mut s = String::from("lr(");
             s.push_str(&delim_typst(*left));

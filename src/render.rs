@@ -558,10 +558,10 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
         }
 
         Node::Sup { arg } => {
-            if cursor.is_none() {
-                if let Some(chars) = inline_script(arg, superscript_char) {
-                    return Block::from_chars(chars);
-                }
+            if cursor.is_none()
+                && let Some(chars) = inline_script(arg, superscript_char)
+            {
+                return Block::from_chars(chars);
             }
             let a = render_row(arg, cur(Field::SupArg), true, ctx);
             let h = a.height();
@@ -573,10 +573,10 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
         }
 
         Node::Sub { arg } => {
-            if cursor.is_none() {
-                if let Some(chars) = inline_script(arg, subscript_char) {
-                    return Block::from_chars(chars);
-                }
+            if cursor.is_none()
+                && let Some(chars) = inline_script(arg, subscript_char)
+            {
+                return Block::from_chars(chars);
             }
             let a = render_row(arg, cur(Field::SubArg), true, ctx);
             let mut lines = vec![vec![' '; a.width()]];
@@ -710,23 +710,22 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             // column markers ┬ ┴ ride the delimiter's top/bottom rows).
             // Angles keep their vertex geometry and wrap a bare lattice
             // instead.
-            if mids.is_empty() && *left != '⟨' && *right != '⟩' {
-                if let [seg] = &segs[..] {
-                    if let [Node::Array { rows, cols, cells }] = &seg[..] {
-                        let seg_cursor = cur(Field::Seg(0));
-                        let acur = match seg_cursor {
-                            Some((path, c)) => match path.first() {
-                                Some(&(0, f)) => Some((f, (&path[1..], c))),
-                                _ => None,
-                            },
-                            None => None,
-                        };
-                        if !matches!(seg_cursor, Some(([], _))) {
-                            return render_fused_grid(
-                                *left, *right, *rows, *cols, cells, acur, ctx,
-                            );
-                        }
-                    }
+            if mids.is_empty()
+                && *left != '⟨'
+                && *right != '⟩'
+                && let [seg] = &segs[..]
+                && let [Node::Array { rows, cols, cells }] = &seg[..]
+            {
+                let seg_cursor = cur(Field::Seg(0));
+                let acur = match seg_cursor {
+                    Some((path, c)) => match path.first() {
+                        Some(&(0, f)) => Some((f, (&path[1..], c))),
+                        _ => None,
+                    },
+                    None => None,
+                };
+                if !matches!(seg_cursor, Some(([], _))) {
+                    return render_fused_grid(*left, *right, *rows, *cols, cells, acur, ctx);
                 }
             }
             // Segments render as ordinary rows (an Array node inside is a

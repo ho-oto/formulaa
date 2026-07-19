@@ -52,6 +52,18 @@ impl Editor {
             return Effect::None;
         }
 
+        // Block-select mode: the next key picks a block label.
+        if self.block.is_some() {
+            match key {
+                Key::Char(c) if !ctrl => self.block_to(c),
+                _ => {
+                    self.block = None;
+                    self.message.clear();
+                }
+            }
+            return Effect::None;
+        }
+
         // Minibuffer (`\command`) mode captures most keys.
         if self.minibuffer.is_some() {
             match key {
@@ -78,13 +90,17 @@ impl Editor {
 
         if ctrl {
             match key {
-                Key::Char('q') | Key::Char('c') => return Effect::Quit,
+                Key::Char('q') => return Effect::Quit,
                 Key::Char('s') => return Effect::SaveTex,
                 Key::Char('y') => return Effect::CopyAa,
+                Key::Char('a') => self.document_start(),
                 Key::Char('g') => self.start_jump(),
+                Key::Char('b') => self.start_block_select(),
                 Key::Char('t') => self.italic = !self.italic,
-                Key::Char('b') => self.highlight = !self.highlight,
                 Key::Char('o') => self.structure = !self.structure,
+                Key::Char('c') => self.copy_selection(),
+                Key::Char('x') => self.cut_selection(),
+                Key::Char('v') => self.paste(),
                 _ => {}
             }
             return Effect::None;
@@ -94,14 +110,28 @@ impl Editor {
         match key {
             Key::Left if shift => self.select_move(false),
             Key::Right if shift => self.select_move(true),
-            Key::Left => {
-                self.select_anchor = None;
-                self.left();
-            }
-            Key::Right => {
-                self.select_anchor = None;
-                self.right();
-            }
+            Key::Up if shift => self.select_parent(),
+            // With an active selection, ←/→ collapse onto its ends.
+            Key::Left => match self.selection() {
+                Some((lo, _)) => {
+                    self.select_anchor = None;
+                    self.col = lo;
+                }
+                None => {
+                    self.select_anchor = None;
+                    self.left();
+                }
+            },
+            Key::Right => match self.selection() {
+                Some((_, hi)) => {
+                    self.select_anchor = None;
+                    self.col = hi;
+                }
+                None => {
+                    self.select_anchor = None;
+                    self.right();
+                }
+            },
             Key::Up => {
                 self.select_anchor = None;
                 self.vertical(true);
@@ -110,7 +140,18 @@ impl Editor {
                 self.select_anchor = None;
                 self.vertical(false);
             }
-            Key::Esc => self.select_anchor = None,
+            // Esc peels state: selection, then the structure view, and
+            // with nothing left to cancel it quits (terminals often
+            // swallow ^Q, so Esc is the reliable way out).
+            Key::Esc => {
+                if self.select_anchor.is_some() {
+                    self.select_anchor = None;
+                } else if self.structure {
+                    self.structure = false;
+                } else {
+                    return Effect::Quit;
+                }
+            }
             Key::Home => self.home(),
             Key::End => self.end(),
             Key::Backspace => {
@@ -157,12 +198,21 @@ impl Editor {
             }
             Key::Char('}') => self.close_brace(),
             Key::Char('[') => {
-                self.message = "[ ] are reserved for matrices; insert one with \\matrix".into()
+                if !self.wrap_selection(|c| Node::Delim {
+                    left: '[',
+                    right: ']',
+                    mids: vec![],
+                    segs: vec![c],
+                }) {
+                    self.insert_delim('[', ']', vec![]);
+                }
             }
             Key::Char('"') => {
                 self.message = "\" is reserved for text runs; use \\rm<text> or \\text<text>".into()
             }
             Key::Char(']') => self.close_bracket(),
+            // `//` makes a fraction (a lone `/` stays the slash atom).
+            Key::Char('/') => self.slash(),
             Key::Tab => self.exit_inset(),
             // Enter inside a grid: new row below (like LyX table editing).
             Key::Enter => self.add_row(),

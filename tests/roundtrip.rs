@@ -146,6 +146,29 @@ fn stray_stacked_content_is_an_error() {
     assert!(parse("1\n─ + x\n2   y").is_err());
 }
 
+/// ess sup_x f(x)  — \op*<name> (\operatorname*): a ┄band┄ whose base is
+/// an arbitrary upright Text run instead of a dictionary Func.
+#[test]
+fn operatorname_star_band() {
+    let row = cat(&[
+        n(Node::BigOp {
+            base: vec![Node::Text {
+                t: "esssup".into(),
+                math: true,
+            }],
+            lower: s("x"),
+            upper: vec![],
+        }),
+        s("f"),
+        n(paren(s("x"))),
+    ]);
+    roundtrip("operatorname-star", &row);
+    assert_eq!(
+        row_to_latex(&normalize(&row)),
+        "\\operatorname*{esssup}_{x}f\\left(x\\right)"
+    );
+}
+
 // ----- MDN: three famous mathematical formulas -----
 
 /// ∛(−q/2 + √(q²/4 + p³/27)) + ∛(−q/2 − √(q²/4 + p³/27))
@@ -852,10 +875,15 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             arg: gen_row(rng, d, 2),
         },
         4 => {
-            let base: Row = match rng.below(4) {
+            let base: Row = match rng.below(5) {
                 0 => vec![Node::Func("lim".into())],
                 1 => vec![Node::Func("max".into())],
                 2 => vec![Node::Func("arg".into()), Node::Func("max".into())],
+                // \op*<name>: arbitrary upright operator (Text base).
+                3 => vec![Node::Text {
+                    t: "esssup".into(),
+                    math: true,
+                }],
                 _ => vec![Node::Sym(['∑', '∏', '∫', '⋃'][rng.below(4)])],
             };
             Node::BigOp {

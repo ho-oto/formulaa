@@ -59,7 +59,12 @@ fn node_to_latex(node: &Node) -> String {
         Node::BigOp { base, lower, upper } => {
             // \sum_{..}^{..}, \lim_{..}, \arg\max_{..} — the base row's
             // own serialization already yields the operator commands.
-            let mut s = row_to_latex(base);
+            // A lone Text base is \op*<name>: \operatorname* keeps the
+            // limits underneath (plain \mathrm would set them aside).
+            let mut s = match &base[..] {
+                [Node::Text { t, math: true }] => format!("\\operatorname*{{{}}}", t),
+                _ => row_to_latex(base),
+            };
             if !lower.is_empty() {
                 s.push_str(&format!("_{}", braced(lower)));
             }
@@ -109,25 +114,24 @@ fn node_to_latex(node: &Node) -> String {
             segs,
         } => {
             // Single grid seg with a well-known pair -> a matrix environment.
-            if mids.is_empty() {
-                if let [seg] = &segs[..] {
-                    if let [Node::Array { cols, cells, .. }] = &seg[..] {
-                        let env = match (left, right) {
-                            ('(', ')') => Some("pmatrix"),
-                            ('[', ']') => Some("bmatrix"),
-                            ('{', '}') => Some("Bmatrix"),
-                            ('|', '|') => Some("vmatrix"),
-                            ('.', '.') => Some("matrix"),
-                            ('{', '.') => Some("cases"),
-                            _ => None,
-                        };
-                        if let Some(env) = env {
-                            return format!(
-                                "\\begin{{{env}}} {} \\end{{{env}}}",
-                                array_body(*cols, cells)
-                            );
-                        }
-                    }
+            if mids.is_empty()
+                && let [seg] = &segs[..]
+                && let [Node::Array { cols, cells, .. }] = &seg[..]
+            {
+                let env = match (left, right) {
+                    ('(', ')') => Some("pmatrix"),
+                    ('[', ']') => Some("bmatrix"),
+                    ('{', '}') => Some("Bmatrix"),
+                    ('|', '|') => Some("vmatrix"),
+                    ('.', '.') => Some("matrix"),
+                    ('{', '.') => Some("cases"),
+                    _ => None,
+                };
+                if let Some(env) = env {
+                    return format!(
+                        "\\begin{{{env}}} {} \\end{{{env}}}",
+                        array_body(*cols, cells)
+                    );
                 }
             }
             let mut s = format!("\\left{}", delim_latex(*left));

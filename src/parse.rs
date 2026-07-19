@@ -419,10 +419,10 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
         // baseline is that of the inner region (a lattice inside answers
         // with its own ┌├└ center rule).
         '⎡' | '[' | '⎛' | '⎸' | '▏' => {
-            if let Ok(close) = match_delim(g, first, c, rect.r) {
-                if fused_grid_markers(g, first, last, c, close).is_some() {
-                    return Ok((first + last) / 2);
-                }
+            if let Ok(close) = match_delim(g, first, c, rect.r)
+                && fused_grid_markers(g, first, last, c, close).is_some()
+            {
+                return Ok((first + last) / 2);
             }
             find_baseline(
                 g,
