@@ -679,6 +679,12 @@ impl Editor {
             "xleftarrow" | "xfrom" => {
                 self.insert_and_enter(Node::Arrow { op: '←', over: vec![], under: vec![] })
             }
+            "xRightarrow" | "xTo" => {
+                self.insert_and_enter(Node::Arrow { op: '⇒', over: vec![], under: vec![] })
+            }
+            "xLeftarrow" | "xFrom" => {
+                self.insert_and_enter(Node::Arrow { op: '⇐', over: vec![], under: vec![] })
+            }
             "addrow" => self.add_row(),
             "addcol" => self.add_col(),
             "delrow" => self.del_row(),

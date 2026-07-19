@@ -90,7 +90,12 @@ fn node_to_typst(node: &Node) -> String {
         }
         Node::Text(t) => format!("\"{}\"", t),
         Node::Arrow { op, over, under } => {
-            let head = if *op == '←' { "<-" } else { "->" };
+            let head = match op {
+                '←' => "<-",
+                '⇒' => "=>",
+                '⇐' => "<=",
+                _ => "->",
+            };
             let mut s = format!("attach(stretch({})", head);
             if !over.is_empty() {
                 s.push_str(&format!(", t: ({})", row_to_typst(over)));

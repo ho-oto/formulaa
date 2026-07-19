@@ -42,16 +42,13 @@ pub enum Node {
     /// Auto-scaling delimiter block. `left`/`right`/`mids` hold delimiter
     /// *spec* chars: ( ) [ ] { } ⟨ ⟩ | and '.' (null delimiter, drawn as
     /// the thin ▏ ▕ markers). Middles ('|' only) separate the segments;
-    /// segs.len() == mids.len() + 1. Canonical constraints (normalize):
-    /// a plain [ ] pair with no mids always holds a single [Array] seg
-    /// (that picture is the matrix), other segs hold an [Array] only when
-    /// the grid has >= 2 cells.
+    /// segs.len() == mids.len() + 1. Segments are ordinary rows — a matrix
+    /// is nothing more than a Delim whose segment contains an Array.
     Delim { left: char, right: char, mids: Vec<char>, segs: Vec<Row> },
     /// rows×cols grid (LaTeX array/matrix), cells stored row-major.
-    /// As the sole node of a Delim segment it renders as a blank-gap grid
-    /// body (the delimiter gives the extent); anywhere else it renders as
-    /// a self-delimiting ┼ lattice (markers at every separator crossing
-    /// including the outer edges).
+    /// Always drawn as a self-delimiting lattice (┌ ┬ ┐ / ├ ┼ ┤ / └ ┴ ┘
+    /// junctions at every separator crossing including the outer edges),
+    /// wherever it appears — delimiters simply wrap it.
     Array { rows: usize, cols: usize, cells: Vec<Row> },
     /// Struck-through content (\cancel): every cell of the rendered
     /// argument carries a combining long solidus overlay (U+0338).
@@ -60,14 +57,6 @@ pub enum Node {
 
 /// Valid delimiter spec chars for `Node::Delim` (`.` = null delimiter).
 pub const DELIM_SPECS: &[char] = &['(', ')', '[', ']', '{', '}', '⟨', '⟩', '|', '.'];
-
-impl Node {
-    /// A `[ … ]` pair with no middles: its interior is always a grid
-    /// (this is the canonical matrix picture).
-    pub fn is_plain_bracket(left: char, right: char, mids: &[char]) -> bool {
-        left == '[' && right == ']' && mids.is_empty()
-    }
-}
 
 /// Identifies one editable slot inside a structure node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -335,12 +324,6 @@ pub fn strip_spacers(row: &Row) -> Row {
     out
 }
 
-/// Top-level spacers only (used where blank columns would be read as cell
-/// separators).
-fn drop_top_spacers(row: &Row) -> Row {
-    row.iter().filter(|n| !matches!(n, Node::Spacer)).cloned().collect()
-}
-
 fn normalize_node(node: &Node) -> Node {
     match node {
         Node::Sym(c) if crate::symbols::bigop_by_char(*c) => {
@@ -370,62 +353,12 @@ fn normalize_node(node: &Node) -> Node {
             over: normalize(over),
             under: normalize(under),
         },
-        Node::Delim { left, right, mids, segs } => {
-            let plain_bracket = Node::is_plain_bracket(*left, *right, mids);
-            let segs = segs
-                .iter()
-                .map(|seg| {
-                    // A sole Array stays a blank-gap grid body; Arrays in
-                    // any other position render as self-delimiting ┼
-                    // lattices and need no special casing.
-                    // Blank-gap grid cells cannot hold top-level spacers
-                    // (their blank columns would read as cell separators).
-                    let seg = match &seg[..] {
-                        [Node::Array { rows, cols, cells }] => vec![Node::Array {
-                            rows: *rows,
-                            cols: *cols,
-                            cells: cells
-                                .iter()
-                                .map(|c| normalize(&drop_top_spacers(c)))
-                                .collect(),
-                        }],
-                        _ => normalize(seg),
-                    };
-                    // Iterate to a fixpoint: splicing can surface a new
-                    // sole Array (e.g. a 1×1 grid whose cell held a grid).
-                    let mut seg = seg;
-                    loop {
-                        seg = match &seg[..] {
-                            // Plain [ ]: the interior is always a grid.
-                            [Node::Array { .. }] if plain_bracket => break seg,
-                            _ if plain_bracket => {
-                                let cell = normalize(&drop_top_spacers(&seg));
-                                break vec![Node::Array { rows: 1, cols: 1, cells: vec![cell] }];
-                            }
-                            // Elsewhere a 1×1 grid is the same picture as
-                            // the cell itself rendered compact — canonical
-                            // form is the plain row.
-                            [Node::Array { rows: 1, cols: 1, cells }] => normalize(&cells[0]),
-                            // A one-row grid has no separator row to prove
-                            // its gridness in a blank-gap body; canonical
-                            // form joins the cells with explicit ␣ spaces.
-                            [Node::Array { rows: 1, cells, .. }] => {
-                                let mut joined: Row = Vec::new();
-                                for (i, cell) in cells.iter().enumerate() {
-                                    if i > 0 {
-                                        joined.push(Node::Sym('␣'));
-                                    }
-                                    joined.extend(cell.clone());
-                                }
-                                normalize(&joined)
-                            }
-                            _ => break seg,
-                        };
-                    }
-                })
-                .collect();
-            Node::Delim { left: *left, right: *right, mids: mids.clone(), segs }
-        }
+        Node::Delim { left, right, mids, segs } => Node::Delim {
+            left: *left,
+            right: *right,
+            mids: mids.clone(),
+            segs: segs.iter().map(normalize).collect(),
+        },
         Node::Cancel { arg } => {
             // A cancel strikes every cell of its subtree, so any Cancel
             // nested anywhere inside it (even deep in a fraction) is the

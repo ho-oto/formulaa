@@ -15,9 +15,16 @@ pub const PLACEHOLDER: char = '⬚';
 pub const FRAC_BAR: char = '─';
 /// Big-operator band: marks the horizontal extent of over/under limits.
 pub const OP_BAND: char = '┄';
-/// Stretchy-arrow body (labels span it like a ┄ band; distinct from the
-/// fraction bar so `───→` stays a fraction followed by an arrow atom).
-pub const ARROW_BODY: char = '╌';
+/// Stretchy single-arrow bodies reuse the ─ bar: a bar run directly
+/// followed by a head (→) *is* the arrow; a fraction next to an arrow
+/// atom is separated by a ⬚ anchor instead (space presence, not count,
+/// is what changes the reading). Double arrows (⇒ ⇐) use ═.
+pub const DOUBLE_BODY: char = '═';
+
+/// Body glyph for an arrow head.
+pub fn arrow_body(op: char) -> char {
+    if op == '⇒' || op == '⇐' { DOUBLE_BODY } else { FRAC_BAR }
+}
 /// Grid lattice markers: a bare Array frames itself with box-drawing
 /// junctions at every crossing of its separator rows/columns including the
 /// outer edges (┌ ┬ ┐ / ├ ┼ ┤ / └ ┴ ┘), so it needs no delimiter to have a
@@ -250,20 +257,11 @@ fn inline_script(row: &Row, map: fn(char) -> Option<char>) -> Option<Vec<char>> 
 #[derive(Clone, Copy)]
 pub struct RenderCtx {
     pub italic: bool,
-    /// Set by Delim for its segment rows only: a sole Array renders as a
-    /// blank-gap grid body (the delimiter provides the extent). Everywhere
-    /// else an Array renders as a self-delimiting ┼ lattice.
-    pub grid_host: bool,
 }
 
 impl RenderCtx {
     pub fn canonical() -> Self {
-        RenderCtx { italic: true, grid_host: false }
-    }
-
-    /// Context for nested rows (clears the Delim-segment grid flag).
-    fn child(self) -> Self {
-        RenderCtx { grid_host: false, ..self }
+        RenderCtx { italic: true }
     }
 
     fn placeholder(&self) -> char {
@@ -326,16 +324,7 @@ pub fn render_row(
             },
             cancel: matches!(node, Node::Cancel { .. }),
         };
-        // A sole Array in a delimiter segment is a blank-gap grid body
-        // (the delimiter provides the extent); any other Array renders as
-        // a self-delimiting ┼ lattice via render_node.
-        let child_ctx = RenderCtx { grid_host: false, ..*ctx };
-        let mut block = match node {
-            Node::Array { rows, cols, cells } if ctx.grid_host && row.len() == 1 => {
-                render_array(*rows, *cols, cells, child_cursor, &child_ctx)
-            }
-            _ => render_node(node, child_cursor, &child_ctx),
-        };
+        let mut block = render_node(node, child_cursor, ctx);
         // A script at the start of a row gets an explicit ⬚ base, so the
         // picture differs from the row without the script wrapper.
         if i == 0 && info.script {
@@ -347,36 +336,38 @@ pub fn render_row(
         blocks.insert(col, (Block::from_chars(vec![CURSOR_CHAR]), Info::default()));
     }
 
-    // Single-column spacers between siblings, inserted only where the
-    // picture would otherwise be unparseable (visual spacing is the user's
-    // job via explicit ␣ atoms). Parse-safe because a fully blank column
-    // always separates same-baseline siblings (normalize re-merges any
-    // script segments the blank column splits). Inserted:
-    //  - between two identical bar glyphs (── / ┄┄ would merge into one run)
+    // Single-space separators between siblings, inserted only where
+    // adjacent glyphs would otherwise fuse into one token — space
+    // *presence* (never count) is what changes a reading:
+    //  - between two identical bar glyphs (── / ┄┄ / ══ would merge)
+    //  - between a bar edge and an arrow head that would cap it (─ then →,
+    //    ═ then ⇒) and between a head and a body that would absorb it
+    //    (← then ─, ⇐ then ═)
+    //  - after a cancel with a blank baseline edge (the strike-extent scan
+    //    must not fuse the ragged edge with the neighbour)
+    // A 2D script right after a cancel instead needs a non-blank baseline
+    // anchor (⬚), or the strike scan would fuse raised content.
     let mut spaced: Vec<Block> = Vec::with_capacity(blocks.len() * 2);
     let mut prev: Option<Info> = None;
     for (block, info) in blocks {
         let need = match (prev, &spaced.last()) {
             (Some(p), Some(last)) => {
-                let bars = match (last.baseline_edge(false), block.baseline_edge(true)) {
+                let edges = (last.baseline_edge(false), block.baseline_edge(true));
+                let fuse = match edges {
                     (Some(a), Some(b)) => {
-                        a == b && (a == FRAC_BAR || a == OP_BAND || a == ARROW_BODY)
+                        (a == b && (a == FRAC_BAR || a == OP_BAND || a == DOUBLE_BODY))
+                            || (a == FRAC_BAR && b == '→')
+                            || (a == DOUBLE_BODY && b == '⇒')
+                            || (a == '←' && b == FRAC_BAR)
+                            || (a == '⇐' && b == DOUBLE_BODY)
                     }
                     _ => false,
                 };
-                // A cancel whose baseline edge is blank (e.g. it ends in a
-                // radical overline over a trailing space) must not touch
-                // the next block, or the parser's strike-extent scan would
-                // fuse the ragged edge with the neighbour's columns.
-                let ragged_cancel =
-                    p.cancel && last.baseline_edge(false) == Some(' ');
-                bars || ragged_cancel
+                let ragged_cancel = p.cancel && last.baseline_edge(false) == Some(' ');
+                fuse || ragged_cancel
             }
             _ => false,
         };
-        // A 2D script right after a cancel needs a baseline anchor, or the
-        // parser would fuse it with raised content inside the strike; the
-        // reserved ⬚ (skipped by the parser) provides one at every level.
         let anchor = matches!(prev, Some(p) if p.cancel) && info.script_2d;
         if anchor {
             spaced.push(Block::from_chars(vec![ctx.placeholder()]));
@@ -482,7 +473,7 @@ fn render_node(
                     return Block::from_chars(chars);
                 }
             }
-            let a = render_row(arg, cur(Field::SupArg), true, &ctx.child());
+            let a = render_row(arg, cur(Field::SupArg), true, ctx);
             let h = a.height();
             Block { lines: a.lines, baseline: h, cancel: a.cancel }
         }
@@ -493,7 +484,7 @@ fn render_node(
                     return Block::from_chars(chars);
                 }
             }
-            let a = render_row(arg, cur(Field::SubArg), true, &ctx.child());
+            let a = render_row(arg, cur(Field::SubArg), true, ctx);
             let mut lines = vec![vec![' '; a.width()]];
             lines.extend(a.lines);
             let cancel = a.cancel.iter().map(|&(r, c)| (r + 1, c)).collect();
@@ -505,8 +496,8 @@ fn render_node(
             // is inside this operator both slots must stay visible (⬚) so
             // they can be navigated to.
             let editing = cursor.is_some();
-            let u = render_row(upper, cur(Field::OpUpper), editing, &ctx.child());
-            let l = render_row(lower, cur(Field::OpLower), editing, &ctx.child());
+            let u = render_row(upper, cur(Field::OpUpper), editing, ctx);
+            let l = render_row(lower, cur(Field::OpLower), editing, ctx);
             if u.is_empty() && l.is_empty() && cursor.is_none() {
                 // No limits: a bare operator character.
                 return Block::from_chars(vec![*op]);
@@ -530,14 +521,14 @@ fn render_node(
             // Same shape as the big-op band: labels centered over the
             // extent; empty labels vanish except while editing.
             let editing = cursor.is_some();
-            let o = render_row(over, cur(Field::ArrowOver), editing, &ctx.child());
-            let u = render_row(under, cur(Field::ArrowUnder), editing, &ctx.child());
+            let o = render_row(over, cur(Field::ArrowOver), editing, ctx);
+            let u = render_row(under, cur(Field::ArrowUnder), editing, ctx);
             let w = o.width().max(u.width()).max(1) + 3;
-            let mut body = vec![ARROW_BODY; w];
-            if *op == '←' {
-                body[0] = '←';
+            let mut body = vec![arrow_body(*op); w];
+            if *op == '←' || *op == '⇐' {
+                body[0] = *op;
             } else {
-                body[w - 1] = '→';
+                body[w - 1] = *op;
             }
             let mut lines = center_pad(&o, w);
             let baseline = lines.len();
@@ -558,8 +549,7 @@ fn render_node(
                 if k > 0 {
                     parts.push(Block::from_chars(vec![' ']));
                 }
-                let seg_ctx = RenderCtx { grid_host: true, ..*ctx };
-                parts.push(render_row(seg, cur(Field::Seg(k)), true, &seg_ctx));
+                parts.push(render_row(seg, cur(Field::Seg(k)), true, ctx));
             }
             let mut body = hcat(&parts);
             let mut x = 0;
@@ -618,7 +608,7 @@ fn render_lattice(
     cursor: Option<(Field, CursorRef)>,
     ctx: &RenderCtx,
 ) -> Block {
-    let cctx = ctx.child();
+    let cctx = *ctx;
     let blocks: Vec<Block> = cells
         .iter()
         .enumerate()
@@ -759,72 +749,6 @@ fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
         .collect()
 }
 
-/// Blank-gap grid body for a sole-Array delimiter segment (the enclosing
-/// Delim draws the extent). Cells are compact, centered per column,
-/// baseline-aligned per row. Column separator: 2 blank columns; row
-/// separator: exactly one blank line. Outside a delimiter an Array uses
-/// the explicit ┼ lattice instead (render_lattice).
-fn render_array(
-    rows: usize,
-    cols: usize,
-    cells: &[Row],
-    cursor: Option<(Field, CursorRef)>,
-    ctx: &RenderCtx,
-) -> Block {
-    let cctx = ctx.child();
-    let blocks: Vec<Block> = cells
-        .iter()
-        .enumerate()
-        .map(|(i, cell)| {
-            let cur = match cursor {
-                Some((Field::Cell(ci), c)) if ci == i => Some(c),
-                _ => None,
-            };
-            render_row(cell, cur, true, &cctx)
-        })
-        .collect();
-
-    let col_w: Vec<usize> = (0..cols)
-        .map(|j| (0..rows).map(|i| blocks[i * cols + j].width()).max().unwrap_or(1))
-        .collect();
-
-    let gap = Block::new(vec![vec![' '; 2]], 0);
-    let mut body: Vec<Vec<char>> = Vec::new();
-    let mut cancel: Vec<(usize, usize)> = Vec::new();
-    for i in 0..rows {
-        let mut parts: Vec<Block> = Vec::new();
-        for j in 0..cols {
-            if j > 0 {
-                parts.push(gap.clone());
-            }
-            let b = &blocks[i * cols + j];
-            let centered = Block {
-                lines: center_pad(b, col_w[j]),
-                baseline: b.baseline,
-                cancel: centered_cancel(b, col_w[j], 0).collect(),
-            };
-            parts.push(centered);
-        }
-        let row_block = hcat(&parts);
-        if i > 0 {
-            body.push(vec![' '; row_block.width()]);
-        }
-        let row_off = body.len();
-        cancel.extend(row_block.cancel.iter().map(|&(r, c)| (r + row_off, c)));
-        body.extend(row_block.lines);
-    }
-    let w = body.iter().map(|l| l.len()).max().unwrap_or(1);
-    for l in &mut body {
-        l.resize(w, ' ');
-    }
-    if body.is_empty() {
-        body.push(vec![' '; w]);
-    }
-    let h = body.len();
-    // Matches the parser: baseline of a grid is its vertical center.
-    Block { lines: body, baseline: (h - 1) / 2, cancel }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -834,7 +758,7 @@ mod tests {
     }
 
     fn plain(root: &Row) -> Vec<String> {
-        let ctx = RenderCtx { italic: false, ..RenderCtx::canonical() };
+        let ctx = RenderCtx { italic: false };
         render_row(root, None, false, &ctx)
             .to_strings()
             .iter()
@@ -894,7 +818,16 @@ mod tests {
                 cells: vec![sym_row("a"), sym_row("b"), sym_row("c"), sym_row("d")],
             }]],
         }];
-        assert_eq!(plain(&root), vec!["⎡a  b⎤", "⎢    ⎥", "⎣c  d⎦"]);
+        assert_eq!(
+            plain(&root),
+            vec![
+                "⎡┌   ┬   ┐⎤",
+                "⎢  a   b  ⎥",
+                "⎢├   ┼   ┤⎥",
+                "⎢  c   d  ⎥",
+                "⎣└   ┴   ┘⎦"
+            ]
+        );
     }
 
     #[test]

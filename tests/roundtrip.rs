@@ -542,6 +542,15 @@ fn labeled_arrows() {
             s("Z"),
         ]),
     );
+    // Double arrows, and a fraction next to an arrow atom (space-separated).
+    roundtrip(
+        "double-arrows",
+        &cat(&[n(arrow('⇒', s("f"), vec![])), n(arrow('⇐', vec![], s("g")))]),
+    );
+    roundtrip(
+        "frac-then-arrow-atom",
+        &cat(&[n(frac(s("1"), s("2"))), s("→"), n(frac(s("3"), s("4")))]),
+    );
     // Adjacent arrows must not fuse their bodies.
     roundtrip(
         "adjacent-arrows",
@@ -735,7 +744,7 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
         }
         10 => Node::Text(["dx", "if", "abc", "T", "if x"][rng.below(5)].into()),
         9 => Node::Arrow {
-            op: ['→', '←'][rng.below(2)],
+            op: ['→', '←', '⇒', '⇐'][rng.below(4)],
             over: gen_row(rng, d, 3),
             under: gen_row(rng, d, 2),
         },

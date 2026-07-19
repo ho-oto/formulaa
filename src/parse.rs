@@ -12,7 +12,7 @@
 
 use crate::ast::{Node, Row};
 use crate::render::{
-    lattice_char, unstyle_char, unsubscript_char, unsuperscript_char, ARROW_BODY, FRAC_BAR,
+    lattice_char, unstyle_char, unsubscript_char, unsuperscript_char, DOUBLE_BODY, FRAC_BAR,
     OP_BAND, PLACEHOLDER,
 };
 
@@ -233,22 +233,6 @@ fn protected_cols(g: &Grid, rect: Rect, skip_row: Option<usize>) -> Vec<bool> {
     protected
 }
 
-/// Baseline of a delimiter interior, derived from its *first* segment
-/// (every segment is baseline-aligned, so any one of them determines the
-/// row): a grid segment centers on its extent, anything else recurses.
-fn delim_interior_baseline(g: &Grid, interior: Rect) -> Option<usize> {
-    let mids = mid_columns(g, interior);
-    let seg0 = Rect { r: mids.first().map_or(interior.r, |&m| m - 1), ..interior };
-    if seg0.l > seg0.r {
-        return None;
-    }
-    if region_is_grid(g, seg0) {
-        trim(g, seg0).map(|t| (t.t + t.b) / 2)
-    } else {
-        find_baseline(g, seg0).ok()
-    }
-}
-
 /// Determine the baseline row of a region from its leftmost column.
 /// See docs/aa-spec.md §baseline-recovery.
 fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
@@ -265,7 +249,7 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
     // lenient hand-written band char (see parse_region).
     if let Some(&r) = occupied
         .iter()
-        .find(|&&r| matches!(g.at(r, c), FRAC_BAR | OP_BAND | ARROW_BODY | '~'))
+        .find(|&&r| matches!(g.at(r, c), FRAC_BAR | OP_BAND | DOUBLE_BODY | '~'))
     {
         return Ok(r);
     }
@@ -283,35 +267,9 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
     let first = *occupied.first().unwrap();
     let last = *occupied.last().unwrap();
     match g.at(first, c) {
-        // Bracket block: a plain [ ] pair always holds a grid, whose
-        // baseline is the vertical center of the extent; with │ middles the
-        // segments are independent, so read the first one.
-        '⎡' | '[' => {
-            if let Ok(close) = match_delim(g, first, c, rect.r) {
-                if close > c + 1 {
-                    let interior = Rect { t: first, b: last, l: c + 1, r: close - 1 };
-                    if !mid_columns(g, interior).is_empty() {
-                        if let Some(bl) = delim_interior_baseline(g, interior) {
-                            return Ok(bl);
-                        }
-                    }
-                }
-            }
-            Ok((first + last) / 2)
-        }
-        // Paren / bar / null delimiters: read the baseline off the first
-        // interior segment (grid segments center on their extent). All
-        // rows of these columns carry a side-distinct glyph, so the close
-        // matches on the top row.
-        '⎛' | '⎸' | '▏' => {
-            if let Ok(close) = match_delim(g, first, c, rect.r) {
-                if close > c + 1 {
-                    let interior = Rect { t: first, b: last, l: c + 1, r: close - 1 };
-                    if let Some(bl) = delim_interior_baseline(g, interior) {
-                        return Ok(bl);
-                    }
-                }
-            }
+        // Delimiter columns: baseline of the inner region (a lattice
+        // inside answers with its own ┌├└ center rule).
+        '⎡' | '[' | '⎛' | '⎸' | '▏' => {
             find_baseline(g, Rect { t: first, b: last, l: c + 1, r: rect.r })
         }
         '(' => Ok(first),
@@ -475,7 +433,20 @@ fn parse_region(
                 col = right + 1;
             }
             _ if ch == FRAC_BAR => {
+                // Maximal munch: a ─ run capped by → is a labeled arrow;
+                // a fraction next to an arrow *atom* renders with a space
+                // between (presence of the space is the disambiguator).
                 let run_end = scan_while(g, bl, col, rect.r, |c| c == FRAC_BAR);
+                if run_end < rect.r && g.at(bl, run_end + 1) == '→' {
+                    let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end + 1 };
+                    let over = region_above(span, bl)
+                        .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
+                    let under = region_below(span, bl)
+                        .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
+                    out.push(Node::Arrow { op: '→', over, under });
+                    col = run_end + 2;
+                    continue;
+                }
                 let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end };
                 let num = region_above(span, bl)
                     .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
@@ -507,29 +478,34 @@ fn parse_region(
                 out.push(Node::BigOp { op, lower, upper });
                 col = run_end + 1;
             }
-            _ if ch == ARROW_BODY => {
-                // Right-pointing labeled arrow: ╌ body, → head at the end.
-                let run_end = scan_while(g, bl, col, rect.r, |c| c == ARROW_BODY);
-                if run_end == rect.r || g.at(bl, run_end + 1) != '→' {
-                    return err("arrow body without a → head", bl, col);
+            _ if ch == DOUBLE_BODY => {
+                // Double-arrow body: ═ run capped by ⇒ (═ has no other use).
+                let run_end = scan_while(g, bl, col, rect.r, |c| c == DOUBLE_BODY);
+                if run_end == rect.r || g.at(bl, run_end + 1) != '⇒' {
+                    return err("═ run without a ⇒ head", bl, col);
                 }
                 let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end + 1 };
                 let over = region_above(span, bl)
                     .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
                 let under = region_below(span, bl)
                     .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
-                out.push(Node::Arrow { op: '→', over, under });
+                out.push(Node::Arrow { op: '⇒', over, under });
                 col = run_end + 2;
             }
-            '←' if col < rect.r && g.at(bl, col + 1) == ARROW_BODY => {
-                // Left-pointing labeled arrow: ← head, then the ╌ body.
-                let run_end = scan_while(g, bl, col + 1, rect.r, |c| c == ARROW_BODY);
+            '←' | '⇐'
+                if col < rect.r
+                    && g.at(bl, col + 1)
+                        == (if ch == '←' { FRAC_BAR } else { DOUBLE_BODY }) =>
+            {
+                // Left-pointing labeled arrow: head, then the body run.
+                let body = if ch == '←' { FRAC_BAR } else { DOUBLE_BODY };
+                let run_end = scan_while(g, bl, col + 1, rect.r, |c| c == body);
                 let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end };
                 let over = region_above(span, bl)
                     .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
                 let under = region_below(span, bl)
                     .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
-                out.push(Node::Arrow { op: '←', over, under });
+                out.push(Node::Arrow { op: ch, over, under });
                 col = run_end + 1;
             }
             '"' => {
@@ -908,7 +884,6 @@ fn parse_delim(
         vec![]
     };
 
-    let plain_bracket = left == '[' && right == ']' && mid_cols.is_empty();
     let mut segs: Vec<Row> = Vec::new();
     let mut start = col + 1;
     for &m in mid_cols.iter().chain(std::iter::once(&close_col)) {
@@ -916,38 +891,13 @@ fn parse_delim(
             vec![]
         } else {
             let rect = Rect { t: top, b: bot, l: start, r: m - 1 };
-            parse_seg(g, rect, bl, plain_bracket, depth, trace, in_cancel)?
+            parse_region(g, rect, Some(bl), depth + 1, trace, in_cancel)?
         };
         segs.push(seg);
         start = m + 1;
     }
     let node = Node::Delim { left, right, mids: vec!['|'; mid_cols.len()], segs };
     Ok((node, close_col))
-}
-
-/// One delimiter segment. Inside a plain [ ] pair the interior is always a
-/// grid; elsewhere it is a grid only when the picture proves it (internal
-/// blank row, or a run of >= 3 fully blank columns — a plain row never
-/// produces more than 2).
-#[allow(clippy::too_many_arguments)]
-fn parse_seg(
-    g: &Grid,
-    rect: Rect,
-    bl: usize,
-    plain_bracket: bool,
-    depth: usize,
-    trace: &mut Vec<RegionSpan>,
-    in_cancel: bool,
-) -> Result<Row> {
-    let Some(trect) = trim(g, rect) else {
-        return Ok(vec![]);
-    };
-    let grid = plain_bracket || region_is_grid(g, trect);
-    if grid {
-        Ok(vec![parse_matrix(g, trect, depth + 1, trace, in_cancel)?])
-    } else {
-        parse_region(g, trect, Some(bl), depth + 1, trace, in_cancel)
-    }
 }
 
 /// Middle-separator columns of a delimiter interior: │ over the full
@@ -961,15 +911,6 @@ fn mid_columns(g: &Grid, interior: Rect) -> Vec<usize> {
             interior.rows().all(|r| g.at(r, c) == '│') && !protected[c - interior.l]
         })
         .collect()
-}
-
-/// Does this (trimmed or untrimmed) region show grid structure: an
-/// internal fully blank row? (Blank columns prove nothing — formatting
-/// spaces are free — so one-row grids exist only inside plain [ ] or as
-/// ┼ lattices.)
-fn region_is_grid(g: &Grid, rect: Rect) -> bool {
-    let Some(t) = trim(g, rect) else { return false };
-    (t.t + 1..t.b).any(|r| row_blank(g, t, r))
 }
 
 /// Column of the structurally matching close delimiter for the open one at
@@ -1003,72 +944,6 @@ fn vertical_extent(g: &Grid, rect: Rect, col: usize, bl: usize, chars: &[char]) 
         bot += 1;
     }
     (top, bot)
-}
-
-/// Split a grid region into Array cells.
-/// Row separators: fully blank rows. Column separators: runs of >= 2 fully
-/// blank, unprotected columns (see `protected_cols`).
-fn parse_matrix(g: &Grid, inner: Rect, depth: usize, trace: &mut Vec<RegionSpan>, in_cancel: bool) -> Result<Node> {
-    let inner = match trim(g, inner) {
-        Some(r) => r,
-        None => return err("empty grid", inner.t, inner.l),
-    };
-
-    let mut row_segs: Vec<(usize, usize)> = Vec::new();
-    let mut r = inner.t;
-    while r <= inner.b {
-        if row_blank(g, inner, r) {
-            r += 1;
-            continue;
-        }
-        let start = r;
-        while r <= inner.b && !row_blank(g, inner, r) {
-            r += 1;
-        }
-        row_segs.push((start, r - 1));
-    }
-
-    let protected = protected_cols(g, inner, None);
-    let mut col_segs: Vec<(usize, usize)> = Vec::new();
-    let mut c = inner.l;
-    while c <= inner.r {
-        let is_sep_start = |c: usize| col_blank(g, inner, c) && !protected[c - inner.l];
-        if is_sep_start(c) {
-            // Only runs of >= 2 blank columns separate cells.
-            let start = c;
-            while c <= inner.r && is_sep_start(c) {
-                c += 1;
-            }
-            if c - start < 2 {
-                // Single blank column: belongs to the current cell.
-                if let Some(last) = col_segs.last_mut() {
-                    last.1 = c - 1;
-                }
-            }
-            continue;
-        }
-        let start = c;
-        while c <= inner.r && !is_sep_start(c) {
-            c += 1;
-        }
-        match col_segs.last_mut() {
-            // Merge with previous segment if separated by a single blank.
-            Some(last) if last.1 + 1 == start => last.1 = c - 1,
-            _ => col_segs.push((start, c - 1)),
-        }
-    }
-
-    let (rows, cols) = (row_segs.len(), col_segs.len());
-    if rows == 0 || cols == 0 {
-        return err("grid with no cells", inner.t, inner.l);
-    }
-    let mut cells = Vec::with_capacity(rows * cols);
-    for &(rt, rb) in &row_segs {
-        for &(cl, cr) in &col_segs {
-            cells.push(parse_region(g, Rect { t: rt, b: rb, l: cl, r: cr }, None, depth, trace, in_cancel)?);
-        }
-    }
-    Ok(Node::Array { rows, cols, cells })
 }
 
 /// Parse a formula from its AA text form.

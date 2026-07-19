@@ -74,7 +74,13 @@ fn node_to_latex(node: &Node) -> String {
             }
         }
         Node::Arrow { op, over, under } => {
-            let cmd = if *op == '←' { "xleftarrow" } else { "xrightarrow" };
+            // \xRightarrow / \xLeftarrow need mathtools.
+            let cmd = match op {
+                '←' => "xleftarrow",
+                '⇒' => "xRightarrow",
+                '⇐' => "xLeftarrow",
+                _ => "xrightarrow",
+            };
             let mut s = format!("\\{}", cmd);
             if !under.is_empty() {
                 s.push_str(&format!("[{}]", row_to_latex(under)));
