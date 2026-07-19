@@ -26,15 +26,15 @@ fn show(title: &str, row: &Row) -> String {
 fn main() {
     // AST 1: sum with upper limit containing an integral (no limits)
     let ast1 = vec![Node::BigOp {
-        op: '∑',
+        base: vec![Node::Sym('∑')],
         lower: syms("n=1"),
-        upper: vec![Node::BigOp { op: '∫', lower: vec![], upper: vec![] }],
+        upper: vec![Node::BigOp { base: vec![Node::Sym('∫')], lower: vec![], upper: vec![] }],
     }];
 
     // AST 2: integral whose LOWER limit is a sum with lower limit n=1
     let ast2 = vec![Node::BigOp {
-        op: '∫',
-        lower: vec![Node::BigOp { op: '∑', lower: syms("n=1"), upper: vec![] }],
+        base: vec![Node::Sym('∫')],
+        lower: vec![Node::BigOp { base: vec![Node::Sym('∑')], lower: syms("n=1"), upper: vec![] }],
         upper: vec![],
     }];
 

@@ -66,7 +66,8 @@ TUI は毎編集後に AA→AST の逆変換を自動検査し、ラウンドト
   `\abs` `\langle` `\braket`(⟨·|·⟩)`\set`({·|·})`\mid`(セグメント分割)
   `\delim<left><right>[mids]`(例 `\delim(]`、`< >` は ⟨ ⟩ の別名)
 - 大型演算子: `\sum` `\prod` `\int` `\oint` `\bigcup` …(挿入直後は下極限、
-  `↑` で上極限へ)
+  `↑` で上極限へ)。`\lim` `\max` `\inf` `\det` `\Pr` なども同じバンドで
+  下極限に入る(`┄lim┄`)
 - 関数名: `\sin` `\cos` `\log` `\lim` …(立体で表示)
 - アクセント: `\hat` `\vec` `\bar` `\dot` `\tilde` `\underline`
   (直前の1文字に付く。続けて実行すると縦に重ね掛け)

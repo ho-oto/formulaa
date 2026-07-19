@@ -355,7 +355,11 @@ pub fn render_row(
                 let edges = (last.baseline_edge(false), block.baseline_edge(true));
                 let fuse = match edges {
                     (Some(a), Some(b)) => {
-                        (a == b && (a == FRAC_BAR || a == OP_BAND || a == DOUBLE_BODY))
+                        // A band edge fuses with *anything* adjacent (the
+                        // general ┄piece┄ grammar munches non-space runs).
+                        a == OP_BAND
+                            || b == OP_BAND
+                            || (a == b && (a == FRAC_BAR || a == DOUBLE_BODY))
                             || (a == FRAC_BAR && b == '→')
                             || (a == DOUBLE_BODY && b == '⇒')
                             || (a == '←' && b == FRAC_BAR)
@@ -491,22 +495,32 @@ fn render_node(
             Block { lines, baseline: 0, cancel }
         }
 
-        Node::BigOp { op, lower, upper } => {
-            // Empty limits vanish in canonical output, but while the cursor
-            // is inside this operator both slots must stay visible (⬚) so
-            // they can be navigated to.
+        Node::BigOp { base, lower, upper } => {
+            // Empty limits vanish in canonical output (normalize splices
+            // the base), but while the cursor is inside both slots must
+            // stay visible (⬚) so they can be navigated to.
             let editing = cursor.is_some();
             let u = render_row(upper, cur(Field::OpUpper), editing, ctx);
             let l = render_row(lower, cur(Field::OpLower), editing, ctx);
+            let b = render_row(base, None, true, ctx);
             if u.is_empty() && l.is_empty() && cursor.is_none() {
-                // No limits: a bare operator character.
-                return Block::from_chars(vec![*op]);
+                // Transient un-normalized state: just the base.
+                return b;
             }
-            // Band marks the horizontal extent of the limits; this is what
-            // makes over/under limits unambiguous (see docs/aa-spec.md).
-            let w = u.width().max(l.width()).max(1) + 2;
+            // Band marks the horizontal extent of the limits; the base is
+            // centered on the band row with its blank cells drawn as ┄
+            // ("anything sandwiched in ┄ without spaces takes limits").
+            let bw = b.width().max(1);
+            let w = u.width().max(l.width()).max(bw) + 2;
             let mut band = vec![OP_BAND; w];
-            band[(w - 1) / 2] = *op;
+            let left = (w - bw) / 2;
+            if !b.is_empty() {
+                for (i, &c0) in b.lines[b.baseline.min(b.height() - 1)].iter().enumerate() {
+                    if c0 != ' ' {
+                        band[left + i] = c0;
+                    }
+                }
+            }
             let mut lines = center_pad(&u, w);
             let baseline = lines.len();
             lines.push(band);
@@ -935,7 +949,7 @@ mod tests {
     #[test]
     fn bigop_band_marks_limit_extent() {
         let root = vec![Node::BigOp {
-            op: '∑',
+            base: vec![Node::Sym('∑')],
             lower: sym_row("i=0"),
             upper: sym_row("n"),
         }];
@@ -944,7 +958,7 @@ mod tests {
 
     #[test]
     fn bigop_without_limits_is_bare() {
-        let root = vec![Node::BigOp { op: '∫', lower: vec![], upper: vec![] }];
+        let root = vec![Node::BigOp { base: vec![Node::Sym('∫')], lower: vec![], upper: vec![] }];
         assert_eq!(plain(&root), vec!["∫"]);
     }
 
@@ -1022,7 +1036,7 @@ mod tests {
     #[test]
     fn bigop_shows_placeholders_while_editing() {
         // Cursor in the (empty) lower limit: both slots must be visible.
-        let root = vec![Node::BigOp { op: '∑', lower: vec![], upper: vec![] }];
+        let root = vec![Node::BigOp { base: vec![Node::Sym('∑')], lower: vec![], upper: vec![] }];
         let path = [(0, Field::OpLower)];
         let b = render_row(&root, Some((&path, 0)), false, &RenderCtx::canonical());
         let text = b.to_text();

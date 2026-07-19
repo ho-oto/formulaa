@@ -33,8 +33,12 @@ pub enum Node {
     Sqrt { arg: Row, index: u8 },
     Sup { arg: Row },
     Sub { arg: Row },
-    /// Big operator (∑ ∫ ∏ …) with optional limits typeset under/over it.
-    BigOp { op: char, lower: Row, upper: Row },
+    /// Band with under/over limits: anything sandwiched in ┄ without
+    /// spaces (`┄∑┄`, `┄lim┄`, `┄arg┄max┄` …). The base is a flat one-line
+    /// row; blank columns inside it are drawn as ┄. With both limits empty
+    /// the node normalizes away (the base is spliced into the row), so a
+    /// bare ∑ is just an atom.
+    BigOp { base: Row, lower: Row, upper: Row },
     /// Stretchy labeled arrow (\xrightarrow / \xleftarrow): a ╌ body with
     /// the head char (→ or ←) at the pointing end, labels over/under
     /// spanning its extent (same range-band idea as ┄).
@@ -157,9 +161,19 @@ pub fn row_at_mut<'a>(root: &'a mut Row, path: &[(usize, Field)]) -> &'a mut Row
 /// the picture, so the parser can only ever return the merged form).
 /// `parse(render(x)) == normalize(x)` is the roundtrip invariant.
 pub fn normalize(row: &Row) -> Row {
-    let mut out: Row = Vec::with_capacity(row.len());
+    // A band with no limits is the same picture as its base alone —
+    // splice it before the merge pass.
+    let mut pre: Row = Vec::with_capacity(row.len());
     for node in row {
-        let node = normalize_node(node);
+        match normalize_node(node) {
+            Node::BigOp { base, lower, upper } if lower.is_empty() && upper.is_empty() => {
+                pre.extend(base)
+            }
+            n => pre.push(n),
+        }
+    }
+    let mut out: Row = Vec::with_capacity(pre.len());
+    for node in pre {
         // Leading spacers are dropped: they would rob a row-initial script
         // of its explicit ⬚ base (and trim eats them anyway).
         if out.is_empty() && matches!(node, Node::Spacer) {
@@ -251,8 +265,8 @@ fn strip_cancels(row: &Row) -> Row {
             }
             Node::Sup { arg } => out.push(Node::Sup { arg: strip_cancels(arg) }),
             Node::Sub { arg } => out.push(Node::Sub { arg: strip_cancels(arg) }),
-            Node::BigOp { op, lower, upper } => out.push(Node::BigOp {
-                op: *op,
+            Node::BigOp { base, lower, upper } => out.push(Node::BigOp {
+                base: strip_cancels(base),
                 lower: strip_cancels(lower),
                 upper: strip_cancels(upper),
             }),
@@ -297,8 +311,8 @@ pub fn strip_spacers(row: &Row) -> Row {
             }
             Node::Sup { arg } => out.push(Node::Sup { arg: strip_spacers(arg) }),
             Node::Sub { arg } => out.push(Node::Sub { arg: strip_spacers(arg) }),
-            Node::BigOp { op, lower, upper } => out.push(Node::BigOp {
-                op: *op,
+            Node::BigOp { base, lower, upper } => out.push(Node::BigOp {
+                base: strip_spacers(base),
                 lower: strip_spacers(lower),
                 upper: strip_spacers(upper),
             }),
@@ -326,11 +340,6 @@ pub fn strip_spacers(row: &Row) -> Row {
 
 fn normalize_node(node: &Node) -> Node {
     match node {
-        Node::Sym(c) if crate::symbols::bigop_by_char(*c) => {
-            // A bare big-operator symbol is the same picture as a BigOp
-            // with empty limits; canonical form uses the BigOp node.
-            Node::BigOp { op: *c, lower: vec![], upper: vec![] }
-        }
         // A markless accent is just its base.
         Node::Accent { overs, unders, base } if overs.is_empty() && unders.is_empty() => {
             let _ = (overs, unders);
@@ -343,8 +352,8 @@ fn normalize_node(node: &Node) -> Node {
         Node::Sqrt { arg, index } => Node::Sqrt { arg: normalize(arg), index: *index },
         Node::Sup { arg } => Node::Sup { arg: normalize(arg) },
         Node::Sub { arg } => Node::Sub { arg: normalize(arg) },
-        Node::BigOp { op, lower, upper } => Node::BigOp {
-            op: *op,
+        Node::BigOp { base, lower, upper } => Node::BigOp {
+            base: normalize(base),
             lower: normalize(lower),
             upper: normalize(upper),
         },

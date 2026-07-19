@@ -50,6 +50,11 @@ impl Default for Editor {
     }
 }
 
+/// Functions that take under-limits: the minibuffer command inserts a
+/// ┄band┄ and puts the cursor in the lower limit.
+const LIMIT_FUNCS: &[&str] =
+    &["lim", "liminf", "limsup", "max", "min", "sup", "inf", "det", "gcd", "Pr"];
+
 /// Delimiter pair of a grid command (None = bare lattice array).
 type GridDelims = Option<(char, char)>;
 
@@ -712,7 +717,14 @@ impl Editor {
             _ => {
                 if let Some(op) = bigop_by_name(cmd) {
                     self.insert_and_enter(Node::BigOp {
-                        op,
+                        base: vec![Node::Sym(op)],
+                        lower: vec![],
+                        upper: vec![],
+                    });
+                } else if LIMIT_FUNCS.contains(&cmd) {
+                    // Limit-taking operators enter the lower limit (┄lim┄).
+                    self.insert_and_enter(Node::BigOp {
+                        base: vec![Node::Func(cmd.to_string())],
                         lower: vec![],
                         upper: vec![],
                     });
@@ -725,7 +737,7 @@ impl Editor {
                 } else if let Some(c) = symbol_by_name(cmd) {
                     if bigop_by_char(c) {
                         self.insert_and_enter(Node::BigOp {
-                            op: c,
+                            base: vec![Node::Sym(c)],
                             lower: vec![],
                             upper: vec![],
                         });
@@ -899,6 +911,18 @@ mod tests {
         assert!(ed.path.is_empty());
         assert_eq!(ed.col, 1);
         assert_eq!(row_to_latex(&ed.root), "\\left(x\\right)");
+    }
+
+    #[test]
+    fn limit_functions_enter_lower() {
+        let mut ed = Editor::new();
+        ed.execute("lim");
+        for c in "x→0".chars() {
+            ed.insert_sym(c);
+        }
+        ed.exit_inset();
+        ed.insert_sym('f');
+        assert_eq!(row_to_latex(&ed.root), "\\lim _{x\\to 0}f");
     }
 
     #[test]

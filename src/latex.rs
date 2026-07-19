@@ -52,11 +52,10 @@ fn node_to_latex(node: &Node) -> String {
         },
         Node::Sup { arg } => format!("^{}", braced(arg)),
         Node::Sub { arg } => format!("_{}", braced(arg)),
-        Node::BigOp { op, lower, upper } => {
-            let mut s = match latex_name(*op) {
-                Some(name) => format!("\\{} ", name),
-                None => op.to_string(),
-            };
+        Node::BigOp { base, lower, upper } => {
+            // \sum_{..}^{..}, \lim_{..}, \arg\max_{..} — the base row's
+            // own serialization already yields the operator commands.
+            let mut s = row_to_latex(base);
             if !lower.is_empty() {
                 s.push_str(&format!("_{}", braced(lower)));
             }
@@ -170,7 +169,7 @@ mod tests {
     #[test]
     fn serializes_bigop_limits() {
         let root = vec![Node::BigOp {
-            op: '∑',
+            base: vec![Node::Sym('∑')],
             lower: vec![Node::Sym('i')],
             upper: vec![Node::Sym('n')],
         }];

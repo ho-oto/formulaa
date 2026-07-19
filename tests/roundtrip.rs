@@ -54,7 +54,7 @@ fn paren(inner: Row) -> Node {
 }
 
 fn bigop(op: char, lower: Row, upper: Row) -> Node {
-    Node::BigOp { op, lower, upper }
+    Node::BigOp { base: vec![Node::Sym(op)], lower, upper }
 }
 
 fn func(name: &str) -> Node {
@@ -612,6 +612,35 @@ fn continued_fraction() {
     roundtrip("continued-fraction", &row);
 }
 
+/// Generalized bands: \lim, \argmax and friends take under-limits with
+/// the same ┄band┄ notation as big operators.
+#[test]
+fn limit_functions() {
+    let row = cat(&[
+        n(Node::BigOp {
+            base: vec![func("lim")],
+            lower: cat(&[s("x"), s("→"), s("0")]),
+            upper: vec![],
+        }),
+        s("f"),
+        n(paren(s("x"))),
+    ]);
+    roundtrip("lim", &row);
+    let row = cat(&[
+        n(Node::BigOp {
+            base: vec![func("arg"), func("max")],
+            lower: s("x∈S"),
+            upper: vec![],
+        }),
+        s("f"),
+        n(paren(s("x"))),
+    ]);
+    roundtrip("argmax", &row);
+    // Empty-limit bands normalize away: base splices into the row.
+    let row = vec![Node::BigOp { base: vec![Node::Sym('∮')], lower: vec![], upper: vec![] }];
+    roundtrip("bare-op", &row);
+}
+
 /// Limits that themselves contain big operators and fractions.
 #[test]
 fn nested_limits() {
@@ -699,11 +728,15 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
         1 => Node::Sqrt { arg: gen_row(rng, d, 3), index: [2, 2, 3, 4][rng.below(4)] },
         2 => Node::Sup { arg: gen_row(rng, d, 2) },
         3 => Node::Sub { arg: gen_row(rng, d, 2) },
-        4 => Node::BigOp {
-            op: ['∑', '∏', '∫', '⋃'][rng.below(4)],
-            lower: gen_row(rng, d, 3),
-            upper: gen_row(rng, d, 2),
-        },
+        4 => {
+            let base: Row = match rng.below(4) {
+                0 => vec![Node::Func("lim".into())],
+                1 => vec![Node::Func("max".into())],
+                2 => vec![Node::Func("arg".into()), Node::Func("max".into())],
+                _ => vec![Node::Sym(['∑', '∏', '∫', '⋃'][rng.below(4)])],
+            };
+            Node::BigOp { base, lower: gen_row(rng, d, 3), upper: gen_row(rng, d, 2) }
+        }
         5 => {
             // Random delimiter block: any pair (mismatched allowed), with
             // an occasional │ middle. normalize repairs constraint slips.

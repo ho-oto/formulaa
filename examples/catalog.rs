@@ -44,7 +44,7 @@ fn paren(inner: Row) -> Node {
 }
 
 fn bigop(op: char, lower: Row, upper: Row) -> Node {
-    Node::BigOp { op, lower, upper }
+    Node::BigOp { base: vec![Node::Sym(op)], lower, upper }
 }
 
 fn func(name: &str) -> Node {
@@ -425,6 +425,26 @@ fn nested_limits() {
 }
 
 
+/// lim / argmax via the generalized band.
+fn limit_funcs() {
+    let row = cat(&[
+        n(Node::BigOp {
+            base: vec![func("lim")],
+            lower: cat(&[s("x"), s("→"), s("0")]),
+            upper: vec![],
+        }),
+        s("f"),
+        n(paren(s("x"))),
+    ]);
+    roundtrip("lim", &row);
+    let row = cat(&[
+        n(Node::BigOp { base: vec![func("arg"), func("max")], lower: s("x∈S"), upper: vec![] }),
+        s("f"),
+        n(paren(s("x"))),
+    ]);
+    roundtrip("argmax", &row);
+}
+
 /// A --f--> B with an under label, and ∫f(x)"dx".
 fn arrows_and_text() {
     let row = cat(&[
@@ -475,4 +495,6 @@ fn main() {
     interval_and_bare_array();
     println!("## 矢印・テキスト\n");
     arrows_and_text();
+    println!("## 極限関数\n");
+    limit_funcs();
 }

@@ -571,27 +571,25 @@ fn parse_region(
                 col = run_end + 1;
             }
             _ if ch == OP_BAND => {
-                // Band structure: ┄+ op ┄+ (the op is centered, with at
-                // least one band char on each side by construction).
-                let lead_end = scan_while(g, bl, col, rect.r, |c| c == OP_BAND);
-                if lead_end == rect.r {
-                    return err("big-op band without operator", bl, col);
+                // General band: ┄+ (piece ┄+)+ — anything sandwiched in ┄
+                // without spaces takes over/under limits (∑, lim, arg┄max
+                // …). Pieces are flat one-line rows joined into the base.
+                let (pieces, end) = scan_band(g, rect, bl, col, OP_BAND)?;
+                if pieces.is_empty() {
+                    return err("band without content", bl, col);
                 }
-                let op = g.at(bl, lead_end + 1);
-                if op == ' ' || op == OP_BAND {
-                    return err("big-op band without operator", bl, col);
+                let mut base: Row = Vec::new();
+                for (l0, r0) in pieces {
+                    let prect = Rect { t: bl, b: bl, l: l0, r: r0 };
+                    base.extend(parse_region(g, prect, Some(bl), depth + 1, trace, in_cancel)?);
                 }
-                let run_end = scan_while(g, bl, lead_end + 1, rect.r, |c| c == OP_BAND);
-                if run_end == lead_end + 1 {
-                    return err("big-op band must extend past its operator", bl, col);
-                }
-                let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end };
+                let span = Rect { t: rect.t, b: rect.b, l: col, r: end };
                 let upper = region_above(span, bl)
                     .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
                 let lower = region_below(span, bl)
                     .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
-                out.push(Node::BigOp { op, lower, upper });
-                col = run_end + 1;
+                out.push(Node::BigOp { base, lower, upper });
+                col = end + 1;
             }
             _ if ch == DOUBLE_BODY => {
                 // Double-arrow body: ═ run capped by ⇒ (═ has no other use).
@@ -647,36 +645,42 @@ fn parse_region(
             }
             '~' => {
                 // Lenient input: '~' doubles as the band char (easier to
-                // type than ┄) when the full band pattern is present AND
-                // there is limit content above or below — otherwise it is
-                // a plain atom (so spaces around a literal ~ keep it one).
-                // The canonical renderer always emits ┄.
-                let lead_end = scan_while(g, bl, col, rect.r, |c| c == '~');
+                // type than ┄) when the full band pattern is present, the
+                // pieces are all known operators/functions (an accented
+                // atom between literal tildes must not read as a band),
+                // AND there is limit content above or below. Otherwise a
+                // plain atom (spaces around a literal ~ keep it one).
                 let band = (|| {
-                    if lead_end >= rect.r {
+                    let (pieces, end) = scan_band(g, rect, bl, col, '~').ok()?;
+                    if pieces.is_empty() {
                         return None;
                     }
-                    let op = g.at(bl, lead_end + 1);
-                    // Only known big operators: an accented atom between
-                    // literal tildes (~𝑎̇~) must not read as a band.
-                    if !bigop_by_char(op) {
+                    let mut base: Row = Vec::new();
+                    for &(l0, r0) in &pieces {
+                        let prect = Rect { t: bl, b: bl, l: l0, r: r0 };
+                        let mut tr = Vec::new();
+                        base.extend(parse_region(g, prect, Some(bl), depth + 1, &mut tr, in_cancel).ok()?);
+                    }
+                    let known = !base.is_empty()
+                        && base.iter().all(|n| match n {
+                            Node::Sym(c) => bigop_by_char(*c),
+                            Node::Func(_) => true,
+                            _ => false,
+                        });
+                    if !known {
                         return None;
                     }
-                    let run_end = scan_while(g, bl, lead_end + 1, rect.r, |c| c == '~');
-                    if run_end == lead_end + 1 {
-                        return None;
-                    }
-                    let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end };
+                    let span = Rect { t: rect.t, b: rect.b, l: col, r: end };
                     let limits = region_above(span, bl).and_then(|r| trim(g, r)).is_some()
                         || region_below(span, bl).and_then(|r| trim(g, r)).is_some();
-                    limits.then_some((op, span, run_end))
+                    limits.then_some((base, span, end))
                 })();
-                if let Some((op, span, run_end)) = band {
+                if let Some((base, span, run_end)) = band {
                     let upper = region_above(span, bl)
                         .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
                     let lower = region_below(span, bl)
                         .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
-                    out.push(Node::BigOp { op, lower, upper });
+                    out.push(Node::BigOp { base, lower, upper });
                     col = run_end + 1;
                 } else {
                     // Same accent probe as ordinary atoms.
@@ -766,9 +770,6 @@ fn parse_region(
                 let base = unstyle_char(ch);
                 if !overs.is_empty() || !unders.is_empty() {
                     out.push(Node::Accent { overs, unders, base });
-                } else if bigop_by_char(ch) {
-                    // A bare big operator is a BigOp with empty limits.
-                    out.push(Node::BigOp { op: ch, lower: vec![], upper: vec![] });
                 } else {
                     out.push(Node::Sym(base));
                 }
@@ -874,6 +875,37 @@ fn parse_script_run(
         out.push(if is_sup { Node::Sup { arg } } else { Node::Sub { arg } });
     }
     Ok(())
+}
+
+/// Scan a band starting at (bl, col): `B+ (piece B+)*` where B is the
+/// band char. Returns the piece spans and the column of the final band
+/// char. A piece not closed by another band char is an error (canonical
+/// bands always are; the lenient caller treats it as "not a band").
+fn scan_band(
+    g: &Grid,
+    rect: Rect,
+    bl: usize,
+    col: usize,
+    band: char,
+) -> Result<(Vec<(usize, usize)>, usize)> {
+    let mut pieces = Vec::new();
+    let mut end = scan_while(g, bl, col, rect.r, |c| c == band);
+    loop {
+        let pstart = end + 1;
+        if pstart > rect.r || g.at(bl, pstart) == ' ' {
+            break;
+        }
+        let mut pend = pstart;
+        while pend < rect.r && g.at(bl, pend + 1) != ' ' && g.at(bl, pend + 1) != band {
+            pend += 1;
+        }
+        if pend == rect.r || g.at(bl, pend + 1) != band {
+            return err("band piece without a closing band char", bl, pstart);
+        }
+        pieces.push((pstart, pend));
+        end = scan_while(g, bl, pend + 1, rect.r, |c| c == band);
+    }
+    Ok((pieces, end))
 }
 
 /// Accent-mark stacks in the cells directly above/below (bl, col),
@@ -1225,8 +1257,8 @@ mod tests {
             mids: vec![],
             segs: vec![syms("a+b")],
         }]);
-        roundtrip(&vec![Node::BigOp { op: '∑', lower: syms("i=0"), upper: syms("n") }]);
-        roundtrip(&vec![Node::BigOp { op: '∫', lower: vec![], upper: vec![] }]);
+        roundtrip(&vec![Node::BigOp { base: vec![Node::Sym('∑')], lower: syms("i=0"), upper: syms("n") }]);
+        roundtrip(&vec![Node::BigOp { base: vec![Node::Sym('∫')], lower: vec![], upper: vec![] }]);
     }
 
     #[test]
@@ -1244,7 +1276,7 @@ mod tests {
         let row = parse(aa).unwrap();
         assert_eq!(
             row,
-            vec![Node::BigOp { op: '∑', lower: syms("n=1"), upper: syms("∞") }]
+            vec![Node::BigOp { base: vec![Node::Sym('∑')], lower: syms("n=1"), upper: syms("∞") }]
         );
         // Without limits (or with spaces around), ~ is a plain atom.
         assert_eq!(parse("a~b").unwrap(), syms("a~b"));
@@ -1258,13 +1290,13 @@ mod tests {
     fn ambiguity_counterexample_is_now_distinguishable() {
         // The two ASTs that rendered identically before the band notation.
         let ast1 = vec![Node::BigOp {
-            op: '∑',
+            base: vec![Node::Sym('∑')],
             lower: syms("n=1"),
-            upper: vec![Node::BigOp { op: '∫', lower: vec![], upper: vec![] }],
+            upper: vec![Node::BigOp { base: vec![Node::Sym('∫')], lower: vec![], upper: vec![] }],
         }];
         let ast2 = vec![Node::BigOp {
-            op: '∫',
-            lower: vec![Node::BigOp { op: '∑', lower: syms("n=1"), upper: vec![] }],
+            base: vec![Node::Sym('∫')],
+            lower: vec![Node::BigOp { base: vec![Node::Sym('∑')], lower: syms("n=1"), upper: vec![] }],
             upper: vec![],
         }];
         let ctx = RenderCtx::canonical();

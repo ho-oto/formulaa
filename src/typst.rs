@@ -78,8 +78,12 @@ fn node_to_typst(node: &Node) -> String {
         },
         Node::Sup { arg } => format!("^{}", grouped(arg)),
         Node::Sub { arg } => format!("_{}", grouped(arg)),
-        Node::BigOp { op, lower, upper } => {
-            let mut s = op.to_string();
+        Node::BigOp { base, lower, upper } => {
+            let mut s = if base.len() == 1 {
+                row_to_typst(base)
+            } else {
+                format!("limits({})", row_to_typst(base))
+            };
             if !lower.is_empty() {
                 s.push_str(&format!("_{}", grouped(lower)));
             }
