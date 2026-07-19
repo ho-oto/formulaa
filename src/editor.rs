@@ -2,13 +2,11 @@
 //! pairs from the root row plus a column inside the innermost row —
 //! the same model LyX uses for math insets.
 
-use crate::ast::{row_at, row_at_mut, Field, Node, Row};
+use crate::ast::{Field, Node, Row, row_at, row_at_mut};
 
 /// A cursor position: path into nested rows plus a column.
 pub type CursorPos = (Vec<(usize, Field)>, usize);
-use crate::symbols::{
-    accent_by_name, bigop_by_char, bigop_by_name, is_func_name, symbol_by_name,
-};
+use crate::symbols::{accent_by_name, bigop_by_char, bigop_by_name, is_func_name, symbol_by_name};
 
 pub struct Editor {
     pub root: Row,
@@ -34,8 +32,7 @@ pub struct Editor {
 }
 
 /// Label keys for jump mode, most reachable first.
-pub const JUMP_LABELS: &str =
-    "asdfghjklqwertyuiopzxcvbnmASDFGHJKLQWERTYUIOPZXCVBNM0123456789";
+pub const JUMP_LABELS: &str = "asdfghjklqwertyuiopzxcvbnmASDFGHJKLQWERTYUIOPZXCVBNM0123456789";
 /// Private-use chars used as display-time markers (never in a real AST):
 /// jump label placeholders …
 pub const JUMP_CHAR_BASE: u32 = 0xE000;
@@ -56,8 +53,9 @@ impl Default for Editor {
 
 /// Functions that take under-limits: the minibuffer command inserts a
 /// ┄band┄ and puts the cursor in the lower limit.
-const LIMIT_FUNCS: &[&str] =
-    &["lim", "liminf", "limsup", "max", "min", "sup", "inf", "det", "gcd", "Pr"];
+const LIMIT_FUNCS: &[&str] = &[
+    "lim", "liminf", "limsup", "max", "min", "sup", "inf", "det", "gcd", "Pr",
+];
 
 /// Delimiter pair of a grid command (None = bare lattice array).
 type GridDelims = Option<(char, char)>;
@@ -76,7 +74,9 @@ fn grid_command(cmd: &str) -> Option<(GridDelims, usize, usize)> {
         ("array", None),
     ];
     for &(name, delims) in GRIDS {
-        let Some(rest) = cmd.strip_prefix(name) else { continue };
+        let Some(rest) = cmd.strip_prefix(name) else {
+            continue;
+        };
         match rest.as_bytes() {
             [] => return Some((delims, 2, 2)),
             [r, c] if r.is_ascii_digit() && c.is_ascii_digit() => {
@@ -298,7 +298,12 @@ impl Editor {
     /// Insert a delimiter block and enter its first segment.
     pub fn insert_delim(&mut self, left: char, right: char, mids: Vec<char>) {
         let segs = vec![vec![]; mids.len() + 1];
-        self.insert_and_enter(Node::Delim { left, right, mids, segs });
+        self.insert_and_enter(Node::Delim {
+            left,
+            right,
+            mids,
+            segs,
+        });
     }
 
     /// Close (step out of) the innermost enclosing Delim whose right
@@ -351,8 +356,17 @@ impl Editor {
     /// Insert a rows×cols grid wrapped in the given delimiter pair and put
     /// the cursor into the first cell.
     pub fn insert_grid(&mut self, left: char, right: char, rows: usize, cols: usize) {
-        let array = Node::Array { rows, cols, cells: vec![vec![]; rows * cols] };
-        let node = Node::Delim { left, right, mids: vec![], segs: vec![vec![array]] };
+        let array = Node::Array {
+            rows,
+            cols,
+            cells: vec![vec![]; rows * cols],
+        };
+        let node = Node::Delim {
+            left,
+            right,
+            mids: vec![],
+            segs: vec![vec![array]],
+        };
         let col = self.col;
         self.cur_row_mut().insert(col, node);
         self.path.push((col, Field::Seg(0)));
@@ -366,7 +380,9 @@ impl Editor {
             .iter()
             .rposition(|&(_, f)| matches!(f, Field::Cell(_)))
             .map(|k| {
-                let (i, Field::Cell(c)) = self.path[k] else { unreachable!() };
+                let (i, Field::Cell(c)) = self.path[k] else {
+                    unreachable!()
+                };
                 (k, i, c)
             })
     }
@@ -477,12 +493,24 @@ impl Editor {
         match &mut row[col - 1] {
             Node::Sym(c) => {
                 let (mut overs, mut unders) = (vec![], vec![]);
-                if under { unders.push(mark) } else { overs.push(mark) }
-                row[col - 1] = Node::Accent { overs, unders, base: *c };
+                if under {
+                    unders.push(mark)
+                } else {
+                    overs.push(mark)
+                }
+                row[col - 1] = Node::Accent {
+                    overs,
+                    unders,
+                    base: *c,
+                };
             }
             // Applying another accent stacks it outside the existing ones.
             Node::Accent { overs, unders, .. } => {
-                if under { unders.push(mark) } else { overs.push(mark) }
+                if under {
+                    unders.push(mark)
+                } else {
+                    overs.push(mark)
+                }
             }
             _ => self.message = "accents apply to a single character".into(),
         }
@@ -657,26 +685,41 @@ impl Editor {
                 // denominator.
                 if let Some(content) = self.take_selection() {
                     let col = self.col;
-                    self.cur_row_mut()
-                        .insert(col, Node::Frac { num: content, den: vec![] });
+                    self.cur_row_mut().insert(
+                        col,
+                        Node::Frac {
+                            num: content,
+                            den: vec![],
+                        },
+                    );
                     self.path.push((col, Field::FracDen));
                     self.col = 0;
                 } else {
-                    self.insert_and_enter(Node::Frac { num: vec![], den: vec![] });
+                    self.insert_and_enter(Node::Frac {
+                        num: vec![],
+                        den: vec![],
+                    });
                 }
                 return;
             }
             "sqrt" if self.wrap_selection(|c| Node::Sqrt { arg: c, index: 2 }) => return,
-            "cbrt" | "sqrt3" if self.wrap_selection(|c| Node::Sqrt { arg: c, index: 3 }) => {
-                return
-            }
+            "cbrt" | "sqrt3" if self.wrap_selection(|c| Node::Sqrt { arg: c, index: 3 }) => return,
             "cancel" if self.wrap_selection(|c| Node::Cancel { arg: c }) => return,
             _ => {}
         }
         match cmd {
-            "sqrt" => self.insert_and_enter(Node::Sqrt { arg: vec![], index: 2 }),
-            "cbrt" | "sqrt3" => self.insert_and_enter(Node::Sqrt { arg: vec![], index: 3 }),
-            "qdrt" | "sqrt4" => self.insert_and_enter(Node::Sqrt { arg: vec![], index: 4 }),
+            "sqrt" => self.insert_and_enter(Node::Sqrt {
+                arg: vec![],
+                index: 2,
+            }),
+            "cbrt" | "sqrt3" => self.insert_and_enter(Node::Sqrt {
+                arg: vec![],
+                index: 3,
+            }),
+            "qdrt" | "sqrt4" => self.insert_and_enter(Node::Sqrt {
+                arg: vec![],
+                index: 4,
+            }),
             "cancel" => self.insert_and_enter(Node::Cancel { arg: vec![] }),
             // Grid commands take an optional RxC digit suffix:
             // \matrix (2×2), \matrix34 (3 rows × 4 cols), \cases41 …
@@ -686,8 +729,11 @@ impl Editor {
                     Some((l, r)) => self.insert_grid(l, r, rows, cols),
                     None => {
                         // Bare grid: self-delimiting ┌┬┐ lattice.
-                        let array =
-                            Node::Array { rows, cols, cells: vec![vec![]; rows * cols] };
+                        let array = Node::Array {
+                            rows,
+                            cols,
+                            cells: vec![vec![]; rows * cols],
+                        };
                         let col = self.col;
                         self.cur_row_mut().insert(col, array);
                         self.path.push((col, Field::Cell(0)));
@@ -705,26 +751,44 @@ impl Editor {
                 if let Some(content) = self.take_selection() {
                     // Selection becomes the argument; cursor to the label.
                     let col = self.col;
-                    self.cur_row_mut()
-                        .insert(col, Node::Brace { over, arg: content, label: vec![] });
+                    self.cur_row_mut().insert(
+                        col,
+                        Node::Brace {
+                            over,
+                            arg: content,
+                            label: vec![],
+                        },
+                    );
                     self.path.push((col, Field::BraceLabel));
                     self.col = 0;
                 } else {
-                    self.insert_and_enter(Node::Brace { over, arg: vec![], label: vec![] });
+                    self.insert_and_enter(Node::Brace {
+                        over,
+                        arg: vec![],
+                        label: vec![],
+                    });
                 }
             }
-            "xrightarrow" | "xto" => {
-                self.insert_and_enter(Node::Arrow { op: '→', over: vec![], under: vec![] })
-            }
-            "xleftarrow" | "xfrom" => {
-                self.insert_and_enter(Node::Arrow { op: '←', over: vec![], under: vec![] })
-            }
-            "xRightarrow" | "xTo" => {
-                self.insert_and_enter(Node::Arrow { op: '⇒', over: vec![], under: vec![] })
-            }
-            "xLeftarrow" | "xFrom" => {
-                self.insert_and_enter(Node::Arrow { op: '⇐', over: vec![], under: vec![] })
-            }
+            "xrightarrow" | "xto" => self.insert_and_enter(Node::Arrow {
+                op: '→',
+                over: vec![],
+                under: vec![],
+            }),
+            "xleftarrow" | "xfrom" => self.insert_and_enter(Node::Arrow {
+                op: '←',
+                over: vec![],
+                under: vec![],
+            }),
+            "xRightarrow" | "xTo" => self.insert_and_enter(Node::Arrow {
+                op: '⇒',
+                over: vec![],
+                under: vec![],
+            }),
+            "xLeftarrow" | "xFrom" => self.insert_and_enter(Node::Arrow {
+                op: '⇐',
+                over: vec![],
+                under: vec![],
+            }),
             // Multi-piece limit operators (┄arg┄max┄). Hardcoded for now;
             // arbitrary bases need OpBase editing (roadmap).
             "argmax" | "argmin" => {
@@ -801,8 +865,13 @@ impl Editor {
                 {
                     // \rm<chars> = \mathrm, \text<chars> = \text.
                     let col = self.col;
-                    self.cur_row_mut()
-                        .insert(col, Node::Text { t: t.to_string(), math });
+                    self.cur_row_mut().insert(
+                        col,
+                        Node::Text {
+                            t: t.to_string(),
+                            math,
+                        },
+                    );
                     self.col += 1;
                 } else {
                     self.message = format!("unknown command: \\{}", cmd);
@@ -857,7 +926,11 @@ mod tests {
     fn delim_mids_are_pipe_only() {
         let mut ed = Editor::new();
         ed.execute("delim(][");
-        assert!(ed.root.is_empty(), "\\delim(][ must be rejected, got {:?}", ed.root);
+        assert!(
+            ed.root.is_empty(),
+            "\\delim(][ must be rejected, got {:?}",
+            ed.root
+        );
         ed.execute("delim(]|");
         assert!(matches!(ed.root[0], Node::Delim { ref mids, .. } if mids == &['|']));
     }
@@ -955,7 +1028,9 @@ mod tests {
             ed.root,
             vec![
                 Node::Sym('a'),
-                Node::Cancel { arg: vec![Node::Sym('b'), Node::Sym('c')] }
+                Node::Cancel {
+                    arg: vec![Node::Sym('b'), Node::Sym('c')]
+                }
             ]
         );
         assert_eq!(ed.col, 2);
@@ -1030,11 +1105,23 @@ mod tests {
         let mut ed = Editor::new();
         ed.execute("matrix13"); // 1×3 row vector
         ed.insert_sym('a');
-        assert_eq!(row_to_latex(&ed.root), "\\begin{bmatrix} a &  &  \\end{bmatrix}");
+        assert_eq!(
+            row_to_latex(&ed.root),
+            "\\begin{bmatrix} a &  &  \\end{bmatrix}"
+        );
         let mut ed = Editor::new();
         ed.execute("cases32");
-        let Node::Delim { segs, .. } = &ed.root[0] else { panic!() };
-        let [Node::Array { rows: 3, cols: 2, .. }] = &segs[0][..] else { panic!() };
+        let Node::Delim { segs, .. } = &ed.root[0] else {
+            panic!()
+        };
+        let [
+            Node::Array {
+                rows: 3, cols: 2, ..
+            },
+        ] = &segs[0][..]
+        else {
+            panic!()
+        };
     }
 
     #[test]
@@ -1071,7 +1158,10 @@ mod tests {
         assert_eq!(ed.path.len(), 2);
         ed.close_bracket();
         assert!(ed.path.is_empty());
-        assert_eq!(row_to_latex(&ed.root), "\\begin{bmatrix} a &  \\\\  &  \\end{bmatrix}");
+        assert_eq!(
+            row_to_latex(&ed.root),
+            "\\begin{bmatrix} a &  \\\\  &  \\end{bmatrix}"
+        );
 
         // ⟨x|y⟩ via \braket, plus \mid splitting.
         let mut ed = Editor::new();
@@ -1079,7 +1169,10 @@ mod tests {
         ed.insert_sym('x');
         ed.right(); // into second segment
         ed.insert_sym('y');
-        assert_eq!(row_to_latex(&ed.root), "\\left\\langle x\\middle|y\\right\\rangle ");
+        assert_eq!(
+            row_to_latex(&ed.root),
+            "\\left\\langle x\\middle|y\\right\\rangle "
+        );
         ed.execute("mid"); // split after y -> third (empty) segment
         ed.insert_sym('z');
         assert_eq!(

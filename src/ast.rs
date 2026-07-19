@@ -22,47 +22,87 @@ pub enum Node {
     /// ASCII letters and not a dictionary word, else 'single-quoted');
     /// `math: false` is \text, always "double-quoted". Interior spaces
     /// are drawn as ␣ inside quotes.
-    Text { t: String, math: bool },
+    Text {
+        t: String,
+        math: bool,
+    },
     /// Accented base character (x̂ ẋ v̄ a⃗ …): over-marks stack upward and
     /// under-marks downward in the cells directly above/below the base,
     /// innermost first. Flat lists (not nesting) are deliberate: the
     /// picture cannot distinguish \hat{\underline{x}} from
     /// \underline{\hat{x}}, so the AST must not either.
-    Accent { overs: Vec<char>, unders: Vec<char>, base: char },
-    Frac { num: Row, den: Row },
+    Accent {
+        overs: Vec<char>,
+        unders: Vec<char>,
+        base: char,
+    },
+    Frac {
+        num: Row,
+        den: Row,
+    },
     /// index 2 = √, 3 = ∛, 4 = ∜ (the only radical glyphs Unicode has).
-    Sqrt { arg: Row, index: u8 },
-    Sup { arg: Row },
-    Sub { arg: Row },
+    Sqrt {
+        arg: Row,
+        index: u8,
+    },
+    Sup {
+        arg: Row,
+    },
+    Sub {
+        arg: Row,
+    },
     /// Band with under/over limits: anything sandwiched in ┄ without
     /// spaces (`┄∑┄`, `┄lim┄`, `┄arg┄max┄` …). The base is a flat one-line
     /// row; blank columns inside it are drawn as ┄. With both limits empty
     /// the node normalizes away (the base is spliced into the row), so a
     /// bare ∑ is just an atom.
-    BigOp { base: Row, lower: Row, upper: Row },
+    BigOp {
+        base: Row,
+        lower: Row,
+        upper: Row,
+    },
     /// Horizontal brace over/under its argument (\overbrace/\underbrace):
     /// a ╭──╮ / ╰──╯ row hugging the argument block, with an optional
     /// label beyond it. Same range-row idea as Frac, anchored off-baseline.
-    Brace { over: bool, arg: Row, label: Row },
+    Brace {
+        over: bool,
+        arg: Row,
+        label: Row,
+    },
     /// Stretchy labeled arrow (\xrightarrow / \xleftarrow and the ⇒/⇐
     /// doubles): a ─ (or ═) body with an ASCII head (< or >) at the
     /// pointing end, labels over/under spanning its extent (same
     /// range-band idea as ┄). `op` is → ← ⇒ or ⇐.
-    Arrow { op: char, over: Row, under: Row },
+    Arrow {
+        op: char,
+        over: Row,
+        under: Row,
+    },
     /// Auto-scaling delimiter block. `left`/`right`/`mids` hold delimiter
     /// *spec* chars: ( ) [ ] { } ⟨ ⟩ | and '.' (null delimiter, drawn as
     /// the thin ▏ ▕ markers). Middles ('|' only) separate the segments;
     /// segs.len() == mids.len() + 1. Segments are ordinary rows — a matrix
     /// is nothing more than a Delim whose segment contains an Array.
-    Delim { left: char, right: char, mids: Vec<char>, segs: Vec<Row> },
+    Delim {
+        left: char,
+        right: char,
+        mids: Vec<char>,
+        segs: Vec<Row>,
+    },
     /// rows×cols grid (LaTeX array/matrix), cells stored row-major.
     /// Always drawn as a self-delimiting lattice (┌ ┬ ┐ / ├ ┼ ┤ / └ ┴ ┘
     /// junctions at every separator crossing including the outer edges),
     /// wherever it appears — delimiters simply wrap it.
-    Array { rows: usize, cols: usize, cells: Vec<Row> },
+    Array {
+        rows: usize,
+        cols: usize,
+        cells: Vec<Row>,
+    },
     /// Struck-through content (\cancel): every cell of the rendered
     /// argument carries a combining long solidus overlay (U+0338).
-    Cancel { arg: Row },
+    Cancel {
+        arg: Row,
+    },
 }
 
 /// Valid delimiter spec chars for `Node::Delim` (`.` = null delimiter).
@@ -93,7 +133,11 @@ impl Node {
     /// Editable fields in cursor-traversal order (empty for atoms).
     pub fn fields(&self) -> Vec<Field> {
         match self {
-            Node::Sym(_) | Node::Spacer | Node::Func(_) | Node::Text { .. } | Node::Accent { .. } => {
+            Node::Sym(_)
+            | Node::Spacer
+            | Node::Func(_)
+            | Node::Text { .. }
+            | Node::Accent { .. } => {
                 vec![]
             }
             Node::Frac { .. } => vec![Field::FracNum, Field::FracDen],
@@ -210,7 +254,10 @@ pub fn normalize(row: &Row) -> Row {
         // the parser reads one merged node — canonical form matches (the
         // spacers die in the merge, and are restored when no merge fires).
         let mut tail: Row = Vec::new();
-        if matches!(node, Node::Sup { .. } | Node::Sub { .. } | Node::Cancel { .. }) {
+        if matches!(
+            node,
+            Node::Sup { .. } | Node::Sub { .. } | Node::Cancel { .. }
+        ) {
             while matches!(out.last(), Some(Node::Spacer)) {
                 tail.push(out.pop().unwrap());
             }
@@ -236,14 +283,18 @@ pub fn normalize(row: &Row) -> Row {
             (Some(Node::Cancel { arg: a }), Node::Sup { arg: b })
                 if matches!(b[..], [Node::Cancel { .. }]) =>
             {
-                let Node::Cancel { arg: inner } = &b[0] else { unreachable!() };
+                let Node::Cancel { arg: inner } = &b[0] else {
+                    unreachable!()
+                };
                 a.push(Node::Sup { arg: inner.clone() });
                 *a = normalize(a);
             }
             (Some(Node::Cancel { arg: a }), Node::Sub { arg: b })
                 if matches!(b[..], [Node::Cancel { .. }]) =>
             {
-                let Node::Cancel { arg: inner } = &b[0] else { unreachable!() };
+                let Node::Cancel { arg: inner } = &b[0] else {
+                    unreachable!()
+                };
                 a.push(Node::Sub { arg: inner.clone() });
                 *a = normalize(a);
             }
@@ -277,11 +328,16 @@ fn strip_cancels(row: &Row) -> Row {
                 num: strip_cancels(num),
                 den: strip_cancels(den),
             }),
-            Node::Sqrt { arg, index } => {
-                out.push(Node::Sqrt { arg: strip_cancels(arg), index: *index })
-            }
-            Node::Sup { arg } => out.push(Node::Sup { arg: strip_cancels(arg) }),
-            Node::Sub { arg } => out.push(Node::Sub { arg: strip_cancels(arg) }),
+            Node::Sqrt { arg, index } => out.push(Node::Sqrt {
+                arg: strip_cancels(arg),
+                index: *index,
+            }),
+            Node::Sup { arg } => out.push(Node::Sup {
+                arg: strip_cancels(arg),
+            }),
+            Node::Sub { arg } => out.push(Node::Sub {
+                arg: strip_cancels(arg),
+            }),
             Node::BigOp { base, lower, upper } => out.push(Node::BigOp {
                 base: strip_cancels(base),
                 lower: strip_cancels(lower),
@@ -297,7 +353,12 @@ fn strip_cancels(row: &Row) -> Row {
                 arg: strip_cancels(arg),
                 label: strip_cancels(label),
             }),
-            Node::Delim { left, right, mids, segs } => out.push(Node::Delim {
+            Node::Delim {
+                left,
+                right,
+                mids,
+                segs,
+            } => out.push(Node::Delim {
                 left: *left,
                 right: *right,
                 mids: mids.clone(),
@@ -328,11 +389,16 @@ pub fn strip_spacers(row: &Row) -> Row {
                 num: strip_spacers(num),
                 den: strip_spacers(den),
             }),
-            Node::Sqrt { arg, index } => {
-                out.push(Node::Sqrt { arg: strip_spacers(arg), index: *index })
-            }
-            Node::Sup { arg } => out.push(Node::Sup { arg: strip_spacers(arg) }),
-            Node::Sub { arg } => out.push(Node::Sub { arg: strip_spacers(arg) }),
+            Node::Sqrt { arg, index } => out.push(Node::Sqrt {
+                arg: strip_spacers(arg),
+                index: *index,
+            }),
+            Node::Sup { arg } => out.push(Node::Sup {
+                arg: strip_spacers(arg),
+            }),
+            Node::Sub { arg } => out.push(Node::Sub {
+                arg: strip_spacers(arg),
+            }),
             Node::BigOp { base, lower, upper } => out.push(Node::BigOp {
                 base: strip_spacers(base),
                 lower: strip_spacers(lower),
@@ -348,7 +414,12 @@ pub fn strip_spacers(row: &Row) -> Row {
                 arg: strip_spacers(arg),
                 label: strip_spacers(label),
             }),
-            Node::Delim { left, right, mids, segs } => out.push(Node::Delim {
+            Node::Delim {
+                left,
+                right,
+                mids,
+                segs,
+            } => out.push(Node::Delim {
                 left: *left,
                 right: *right,
                 mids: mids.clone(),
@@ -359,7 +430,9 @@ pub fn strip_spacers(row: &Row) -> Row {
                 cols: *cols,
                 cells: cells.iter().map(strip_spacers).collect(),
             }),
-            Node::Cancel { arg } => out.push(Node::Cancel { arg: strip_spacers(arg) }),
+            Node::Cancel { arg } => out.push(Node::Cancel {
+                arg: strip_spacers(arg),
+            }),
         }
     }
     out
@@ -368,17 +441,31 @@ pub fn strip_spacers(row: &Row) -> Row {
 fn normalize_node(node: &Node) -> Node {
     match node {
         // A markless accent is just its base.
-        Node::Accent { overs, unders, base } if overs.is_empty() && unders.is_empty() => {
+        Node::Accent {
+            overs,
+            unders,
+            base,
+        } if overs.is_empty() && unders.is_empty() => {
             let _ = (overs, unders);
             Node::Sym(*base)
         }
         Node::Sym(_) | Node::Spacer | Node::Func(_) | Node::Text { .. } | Node::Accent { .. } => {
             node.clone()
         }
-        Node::Frac { num, den } => Node::Frac { num: normalize(num), den: normalize(den) },
-        Node::Sqrt { arg, index } => Node::Sqrt { arg: normalize(arg), index: *index },
-        Node::Sup { arg } => Node::Sup { arg: normalize(arg) },
-        Node::Sub { arg } => Node::Sub { arg: normalize(arg) },
+        Node::Frac { num, den } => Node::Frac {
+            num: normalize(num),
+            den: normalize(den),
+        },
+        Node::Sqrt { arg, index } => Node::Sqrt {
+            arg: normalize(arg),
+            index: *index,
+        },
+        Node::Sup { arg } => Node::Sup {
+            arg: normalize(arg),
+        },
+        Node::Sub { arg } => Node::Sub {
+            arg: normalize(arg),
+        },
         Node::BigOp { base, lower, upper } => Node::BigOp {
             base: normalize(base),
             lower: normalize(lower),
@@ -394,7 +481,12 @@ fn normalize_node(node: &Node) -> Node {
             arg: normalize(arg),
             label: normalize(label),
         },
-        Node::Delim { left, right, mids, segs } => {
+        Node::Delim {
+            left,
+            right,
+            mids,
+            segs,
+        } => {
             let segs = segs
                 .iter()
                 .map(|seg| {
@@ -404,19 +496,32 @@ fn normalize_node(node: &Node) -> Node {
                     let mut seg = normalize(seg);
                     loop {
                         seg = match &seg[..] {
-                            [Node::Array { rows: 1, cols: 1, cells }] => normalize(&cells[0]),
+                            [
+                                Node::Array {
+                                    rows: 1,
+                                    cols: 1,
+                                    cells,
+                                },
+                            ] => normalize(&cells[0]),
                             _ => break seg,
                         };
                     }
                 })
                 .collect();
-            Node::Delim { left: *left, right: *right, mids: mids.clone(), segs }
+            Node::Delim {
+                left: *left,
+                right: *right,
+                mids: mids.clone(),
+                segs,
+            }
         }
         Node::Cancel { arg } => {
             // A cancel strikes every cell of its subtree, so any Cancel
             // nested anywhere inside it (even deep in a fraction) is the
             // same picture; dissolve them all.
-            Node::Cancel { arg: normalize(&strip_cancels(&normalize(arg))) }
+            Node::Cancel {
+                arg: normalize(&strip_cancels(&normalize(arg))),
+            }
         }
         Node::Array { rows, cols, cells } => Node::Array {
             rows: *rows,

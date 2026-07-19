@@ -14,7 +14,7 @@ use mascii::editor::Editor;
 use mascii::input::{Effect, Key};
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
-use mascii::render::{render_row, RenderCtx};
+use mascii::render::{RenderCtx, render_row};
 
 fn named(tok: &str) -> Option<Key> {
     Some(match tok {
@@ -169,7 +169,12 @@ fn assert_roundtrip(ed: &Editor, history: &[String]) {
     let aa = render_row(&row, None, false, &RenderCtx::canonical()).to_text();
     let expected = normalize(&strip_spacers(&row));
     let parsed = parse(&aa).unwrap_or_else(|e| {
-        panic!("parse failed: {}\n--- AA ---\n{}\n--- keys ---\n{}", e, aa, history.join(" "))
+        panic!(
+            "parse failed: {}\n--- AA ---\n{}\n--- keys ---\n{}",
+            e,
+            aa,
+            history.join(" ")
+        )
     });
     assert_eq!(
         parsed,
@@ -221,7 +226,11 @@ fn property_random_key_sequences_roundtrip() {
                 (*rng.pick(&[Key::Left, Key::Right]), true, false)
             } else if r < 95 {
                 // Ctrl toggles/jump (host effects are inert here).
-                (Key::Char(*rng.pick(&['g', 't', 'b', 'o', 'y', 's'])), false, true)
+                (
+                    Key::Char(*rng.pick(&['g', 't', 'b', 'o', 'y', 's'])),
+                    false,
+                    true,
+                )
             } else {
                 (Key::Char(*rng.pick(&chars)), true, false)
             };

@@ -4,39 +4,113 @@
 /// (command name, unicode char). The LaTeX command is `\name`.
 pub const SYMBOLS: &[(&str, char)] = &[
     // Greek lowercase
-    ("alpha", 'α'), ("beta", 'β'), ("gamma", 'γ'), ("delta", 'δ'),
-    ("epsilon", 'ε'), ("zeta", 'ζ'), ("eta", 'η'), ("theta", 'θ'),
-    ("iota", 'ι'), ("kappa", 'κ'), ("lambda", 'λ'), ("mu", 'μ'),
-    ("nu", 'ν'), ("xi", 'ξ'), ("pi", 'π'), ("rho", 'ρ'),
-    ("sigma", 'σ'), ("tau", 'τ'), ("upsilon", 'υ'), ("phi", 'φ'),
-    ("chi", 'χ'), ("psi", 'ψ'), ("omega", 'ω'),
-    ("varphi", 'ϕ'), ("vartheta", 'ϑ'),
+    ("alpha", 'α'),
+    ("beta", 'β'),
+    ("gamma", 'γ'),
+    ("delta", 'δ'),
+    ("epsilon", 'ε'),
+    ("zeta", 'ζ'),
+    ("eta", 'η'),
+    ("theta", 'θ'),
+    ("iota", 'ι'),
+    ("kappa", 'κ'),
+    ("lambda", 'λ'),
+    ("mu", 'μ'),
+    ("nu", 'ν'),
+    ("xi", 'ξ'),
+    ("pi", 'π'),
+    ("rho", 'ρ'),
+    ("sigma", 'σ'),
+    ("tau", 'τ'),
+    ("upsilon", 'υ'),
+    ("phi", 'φ'),
+    ("chi", 'χ'),
+    ("psi", 'ψ'),
+    ("omega", 'ω'),
+    ("varphi", 'ϕ'),
+    ("vartheta", 'ϑ'),
     // Greek uppercase
-    ("Gamma", 'Γ'), ("Delta", 'Δ'), ("Theta", 'Θ'), ("Lambda", 'Λ'),
-    ("Xi", 'Ξ'), ("Pi", 'Π'), ("Sigma", 'Σ'), ("Upsilon", 'Υ'),
-    ("Phi", 'Φ'), ("Psi", 'Ψ'), ("Omega", 'Ω'),
+    ("Gamma", 'Γ'),
+    ("Delta", 'Δ'),
+    ("Theta", 'Θ'),
+    ("Lambda", 'Λ'),
+    ("Xi", 'Ξ'),
+    ("Pi", 'Π'),
+    ("Sigma", 'Σ'),
+    ("Upsilon", 'Υ'),
+    ("Phi", 'Φ'),
+    ("Psi", 'Ψ'),
+    ("Omega", 'Ω'),
     // Binary operators / relations
-    ("pm", '±'), ("mp", '∓'), ("times", '×'), ("div", '÷'), ("cdot", '⋅'),
-    ("circ", '∘'), ("oplus", '⊕'), ("otimes", '⊗'), ("ast", '∗'),
-    ("le", '≤'), ("leq", '≤'), ("ge", '≥'), ("geq", '≥'), ("ne", '≠'),
-    ("neq", '≠'), ("approx", '≈'), ("equiv", '≡'), ("sim", '∼'),
-    ("simeq", '≃'), ("propto", '∝'), ("ll", '≪'), ("gg", '≫'),
+    ("pm", '±'),
+    ("mp", '∓'),
+    ("times", '×'),
+    ("div", '÷'),
+    ("cdot", '⋅'),
+    ("circ", '∘'),
+    ("oplus", '⊕'),
+    ("otimes", '⊗'),
+    ("ast", '∗'),
+    ("le", '≤'),
+    ("leq", '≤'),
+    ("ge", '≥'),
+    ("geq", '≥'),
+    ("ne", '≠'),
+    ("neq", '≠'),
+    ("approx", '≈'),
+    ("equiv", '≡'),
+    ("sim", '∼'),
+    ("simeq", '≃'),
+    ("propto", '∝'),
+    ("ll", '≪'),
+    ("gg", '≫'),
     // Arrows
-    ("to", '→'), ("rightarrow", '→'), ("leftarrow", '←'),
-    ("Rightarrow", '⇒'), ("Leftarrow", '⇐'), ("leftrightarrow", '↔'),
-    ("Leftrightarrow", '⇔'), ("mapsto", '↦'),
+    ("to", '→'),
+    ("rightarrow", '→'),
+    ("leftarrow", '←'),
+    ("Rightarrow", '⇒'),
+    ("Leftarrow", '⇐'),
+    ("leftrightarrow", '↔'),
+    ("Leftrightarrow", '⇔'),
+    ("mapsto", '↦'),
     // Sets / logic
-    ("in", '∈'), ("notin", '∉'), ("ni", '∋'), ("subset", '⊂'),
-    ("subseteq", '⊆'), ("supset", '⊃'), ("supseteq", '⊇'),
-    ("cup", '∪'), ("cap", '∩'), ("setminus", '∖'), ("emptyset", '∅'),
-    ("forall", '∀'), ("exists", '∃'), ("neg", '¬'), ("land", '∧'),
-    ("lor", '∨'), ("vdash", '⊢'), ("models", '⊨'),
+    ("in", '∈'),
+    ("notin", '∉'),
+    ("ni", '∋'),
+    ("subset", '⊂'),
+    ("subseteq", '⊆'),
+    ("supset", '⊃'),
+    ("supseteq", '⊇'),
+    ("cup", '∪'),
+    ("cap", '∩'),
+    ("setminus", '∖'),
+    ("emptyset", '∅'),
+    ("forall", '∀'),
+    ("exists", '∃'),
+    ("neg", '¬'),
+    ("land", '∧'),
+    ("lor", '∨'),
+    ("vdash", '⊢'),
+    ("models", '⊨'),
     // Misc
-    ("infty", '∞'), ("partial", '∂'), ("nabla", '∇'), ("hbar", 'ℏ'),
-    ("ell", 'ℓ'), ("Re", 'ℜ'), ("Im", 'ℑ'), ("aleph", 'ℵ'),
-    ("angle", '∠'), ("perp", '⊥'), ("parallel", '∥'), ("prime", '′'),
-    ("degree", '°'), ("cdots", '⋯'), ("ldots", '…'), ("dots", '…'),
-    ("vdots", '⋮'), ("ddots", '⋱'),
+    ("infty", '∞'),
+    ("partial", '∂'),
+    ("nabla", '∇'),
+    ("hbar", 'ℏ'),
+    ("ell", 'ℓ'),
+    ("Re", 'ℜ'),
+    ("Im", 'ℑ'),
+    ("aleph", 'ℵ'),
+    ("angle", '∠'),
+    ("perp", '⊥'),
+    ("parallel", '∥'),
+    ("prime", '′'),
+    ("degree", '°'),
+    ("cdots", '⋯'),
+    ("ldots", '…'),
+    ("dots", '…'),
+    ("vdots", '⋮'),
+    ("ddots", '⋱'),
     // Explicit space atom (the Space key): visible ␣ in canonical AA so the
     // picture stays parseable (a real blank column is a sibling separator).
     ("space", '␣'),
@@ -49,14 +123,64 @@ pub const SYMBOLS: &[(&str, char)] = &[
 pub fn is_reserved_glyph(c: char) -> bool {
     matches!(
         c,
-        '─' | '┄' | '═' | '√' | '∛' | '∜' | '│' | '⬚' | '▌' | '"' | '_'
-            | '⎛' | '⎜' | '⎝' | '⎞' | '⎟' | '⎠'
-            | '⎡' | '⎢' | '⎣' | '⎤' | '⎥' | '⎦'
-            | '(' | ')' | '[' | ']' | '{' | '}' | '⟨' | '⟩'
-            | '⎧' | '⎨' | '⎩' | '⎪' | '⎫' | '⎬' | '⎭'
-            | '╱' | '╲' | '⎸' | '⎹' | '▏' | '▕'
-            | '┌' | '┬' | '┐' | '├' | '┼' | '┤' | '└' | '┴' | '┘' | '┠' | '┨'
-            | '╭' | '╮' | '╰' | '╯'
+        '─' | '┄'
+            | '═'
+            | '√'
+            | '∛'
+            | '∜'
+            | '│'
+            | '⬚'
+            | '▌'
+            | '"'
+            | '_'
+            | '⎛'
+            | '⎜'
+            | '⎝'
+            | '⎞'
+            | '⎟'
+            | '⎠'
+            | '⎡'
+            | '⎢'
+            | '⎣'
+            | '⎤'
+            | '⎥'
+            | '⎦'
+            | '('
+            | ')'
+            | '['
+            | ']'
+            | '{'
+            | '}'
+            | '⟨'
+            | '⟩'
+            | '⎧'
+            | '⎨'
+            | '⎩'
+            | '⎪'
+            | '⎫'
+            | '⎬'
+            | '⎭'
+            | '╱'
+            | '╲'
+            | '⎸'
+            | '⎹'
+            | '▏'
+            | '▕'
+            | '┌'
+            | '┬'
+            | '┐'
+            | '├'
+            | '┼'
+            | '┤'
+            | '└'
+            | '┴'
+            | '┘'
+            | '┠'
+            | '┨'
+            | '╭'
+            | '╮'
+            | '╰'
+            | '╯'
     ) || is_over_mark(c)
         || is_under_mark(c)
         || crate::render::unsuperscript_char(c).is_some()
@@ -104,19 +228,26 @@ pub fn is_under_mark(c: char) -> bool {
 
 /// Big operators available as `\name` (typeset with under/over limits).
 pub const BIG_OPS: &[(&str, char)] = &[
-    ("sum", '∑'), ("prod", '∏'), ("coprod", '∐'),
-    ("int", '∫'), ("iint", '∬'), ("oint", '∮'),
-    ("bigcup", '⋃'), ("bigcap", '⋂'),
-    ("bigoplus", '⨁'), ("bigotimes", '⨂'), ("bigvee", '⋁'), ("bigwedge", '⋀'),
+    ("sum", '∑'),
+    ("prod", '∏'),
+    ("coprod", '∐'),
+    ("int", '∫'),
+    ("iint", '∬'),
+    ("oint", '∮'),
+    ("bigcup", '⋃'),
+    ("bigcap", '⋂'),
+    ("bigoplus", '⨁'),
+    ("bigotimes", '⨂'),
+    ("bigvee", '⋁'),
+    ("bigwedge", '⋀'),
 ];
 
 /// Function/operator names rendered upright (Node::Func). Sorted so that
 /// longer names are matched first by the parser (greedy longest match).
 pub const FUNCS: &[&str] = &[
-    "arccos", "arcsin", "arctan", "arg", "cos", "cosh", "cot", "coth", "csc",
-    "deg", "det", "dim", "exp", "gcd", "hom", "inf", "ker", "lg", "lim",
-    "liminf", "limsup", "ln", "log", "max", "min", "mod", "sec", "sin",
-    "sinh", "sup", "tan", "tanh", "Pr",
+    "arccos", "arcsin", "arctan", "arg", "cos", "cosh", "cot", "coth", "csc", "deg", "det", "dim",
+    "exp", "gcd", "hom", "inf", "ker", "lg", "lim", "liminf", "limsup", "ln", "log", "max", "min",
+    "mod", "sec", "sin", "sinh", "sup", "tan", "tanh", "Pr",
 ];
 
 pub fn is_func_name(name: &str) -> bool {
@@ -164,4 +295,3 @@ pub fn latex_name(c: char) -> Option<&'static str> {
         .find(|&&(_, ch)| ch == c)
         .map(|&(n, _)| n)
 }
-

@@ -3,7 +3,7 @@
 
 use mascii::ast::{Node, Row};
 use mascii::latex;
-use mascii::render::{render_row, RenderCtx};
+use mascii::render::{RenderCtx, render_row};
 
 fn syms(s: &str) -> Row {
     s.chars().map(Node::Sym).collect()
@@ -34,7 +34,10 @@ fn main() {
         Node::Sym('d'),
         Node::Sym('x'),
         Node::Sym('='),
-        Node::Sqrt { arg: vec![Node::Sym('π')], index: 2 },
+        Node::Sqrt {
+            arg: vec![Node::Sym('π')],
+            index: 2,
+        },
     ];
     show("Gaussian integral", &gaussian);
 
@@ -86,7 +89,12 @@ fn main() {
     // Nested: f(x) = (1 + 1/(1 + 1/x))
     let nested = vec![
         Node::Sym('f'),
-        Node::Delim { left: '(', right: ')', mids: vec![], segs: vec![syms("x")] },
+        Node::Delim {
+            left: '(',
+            right: ')',
+            mids: vec![],
+            segs: vec![syms("x")],
+        },
         Node::Sym('='),
         Node::Delim {
             left: '(',
@@ -100,7 +108,10 @@ fn main() {
                     den: vec![
                         Node::Sym('1'),
                         Node::Sym('+'),
-                        Node::Frac { num: syms("1"), den: syms("x") },
+                        Node::Frac {
+                            num: syms("1"),
+                            den: syms("x"),
+                        },
                     ],
                 },
             ]],

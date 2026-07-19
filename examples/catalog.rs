@@ -4,9 +4,9 @@
 //! (Formula definitions mirror tests/roundtrip.rs.)
 
 #![allow(dead_code)]
-use mascii::ast::{normalize, Node, Row};
+use mascii::ast::{Node, Row, normalize};
 use mascii::latex::row_to_latex;
-use mascii::render::{render_row, RenderCtx};
+use mascii::render::{RenderCtx, render_row};
 use mascii::typst::row_to_typst;
 
 // ----- tiny DSL for building formulas -----
@@ -40,11 +40,20 @@ fn sub(arg: Row) -> Node {
 }
 
 fn paren(inner: Row) -> Node {
-    Node::Delim { left: '(', right: ')', mids: vec![], segs: vec![inner] }
+    Node::Delim {
+        left: '(',
+        right: ')',
+        mids: vec![],
+        segs: vec![inner],
+    }
 }
 
 fn bigop(op: char, lower: Row, upper: Row) -> Node {
-    Node::BigOp { base: vec![Node::Sym(op)], lower, upper }
+    Node::BigOp {
+        base: vec![Node::Sym(op)],
+        lower,
+        upper,
+    }
 }
 
 fn func(name: &str) -> Node {
@@ -53,9 +62,17 @@ fn func(name: &str) -> Node {
 
 fn acc(accent: char, base: char) -> Node {
     if mascii::symbols::is_under_mark(accent) {
-        Node::Accent { overs: vec![], unders: vec![accent], base }
+        Node::Accent {
+            overs: vec![],
+            unders: vec![accent],
+            base,
+        }
     } else {
-        Node::Accent { overs: vec![accent], unders: vec![], base }
+        Node::Accent {
+            overs: vec![accent],
+            unders: vec![],
+            base,
+        }
     }
 }
 
@@ -106,12 +123,7 @@ fn cardano_formula() {
             n(discriminant.clone()),
         ])
     };
-    let row = cat(&[
-        s("t="),
-        n(cbrt(half_q("-"))),
-        s("+"),
-        n(cbrt(half_q(""))),
-    ]);
+    let row = cat(&[s("t="), n(cbrt(half_q("-"))), s("+"), n(cbrt(half_q("")))]);
     roundtrip("cardano", &row);
 }
 
@@ -119,7 +131,12 @@ fn cardano_formula() {
 /// (MDN's Cauchy–Bunyakovsky–Schwarz inequality, kept with parens as in
 /// the original corpus entry; |·| delimiters exist too — see \abs.)
 fn cauchy_schwarz_inequality() {
-    let sum = |body: Row| n(bigop('∑', s("k=1"), s("n"))).into_iter().chain(body).collect::<Row>();
+    let sum = |body: Row| {
+        n(bigop('∑', s("k=1"), s("n")))
+            .into_iter()
+            .chain(body)
+            .collect::<Row>()
+    };
     let row = cat(&[
         n(paren(sum(cat(&[
             s("u"),
@@ -148,10 +165,26 @@ fn vandermonde_determinant() {
         4,
         5,
         vec![
-            s("1"), x("1", None), x("1", Some("2")), s("⋯"), x("1", Some("n-1")),
-            s("1"), x("2", None), x("2", Some("2")), s("⋯"), x("2", Some("n-1")),
-            s("⋮"), s("⋮"), s("⋮"), s("⋱"), s("⋮"),
-            s("1"), x("n", None), x("n", Some("2")), s("⋯"), x("n", Some("n-1")),
+            s("1"),
+            x("1", None),
+            x("1", Some("2")),
+            s("⋯"),
+            x("1", Some("n-1")),
+            s("1"),
+            x("2", None),
+            x("2", Some("2")),
+            s("⋯"),
+            x("2", Some("n-1")),
+            s("⋮"),
+            s("⋮"),
+            s("⋮"),
+            s("⋱"),
+            s("⋮"),
+            s("1"),
+            x("n", None),
+            x("n", Some("2")),
+            s("⋯"),
+            x("n", Some("n-1")),
         ],
     );
     let row = cat(&[
@@ -242,10 +275,7 @@ fn normal_pdf() {
         s("f"),
         n(paren(s("x"))),
         s("="),
-        n(frac(
-            s("1"),
-            n(sqrt(cat(&[s("2πσ"), n(sup(s("2")))]))),
-        )),
+        n(frac(s("1"), n(sqrt(cat(&[s("2πσ"), n(sup(s("2")))]))))),
         s("e"),
         n(sup(cat(&[
             s("-"),
@@ -275,11 +305,7 @@ fn variance() {
 /// P(A|B) = P(B|A)P(A) / P(B)
 fn bayes_theorem() {
     let p = |arg: &str| cat(&[s("P"), n(paren(s(arg)))]);
-    let row = cat(&[
-        p("A|B"),
-        s("="),
-        n(frac(cat(&[p("B|A"), p("A")]), p("B"))),
-    ]);
+    let row = cat(&[p("A|B"), s("="), n(frac(cat(&[p("B|A"), p("A")]), p("B")))]);
     roundtrip("bayes", &row);
 }
 
@@ -335,10 +361,7 @@ fn nested_matrices() {
 fn cancel_strikes() {
     // x·y/y = x with the y's cancelled
     let row = cat(&[
-        n(frac(
-            cat(&[s("x"), n(cancel(s("y")))]),
-            n(cancel(s("y"))),
-        )),
+        n(frac(cat(&[s("x"), n(cancel(s("y")))]), n(cancel(s("y"))))),
         s("="),
         s("x"),
     ]);
@@ -351,10 +374,7 @@ fn cancel_strikes() {
     ]);
     roundtrip("cancel-frac", &row);
     // cancel inside a superscript
-    let row = cat(&[
-        s("e"),
-        n(sup(cat(&[s("x"), n(cancel(s("2α")))]))),
-    ]);
+    let row = cat(&[s("e"), n(sup(cat(&[s("x"), n(cancel(s("2α")))])))]);
     roundtrip("cancel-in-sup", &row);
 }
 
@@ -368,7 +388,12 @@ fn continued_fraction() {
 }
 
 fn delim(left: char, right: char, mids: Vec<char>, segs: Vec<Row>) -> Node {
-    Node::Delim { left, right, mids, segs }
+    Node::Delim {
+        left,
+        right,
+        mids,
+        segs,
+    }
 }
 
 fn array(rows: usize, cols: usize, cells: Vec<Row>) -> Node {
@@ -392,13 +417,21 @@ fn cases_abs() {
 
 /// ⟨ψ|H|ψ⟩ braket with two middles, and a set-builder {x | x² > 2}.
 fn braket_and_set() {
-    let row = n(delim('⟨', '⟩', vec!['|', '|'], vec![s("ψ"), s("H"), s("ψ")]));
+    let row = n(delim(
+        '⟨',
+        '⟩',
+        vec!['|', '|'],
+        vec![s("ψ"), s("H"), s("ψ")],
+    ));
     roundtrip("braket", &row);
     let row = n(delim(
         '{',
         '}',
         vec!['|'],
-        vec![s("x"), cat(&[s("x"), n(sup(s("2"))), s(">"), n(frac(s("1"), s("2")))])],
+        vec![
+            s("x"),
+            cat(&[s("x"), n(sup(s("2"))), s(">"), n(frac(s("1"), s("2")))]),
+        ],
     ));
     roundtrip("set-builder", &row);
 }
@@ -407,7 +440,10 @@ fn braket_and_set() {
 /// a self-delimiting ┌┬┐ lattice.
 fn interval_and_bare_array() {
     roundtrip("interval", &n(delim('(', ']', vec![], vec![s("0,1")])));
-    roundtrip("bare-array", &n(array(2, 2, vec![s("a"), s("b"), s("c"), s("d")])));
+    roundtrip(
+        "bare-array",
+        &n(array(2, 2, vec![s("a"), s("b"), s("c"), s("d")])),
+    );
 }
 
 /// Limits that themselves contain big operators and fractions.
@@ -415,7 +451,12 @@ fn nested_limits() {
     let row = cat(&[
         n(bigop(
             '∑',
-            cat(&[s("i∈"), n(bigop('⋃', s("k"), vec![])), s("S"), n(sub(s("k")))]),
+            cat(&[
+                s("i∈"),
+                n(bigop('⋃', s("k"), vec![])),
+                s("S"),
+                n(sub(s("k"))),
+            ]),
             n(frac(s("n"), s("2"))),
         )),
         s("a"),
@@ -424,13 +465,20 @@ fn nested_limits() {
     roundtrip("nested-limits", &row);
 }
 
-
 /// overbrace / underbrace.
 fn braces_over_under() {
     let row = cat(&[
-        n(Node::Brace { over: true, arg: cat(&[s("a"), s("+"), s("b")]), label: s("n") }),
+        n(Node::Brace {
+            over: true,
+            arg: cat(&[s("a"), s("+"), s("b")]),
+            label: s("n"),
+        }),
         s("+"),
-        n(Node::Brace { over: false, arg: s("c"), label: s("m") }),
+        n(Node::Brace {
+            over: false,
+            arg: s("c"),
+            label: s("m"),
+        }),
     ]);
     roundtrip("overbrace", &row);
 }
@@ -448,7 +496,11 @@ fn limit_funcs() {
     ]);
     roundtrip("lim", &row);
     let row = cat(&[
-        n(Node::BigOp { base: vec![func("arg"), func("max")], lower: s("x∈S"), upper: vec![] }),
+        n(Node::BigOp {
+            base: vec![func("arg"), func("max")],
+            lower: s("x∈S"),
+            upper: vec![],
+        }),
         s("f"),
         n(paren(s("x"))),
     ]);
@@ -459,7 +511,11 @@ fn limit_funcs() {
 fn arrows_and_text() {
     let row = cat(&[
         s("A"),
-        n(Node::Arrow { op: '→', over: s("f"), under: s("n→∞") }),
+        n(Node::Arrow {
+            op: '→',
+            over: s("f"),
+            under: s("n→∞"),
+        }),
         s("B"),
     ]);
     roundtrip("xrightarrow", &row);
@@ -467,7 +523,10 @@ fn arrows_and_text() {
         n(bigop('∫', vec![], vec![])),
         s("f"),
         n(paren(s("x"))),
-        n(Node::Text { t: "dx".into(), math: true }),
+        n(Node::Text {
+            t: "dx".into(),
+            math: true,
+        }),
     ]);
     roundtrip("mathrm-dx", &row);
 }
@@ -477,7 +536,9 @@ fn main() {
     println!("`tests/roundtrip.rs` のラウンドトリップ検証済み数式の対照表。");
     println!("`cargo run --example catalog > docs/examples.md` で再生成する。\n");
     println!("すべての式で `parse(render(normalize(x))) == normalize(x)` と");
-    println!("`render(parse(aa)) == aa` が成立している(AA はそのまま `mascii aa2tex` に入力可能)。\n");
+    println!(
+        "`render(parse(aa)) == aa` が成立している(AA はそのまま `mascii aa2tex` に入力可能)。\n"
+    );
     println!("## MDN「三つの有名な数式」\n");
     cardano_formula();
     cauchy_schwarz_inequality();

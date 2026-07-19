@@ -64,7 +64,11 @@ fn node_to_typst(node: &Node) -> String {
             c => c.to_string(),
         },
         Node::Func(name) => name.clone(),
-        Node::Accent { overs, unders, base } => {
+        Node::Accent {
+            overs,
+            unders,
+            base,
+        } => {
             let mut s = base.to_string();
             for &m in unders.iter().chain(overs.iter()) {
                 s = format!("{}({})", accent_fn(m), s);
@@ -94,7 +98,14 @@ fn node_to_typst(node: &Node) -> String {
         }
         Node::Text { t, math } => {
             if *math {
-                format!("upright({})", if t.chars().count() == 1 { t.clone() } else { format!("\"{}\"", t) })
+                format!(
+                    "upright({})",
+                    if t.chars().count() == 1 {
+                        t.clone()
+                    } else {
+                        format!("\"{}\"", t)
+                    }
+                )
             } else {
                 format!("\"{}\"", t)
             }
@@ -124,7 +135,12 @@ fn node_to_typst(node: &Node) -> String {
             s.push(')');
             s
         }
-        Node::Delim { left, right, mids, segs } => {
+        Node::Delim {
+            left,
+            right,
+            mids,
+            segs,
+        } => {
             if mids.is_empty() {
                 if let [seg] = &segs[..] {
                     if let [Node::Array { cols, cells, .. }] = &seg[..] {
@@ -135,10 +151,7 @@ fn node_to_typst(node: &Node) -> String {
                                 let rows = cells
                                     .chunks(*cols)
                                     .map(|row| {
-                                        row.iter()
-                                            .map(row_to_typst)
-                                            .collect::<Vec<_>>()
-                                            .join(" & ")
+                                        row.iter().map(row_to_typst).collect::<Vec<_>>().join(" & ")
                                     })
                                     .collect::<Vec<_>>()
                                     .join(", ");
@@ -211,7 +224,12 @@ mod tests {
             Node::Sym('='),
             Node::Frac {
                 num: vec![Node::Sym('1')],
-                den: vec![Node::Sym('n'), Node::Sup { arg: vec![Node::Sym('2')] }],
+                den: vec![
+                    Node::Sym('n'),
+                    Node::Sup {
+                        arg: vec![Node::Sym('2')],
+                    },
+                ],
             },
         ];
         assert_eq!(row_to_typst(&root), "x = 1/(n ^2)");

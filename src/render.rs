@@ -24,7 +24,11 @@ pub const DOUBLE_BODY: char = '═';
 
 /// Body glyph for an arrow head.
 pub fn arrow_body(op: char) -> char {
-    if op == '⇒' || op == '⇐' { DOUBLE_BODY } else { FRAC_BAR }
+    if op == '⇒' || op == '⇐' {
+        DOUBLE_BODY
+    } else {
+        FRAC_BAR
+    }
 }
 /// Grid lattice markers: a bare Array frames itself with box-drawing
 /// junctions at every crossing of its separator rows/columns including the
@@ -54,7 +58,11 @@ pub struct Block {
 
 impl Block {
     pub fn new(lines: Vec<Vec<char>>, baseline: usize) -> Self {
-        Block { lines, baseline, cancel: vec![] }
+        Block {
+            lines,
+            baseline,
+            cancel: vec![],
+        }
     }
 
     pub fn empty() -> Self {
@@ -139,11 +147,19 @@ fn hcat(blocks: &[Block]) -> Block {
         cancel.extend(b.cancel.iter().map(|&(r, c)| (y0 + r, x + c)));
         x += b.width();
     }
-    Block { lines: grid, baseline: above, cancel }
+    Block {
+        lines: grid,
+        baseline: above,
+        cancel,
+    }
 }
 
 /// Cancel coords of a child centered into `width` at vertical offset.
-fn centered_cancel(b: &Block, width: usize, row_off: usize) -> impl Iterator<Item = (usize, usize)> + '_ {
+fn centered_cancel(
+    b: &Block,
+    width: usize,
+    row_off: usize,
+) -> impl Iterator<Item = (usize, usize)> + '_ {
     let left = (width - b.width()) / 2;
     b.cancel.iter().map(move |&(r, c)| (r + row_off, c + left))
 }
@@ -206,23 +222,61 @@ fn display_char(c: char, ctx: &RenderCtx) -> char {
 
 pub fn superscript_char(c: char) -> Option<char> {
     Some(match c {
-        '0' => '⁰', '1' => '¹', '2' => '²', '3' => '³', '4' => '⁴',
-        '5' => '⁵', '6' => '⁶', '7' => '⁷', '8' => '⁸', '9' => '⁹',
-        '+' => '⁺', '-' => '⁻', '=' => '⁼', '(' => '⁽', ')' => '⁾',
-        'n' => 'ⁿ', 'i' => 'ⁱ',
+        '0' => '⁰',
+        '1' => '¹',
+        '2' => '²',
+        '3' => '³',
+        '4' => '⁴',
+        '5' => '⁵',
+        '6' => '⁶',
+        '7' => '⁷',
+        '8' => '⁸',
+        '9' => '⁹',
+        '+' => '⁺',
+        '-' => '⁻',
+        '=' => '⁼',
+        '(' => '⁽',
+        ')' => '⁾',
+        'n' => 'ⁿ',
+        'i' => 'ⁱ',
         _ => return None,
     })
 }
 
 pub fn subscript_char(c: char) -> Option<char> {
     Some(match c {
-        '0' => '₀', '1' => '₁', '2' => '₂', '3' => '₃', '4' => '₄',
-        '5' => '₅', '6' => '₆', '7' => '₇', '8' => '₈', '9' => '₉',
-        '+' => '₊', '-' => '₋', '=' => '₌', '(' => '₍', ')' => '₎',
-        'a' => 'ₐ', 'e' => 'ₑ', 'h' => 'ₕ', 'i' => 'ᵢ', 'j' => 'ⱼ',
-        'k' => 'ₖ', 'l' => 'ₗ', 'm' => 'ₘ', 'n' => 'ₙ', 'o' => 'ₒ',
-        'p' => 'ₚ', 'r' => 'ᵣ', 's' => 'ₛ', 't' => 'ₜ', 'u' => 'ᵤ',
-        'v' => 'ᵥ', 'x' => 'ₓ',
+        '0' => '₀',
+        '1' => '₁',
+        '2' => '₂',
+        '3' => '₃',
+        '4' => '₄',
+        '5' => '₅',
+        '6' => '₆',
+        '7' => '₇',
+        '8' => '₈',
+        '9' => '₉',
+        '+' => '₊',
+        '-' => '₋',
+        '=' => '₌',
+        '(' => '₍',
+        ')' => '₎',
+        'a' => 'ₐ',
+        'e' => 'ₑ',
+        'h' => 'ₕ',
+        'i' => 'ᵢ',
+        'j' => 'ⱼ',
+        'k' => 'ₖ',
+        'l' => 'ₗ',
+        'm' => 'ₘ',
+        'n' => 'ₙ',
+        'o' => 'ₒ',
+        'p' => 'ₚ',
+        'r' => 'ᵣ',
+        's' => 'ₛ',
+        't' => 'ₜ',
+        'u' => 'ᵤ',
+        'v' => 'ᵥ',
+        'x' => 'ₓ',
         _ => return None,
     })
 }
@@ -397,11 +451,7 @@ fn l_placeholder(cursor: Option<(Field, CursorRef)>) -> bool {
     cursor.is_some()
 }
 
-fn render_node(
-    node: &Node,
-    cursor: Option<(Field, CursorRef)>,
-    ctx: &RenderCtx,
-) -> Block {
+fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx) -> Block {
     // Cursor for a specific field of this node.
     let cur = |f: Field| -> Option<CursorRef> {
         match cursor {
@@ -444,7 +494,11 @@ fn render_node(
         // outward (innermost first in each list). Those cells are never
         // used by anything else (scripts go up-right, limits live inside
         // their band), so a column probe parses the stack back.
-        Node::Accent { overs, unders, base } => {
+        Node::Accent {
+            overs,
+            unders,
+            base,
+        } => {
             let b = display_char(*base, ctx);
             let mut lines: Vec<Vec<char>> = overs.iter().rev().map(|&m| vec![m]).collect();
             lines.push(vec![b]);
@@ -463,7 +517,11 @@ fn render_node(
             let cancel = centered_cancel(&n, w, 0)
                 .chain(centered_cancel(&d, w, baseline + 1))
                 .collect();
-            Block { lines, baseline, cancel }
+            Block {
+                lines,
+                baseline,
+                cancel,
+            }
         }
 
         Node::Sqrt { arg, index } => {
@@ -492,7 +550,11 @@ fn render_node(
                 lines.push(row);
             }
             let cancel = a.cancel.iter().map(|&(r, c)| (r + 1, c + 1)).collect();
-            Block { lines, baseline: a.baseline + 1, cancel }
+            Block {
+                lines,
+                baseline: a.baseline + 1,
+                cancel,
+            }
         }
 
         Node::Sup { arg } => {
@@ -503,7 +565,11 @@ fn render_node(
             }
             let a = render_row(arg, cur(Field::SupArg), true, ctx);
             let h = a.height();
-            Block { lines: a.lines, baseline: h, cancel: a.cancel }
+            Block {
+                lines: a.lines,
+                baseline: h,
+                cancel: a.cancel,
+            }
         }
 
         Node::Sub { arg } => {
@@ -516,7 +582,11 @@ fn render_node(
             let mut lines = vec![vec![' '; a.width()]];
             lines.extend(a.lines);
             let cancel = a.cancel.iter().map(|&(r, c)| (r + 1, c)).collect();
-            Block { lines, baseline: 0, cancel }
+            Block {
+                lines,
+                baseline: 0,
+                cancel,
+            }
         }
 
         Node::BigOp { base, lower, upper } => {
@@ -552,7 +622,11 @@ fn render_node(
             let cancel = centered_cancel(&u, w, 0)
                 .chain(centered_cancel(&l, w, baseline + 1))
                 .collect();
-            Block { lines, baseline, cancel }
+            Block {
+                lines,
+                baseline,
+                cancel,
+            }
         }
 
         Node::Brace { over, arg, label } => {
@@ -575,7 +649,11 @@ fn render_node(
                 cancel.extend(centered_cancel(&l, w, 0));
                 cancel.extend(centered_cancel(&a, w, a_off));
                 lines.extend(center_pad(&a, w));
-                Block { lines, baseline, cancel }
+                Block {
+                    lines,
+                    baseline,
+                    cancel,
+                }
             } else {
                 let baseline = a.baseline;
                 cancel.extend(centered_cancel(&a, w, 0));
@@ -584,7 +662,11 @@ fn render_node(
                 lines.push(brace);
                 cancel.extend(centered_cancel(&l, w, brace_off + 1));
                 lines.extend(center_pad(&l, w));
-                Block { lines, baseline, cancel }
+                Block {
+                    lines,
+                    baseline,
+                    cancel,
+                }
             }
         }
 
@@ -610,10 +692,19 @@ fn render_node(
             let cancel = centered_cancel(&o, w, 0)
                 .chain(centered_cancel(&u, w, baseline + 1))
                 .collect();
-            Block { lines, baseline, cancel }
+            Block {
+                lines,
+                baseline,
+                cancel,
+            }
         }
 
-        Node::Delim { left, right, mids, segs } => {
+        Node::Delim {
+            left,
+            right,
+            mids,
+            segs,
+        } => {
             // A sole Array segment fuses with the delimiter: the delimiter
             // columns absorb the lattice edges (junction rows show ┠ ┨,
             // column markers ┬ ┴ ride the delimiter's top/bottom rows).
@@ -671,7 +762,11 @@ fn render_node(
                 lines.push(row);
             }
             let cancel = body.cancel.iter().map(|&(r, c)| (r, c + 1)).collect();
-            Block { lines, baseline: body.baseline, cancel }
+            Block {
+                lines,
+                baseline: body.baseline,
+                cancel,
+            }
         }
 
         Node::Cancel { arg } => {
@@ -685,12 +780,14 @@ fn render_node(
                     }
                 }
             }
-            Block { lines: a.lines, baseline: a.baseline, cancel }
+            Block {
+                lines: a.lines,
+                baseline: a.baseline,
+                cancel,
+            }
         }
 
-        Node::Array { rows, cols, cells } => {
-            render_lattice(*rows, *cols, cells, cursor, ctx)
-        }
+        Node::Array { rows, cols, cells } => render_lattice(*rows, *cols, cells, cursor, ctx),
     }
 }
 
@@ -726,7 +823,12 @@ fn render_fused_grid(
         })
         .collect();
     let col_w: Vec<usize> = (0..cols)
-        .map(|j| (0..rows).map(|i| blocks[i * cols + j].width()).max().unwrap_or(1))
+        .map(|j| {
+            (0..rows)
+                .map(|i| blocks[i * cols + j].width())
+                .max()
+                .unwrap_or(1)
+        })
         .collect();
     // Interior: pad cell pad, with a marker column between cells.
     let mut marker_x: Vec<usize> = Vec::new();
@@ -805,7 +907,11 @@ fn render_fused_grid(
         out.push(row);
     }
     let cancel = cancel.into_iter().map(|(r, c)| (r, c + 1)).collect();
-    Block { lines: out, baseline: bl, cancel }
+    Block {
+        lines: out,
+        baseline: bl,
+        cancel,
+    }
 }
 
 fn render_lattice(
@@ -828,7 +934,12 @@ fn render_lattice(
         })
         .collect();
     let col_w: Vec<usize> = (0..cols)
-        .map(|j| (0..rows).map(|i| blocks[i * cols + j].width()).max().unwrap_or(1))
+        .map(|j| {
+            (0..rows)
+                .map(|i| blocks[i * cols + j].width())
+                .max()
+                .unwrap_or(1)
+        })
         .collect();
     // Marker columns at x = 0 and after every cell span (cell + 1 pad on
     // each side).
@@ -837,7 +948,15 @@ fn render_lattice(
         marker_x.push(marker_x.last().unwrap() + w + 3);
     }
     let width = *marker_x.last().unwrap() + 1;
-    let kind = |i: usize, n: usize| if i == 0 { 0 } else if i == n { 2 } else { 1 };
+    let kind = |i: usize, n: usize| {
+        if i == 0 {
+            0
+        } else if i == n {
+            2
+        } else {
+            1
+        }
+    };
     let marker_row = |ri: usize| {
         let mut r = vec![' '; width];
         for (ci, &x) in marker_x.iter().enumerate() {
@@ -872,7 +991,11 @@ fn render_lattice(
         lines.push(marker_row(i + 1));
     }
     let h = lines.len();
-    Block { lines, baseline: (h - 1) / 2, cancel }
+    Block {
+        lines,
+        baseline: (h - 1) / 2,
+        cancel,
+    }
 }
 
 /// One rendered column of a delimiter. `spec` is the delimiter spec char,
@@ -917,7 +1040,11 @@ fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
                 }
             }
             '{' | '}' => {
-                let (top, mid, bot) = if spec == '{' { ('⎧', '⎨', '⎩') } else { ('⎫', '⎬', '⎭') };
+                let (top, mid, bot) = if spec == '{' {
+                    ('⎧', '⎨', '⎩')
+                } else {
+                    ('⎫', '⎬', '⎭')
+                };
                 if r == bl {
                     mid
                 } else if r == 0 {
@@ -975,7 +1102,10 @@ mod tests {
 
     #[test]
     fn fraction_renders_with_bar() {
-        let root = vec![Node::Frac { num: sym_row("1"), den: sym_row("x+1") }];
+        let root = vec![Node::Frac {
+            num: sym_row("1"),
+            den: sym_row("x+1"),
+        }];
         assert_eq!(plain(&root), vec!["  1", "─────", " x+1"]);
     }
 
@@ -997,13 +1127,20 @@ mod tests {
 
     #[test]
     fn bigop_without_limits_is_bare() {
-        let root = vec![Node::BigOp { base: vec![Node::Sym('∫')], lower: vec![], upper: vec![] }];
+        let root = vec![Node::BigOp {
+            base: vec![Node::Sym('∫')],
+            lower: vec![],
+            upper: vec![],
+        }];
         assert_eq!(plain(&root), vec!["∫"]);
     }
 
     #[test]
     fn sqrt_single_line() {
-        let root = vec![Node::Sqrt { arg: sym_row("2"), index: 2 }];
+        let root = vec![Node::Sqrt {
+            arg: sym_row("2"),
+            index: 2,
+        }];
         assert_eq!(plain(&root), vec![" _", "√2"]);
     }
 
@@ -1035,7 +1172,10 @@ mod tests {
             left: '{',
             right: '}',
             mids: vec![],
-            segs: vec![vec![Node::Frac { num: sym_row("1"), den: sym_row("2") }]],
+            segs: vec![vec![Node::Frac {
+                num: sym_row("1"),
+                den: sym_row("2"),
+            }]],
         }];
         assert_eq!(plain(&root), vec!["⎧ 1 ⎫", "⎨───⎬", "⎩ 2 ⎭"]);
         // ⟨x|y⟩ single-line braket.
@@ -1060,10 +1200,7 @@ mod tests {
 
     #[test]
     fn func_renders_upright() {
-        let root = vec![
-            Node::Func("sin".into()),
-            Node::Sym('x'),
-        ];
+        let root = vec![Node::Func("sin".into()), Node::Sym('x')];
         let ctx = RenderCtx::canonical();
         let b = render_row(&root, None, false, &ctx);
         assert_eq!(b.to_text(), "sin𝑥");
@@ -1072,12 +1209,20 @@ mod tests {
     #[test]
     fn bigop_shows_placeholders_while_editing() {
         // Cursor in the (empty) lower limit: both slots must be visible.
-        let root = vec![Node::BigOp { base: vec![Node::Sym('∑')], lower: vec![], upper: vec![] }];
+        let root = vec![Node::BigOp {
+            base: vec![Node::Sym('∑')],
+            lower: vec![],
+            upper: vec![],
+        }];
         let path = [(0, Field::OpLower)];
         let b = render_row(&root, Some((&path, 0)), false, &RenderCtx::canonical());
         let text = b.to_text();
         assert!(text.contains(CURSOR_CHAR), "cursor visible:\n{}", text);
-        assert!(text.contains(PLACEHOLDER), "empty upper slot visible:\n{}", text);
+        assert!(
+            text.contains(PLACEHOLDER),
+            "empty upper slot visible:\n{}",
+            text
+        );
         // Cursor elsewhere: canonical bare operator, no placeholders.
         let plain = render_row(&root, None, false, &RenderCtx::canonical()).to_text();
         assert_eq!(plain, "∑");
@@ -1088,7 +1233,10 @@ mod tests {
         let root = vec![
             Node::Sym('a'),
             Node::Sym('+'),
-            Node::Frac { num: sym_row("1"), den: sym_row("2") },
+            Node::Frac {
+                num: sym_row("1"),
+                den: sym_row("2"),
+            },
         ];
         let lines = plain(&root);
         assert_eq!(lines.len(), 3);

@@ -36,7 +36,11 @@ fn node_to_latex(node: &Node) -> String {
                 format!("\\operatorname{{{}}}", name)
             }
         }
-        Node::Accent { overs, unders, base } => {
+        Node::Accent {
+            overs,
+            unders,
+            base,
+        } => {
             // Canonical nesting: under-marks innermost, then over-marks.
             let mut s = sym_to_latex(*base).trim_end().to_string();
             for &m in unders.iter().chain(overs.iter()) {
@@ -72,7 +76,11 @@ fn node_to_latex(node: &Node) -> String {
             }
         }
         Node::Brace { over, arg, label } => {
-            let (cmd, att) = if *over { ("overbrace", '^') } else { ("underbrace", '_') };
+            let (cmd, att) = if *over {
+                ("overbrace", '^')
+            } else {
+                ("underbrace", '_')
+            };
             let mut s = format!("\\{}{}", cmd, braced(arg));
             if !label.is_empty() {
                 s.push_str(&format!("{}{}", att, braced(label)));
@@ -94,7 +102,12 @@ fn node_to_latex(node: &Node) -> String {
             s.push_str(&braced(over));
             s
         }
-        Node::Delim { left, right, mids, segs } => {
+        Node::Delim {
+            left,
+            right,
+            mids,
+            segs,
+        } => {
             // Single grid seg with a well-known pair -> a matrix environment.
             if mids.is_empty() {
                 if let [seg] = &segs[..] {
@@ -128,7 +141,10 @@ fn node_to_latex(node: &Node) -> String {
             s
         }
         Node::Array { cols, cells, .. } => {
-            format!("\\begin{{matrix}} {} \\end{{matrix}}", array_body(*cols, cells))
+            format!(
+                "\\begin{{matrix}} {} \\end{{matrix}}",
+                array_body(*cols, cells)
+            )
         }
         // Requires \usepackage{cancel}.
         Node::Cancel { arg } => format!("\\cancel{}", braced(arg)),
@@ -163,7 +179,9 @@ mod tests {
     fn serializes_basic_formula() {
         let root = vec![
             Node::Sym('x'),
-            Node::Sup { arg: vec![Node::Sym('2')] },
+            Node::Sup {
+                arg: vec![Node::Sym('2')],
+            },
             Node::Sym('+'),
             Node::Frac {
                 num: vec![Node::Sym('α')],
@@ -187,7 +205,11 @@ mod tests {
     fn serializes_matrix_func_accent() {
         let root = vec![
             Node::Func("sin".into()),
-            Node::Accent { overs: vec!['⇀'], unders: vec![], base: 'v' },
+            Node::Accent {
+                overs: vec!['⇀'],
+                unders: vec![],
+                base: 'v',
+            },
             Node::Delim {
                 left: '[',
                 right: ']',
@@ -198,7 +220,10 @@ mod tests {
                     cells: vec![vec![Node::Sym('a')], vec![Node::Sym('b')]],
                 }]],
             },
-            Node::Sqrt { arg: vec![Node::Sym('x')], index: 3 },
+            Node::Sqrt {
+                arg: vec![Node::Sym('x')],
+                index: 3,
+            },
         ];
         assert_eq!(
             row_to_latex(&root),

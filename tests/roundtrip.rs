@@ -10,10 +10,10 @@
 //! "Three famous mathematical formulas" (Cardano, Cauchy–Schwarz,
 //! Vandermonde determinant).
 
-use mascii::ast::{normalize, strip_spacers, Node, Row};
+use mascii::ast::{Node, Row, normalize, strip_spacers};
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
-use mascii::render::{render_row, RenderCtx};
+use mascii::render::{RenderCtx, render_row};
 use mascii::typst::row_to_typst;
 
 // ----- tiny DSL for building formulas -----
@@ -47,7 +47,12 @@ fn sub(arg: Row) -> Node {
 }
 
 fn delim(left: char, right: char, mids: Vec<char>, segs: Vec<Row>) -> Node {
-    Node::Delim { left, right, mids, segs }
+    Node::Delim {
+        left,
+        right,
+        mids,
+        segs,
+    }
 }
 
 fn paren(inner: Row) -> Node {
@@ -55,7 +60,11 @@ fn paren(inner: Row) -> Node {
 }
 
 fn bigop(op: char, lower: Row, upper: Row) -> Node {
-    Node::BigOp { base: vec![Node::Sym(op)], lower, upper }
+    Node::BigOp {
+        base: vec![Node::Sym(op)],
+        lower,
+        upper,
+    }
 }
 
 fn func(name: &str) -> Node {
@@ -64,9 +73,17 @@ fn func(name: &str) -> Node {
 
 fn acc(accent: char, base: char) -> Node {
     if mascii::symbols::is_under_mark(accent) {
-        Node::Accent { overs: vec![], unders: vec![accent], base }
+        Node::Accent {
+            overs: vec![],
+            unders: vec![accent],
+            base,
+        }
     } else {
-        Node::Accent { overs: vec![accent], unders: vec![], base }
+        Node::Accent {
+            overs: vec![accent],
+            unders: vec![],
+            base,
+        }
     }
 }
 
@@ -97,10 +114,11 @@ fn roundtrip(name: &str, row: &Row) {
     // Formatting spacers survive in the AA but are invisible to the
     // parser, so the roundtrip target is the spacer-free normal form.
     let expected = normalize(&strip_spacers(&row));
-    let parsed = parse(&aa)
-        .unwrap_or_else(|e| panic!("[{}] parse failed: {}\n--- AA ---\n{}", name, e, aa));
+    let parsed =
+        parse(&aa).unwrap_or_else(|e| panic!("[{}] parse failed: {}\n--- AA ---\n{}", name, e, aa));
     assert_eq!(
-        parsed, expected,
+        parsed,
+        expected,
         "[{}] AST mismatch\n--- AA ---\n{}\n--- LaTeX (expected) ---\n{}\n--- LaTeX (parsed) ---\n{}",
         name,
         aa,
@@ -146,12 +164,7 @@ fn cardano_formula() {
             n(discriminant.clone()),
         ])
     };
-    let row = cat(&[
-        s("t="),
-        n(cbrt(half_q("-"))),
-        s("+"),
-        n(cbrt(half_q(""))),
-    ]);
+    let row = cat(&[s("t="), n(cbrt(half_q("-"))), s("+"), n(cbrt(half_q("")))]);
     roundtrip("cardano", &row);
 }
 
@@ -160,7 +173,12 @@ fn cardano_formula() {
 /// the original corpus entry; |·| delimiters exist too — see \abs.)
 #[test]
 fn cauchy_schwarz_inequality() {
-    let sum = |body: Row| n(bigop('∑', s("k=1"), s("n"))).into_iter().chain(body).collect::<Row>();
+    let sum = |body: Row| {
+        n(bigop('∑', s("k=1"), s("n")))
+            .into_iter()
+            .chain(body)
+            .collect::<Row>()
+    };
     let row = cat(&[
         n(paren(sum(cat(&[
             s("u"),
@@ -190,10 +208,26 @@ fn vandermonde_determinant() {
         4,
         5,
         vec![
-            s("1"), x("1", None), x("1", Some("2")), s("⋯"), x("1", Some("n-1")),
-            s("1"), x("2", None), x("2", Some("2")), s("⋯"), x("2", Some("n-1")),
-            s("⋮"), s("⋮"), s("⋮"), s("⋱"), s("⋮"),
-            s("1"), x("n", None), x("n", Some("2")), s("⋯"), x("n", Some("n-1")),
+            s("1"),
+            x("1", None),
+            x("1", Some("2")),
+            s("⋯"),
+            x("1", Some("n-1")),
+            s("1"),
+            x("2", None),
+            x("2", Some("2")),
+            s("⋯"),
+            x("2", Some("n-1")),
+            s("⋮"),
+            s("⋮"),
+            s("⋮"),
+            s("⋱"),
+            s("⋮"),
+            s("1"),
+            x("n", None),
+            x("n", Some("2")),
+            s("⋯"),
+            x("n", Some("n-1")),
         ],
     );
     let row = cat(&[
@@ -290,10 +324,7 @@ fn normal_pdf() {
         s("f"),
         n(paren(s("x"))),
         s("="),
-        n(frac(
-            s("1"),
-            n(sqrt(cat(&[s("2πσ"), n(sup(s("2")))]))),
-        )),
+        n(frac(s("1"), n(sqrt(cat(&[s("2πσ"), n(sup(s("2")))]))))),
         s("e"),
         n(sup(cat(&[
             s("-"),
@@ -325,11 +356,7 @@ fn variance() {
 #[test]
 fn bayes_theorem() {
     let p = |arg: &str| cat(&[s("P"), n(paren(s(arg)))]);
-    let row = cat(&[
-        p("A|B"),
-        s("="),
-        n(frac(cat(&[p("B|A"), p("A")]), p("B"))),
-    ]);
+    let row = cat(&[p("A|B"), s("="), n(frac(cat(&[p("B|A"), p("A")]), p("B")))]);
     roundtrip("bayes", &row);
 }
 
@@ -389,10 +416,7 @@ fn nested_matrices() {
 fn cancel_strikes() {
     // x·y/y = x with the y's cancelled
     let row = cat(&[
-        n(frac(
-            cat(&[s("x"), n(cancel(s("y")))]),
-            n(cancel(s("y"))),
-        )),
+        n(frac(cat(&[s("x"), n(cancel(s("y")))]), n(cancel(s("y"))))),
         s("="),
         s("x"),
     ]);
@@ -405,10 +429,7 @@ fn cancel_strikes() {
     ]);
     roundtrip("cancel-frac", &row);
     // cancel inside a superscript
-    let row = cat(&[
-        s("e"),
-        n(sup(cat(&[s("x"), n(cancel(s("2α")))]))),
-    ]);
+    let row = cat(&[s("e"), n(sup(cat(&[s("x"), n(cancel(s("2α")))])))]);
     roundtrip("cancel-in-sup", &row);
 }
 
@@ -418,14 +439,16 @@ fn cancel_strikes() {
 fn delimiter_blocks() {
     // |−x| = |x|
     let abs = |r: Row| delim('|', '|', vec![], vec![r]);
-    roundtrip(
-        "abs",
-        &cat(&[n(abs(s("-x"))), s("="), n(abs(s("x")))]),
-    );
+    roundtrip("abs", &cat(&[n(abs(s("-x"))), s("="), n(abs(s("x")))]));
     // ⟨ψ|H|ψ⟩ (two mids)
     roundtrip(
         "braket",
-        &n(delim('⟨', '⟩', vec!['|', '|'], vec![s("ψ"), s("H"), s("ψ")])),
+        &n(delim(
+            '⟨',
+            '⟩',
+            vec!['|', '|'],
+            vec![s("ψ"), s("H"), s("ψ")],
+        )),
     );
     // {x | x² > 0} with a tall member
     roundtrip(
@@ -434,7 +457,10 @@ fn delimiter_blocks() {
             '{',
             '}',
             vec!['|'],
-            vec![s("x"), cat(&[s("x"), n(sup(s("2"))), s(">"), n(frac(s("1"), s("2")))])],
+            vec![
+                s("x"),
+                cat(&[s("x"), n(sup(s("2"))), s(">"), n(frac(s("1"), s("2")))]),
+            ],
         )),
     );
     // cases: |x| = { x (x≥0) / −x (x<0)
@@ -472,11 +498,21 @@ fn delimiter_blocks() {
     // Explicit ▏ ▕ null pair still available via \delim..
     roundtrip(
         "null-delim-grid",
-        &n(delim('.', '.', vec![], vec![n(array(2, 2, vec![s("a"), s("b"), s("c"), s("d")]))])),
+        &n(delim(
+            '.',
+            '.',
+            vec![],
+            vec![n(array(2, 2, vec![s("a"), s("b"), s("c"), s("d")]))],
+        )),
     );
     roundtrip(
         "pmatrix",
-        &n(delim('(', ')', vec![], vec![n(array(1, 2, vec![s("a+b"), s("c")]))])),
+        &n(delim(
+            '(',
+            ')',
+            vec![],
+            vec![n(array(1, 2, vec![s("a+b"), s("c")]))],
+        )),
     );
     // Mismatched pair (half-open interval) and nested delimiters.
     roundtrip("interval", &n(delim('(', ']', vec![], vec![s("0,1")])));
@@ -523,7 +559,11 @@ fn braces_over_under() {
         &cat(&[
             s("x"),
             s("<"),
-            n(brace(true, cat(&[n(frac(s("1"), s("2"))), s("+y")]), vec![])),
+            n(brace(
+                true,
+                cat(&[n(frac(s("1"), s("2"))), s("+y")]),
+                vec![],
+            )),
         ]),
     );
 }
@@ -538,7 +578,10 @@ fn text_runs() {
             n(bigop('∫', vec![], vec![])),
             s("f"),
             n(paren(s("x"))),
-            n(Node::Text { t: "dx".into(), math: true }),
+            n(Node::Text {
+                t: "dx".into(),
+                math: true,
+            }),
         ]),
     );
     roundtrip(
@@ -550,7 +593,15 @@ fn text_runs() {
             vec![n(array(
                 2,
                 2,
-                vec![s("x"), s("x≥0"), s("-x"), n(Node::Text { t: "other wise".into(), math: false })],
+                vec![
+                    s("x"),
+                    s("x≥0"),
+                    s("-x"),
+                    n(Node::Text {
+                        t: "other wise".into(),
+                        math: false,
+                    }),
+                ],
             ))],
         )),
     );
@@ -596,14 +647,26 @@ fn labeled_arrows() {
 fn stacked_accents() {
     // \hat{\vec{a}} and a bar over an underlined x.
     let row = cat(&[
-        n(Node::Accent { overs: vec!['⇀', '^'], unders: vec![], base: 'a' }),
+        n(Node::Accent {
+            overs: vec!['⇀', '^'],
+            unders: vec![],
+            base: 'a',
+        }),
         s("+"),
-        n(Node::Accent { overs: vec!['¯'], unders: vec!['‗'], base: 'x' }),
+        n(Node::Accent {
+            overs: vec!['¯'],
+            unders: vec!['‗'],
+            base: 'x',
+        }),
     ]);
     roundtrip("stacked-accents", &row);
     // Triple stack next to a fraction (baseline stripping goes deep).
     let row = cat(&[
-        n(Node::Accent { overs: vec!['˙', '¯', '^'], unders: vec![], base: 'v' }),
+        n(Node::Accent {
+            overs: vec!['˙', '¯', '^'],
+            unders: vec![],
+            base: 'v',
+        }),
         n(frac(s("1"), s("2"))),
     ]);
     roundtrip("triple-accent", &row);
@@ -670,7 +733,11 @@ fn limit_functions() {
     ]);
     roundtrip("argmax", &row);
     // Empty-limit bands normalize away: base splices into the row.
-    let row = vec![Node::BigOp { base: vec![Node::Sym('∮')], lower: vec![], upper: vec![] }];
+    let row = vec![Node::BigOp {
+        base: vec![Node::Sym('∮')],
+        lower: vec![],
+        upper: vec![],
+    }];
     roundtrip("bare-op", &row);
 }
 
@@ -680,7 +747,12 @@ fn nested_limits() {
     let row = cat(&[
         n(bigop(
             '∑',
-            cat(&[s("i∈"), n(bigop('⋃', s("k"), vec![])), s("S"), n(sub(s("k")))]),
+            cat(&[
+                s("i∈"),
+                n(bigop('⋃', s("k"), vec![])),
+                s("S"),
+                n(sub(s("k"))),
+            ]),
             n(frac(s("n"), s("2"))),
         )),
         s("a"),
@@ -726,8 +798,8 @@ impl Rng {
 }
 
 const ATOMS: &[char] = &[
-    'a', 'b', 'c', 'x', 'y', 'z', 'A', 'B', 'N', '0', '1', '2', '7', '+',
-    '-', '=', '<', 'α', 'β', 'π', 'λ', '∞', '∂', '⋅', '±', '∈', '→', '␣', '~', '\'',
+    'a', 'b', 'c', 'x', 'y', 'z', 'A', 'B', 'N', '0', '1', '2', '7', '+', '-', '=', '<', 'α', 'β',
+    'π', 'λ', '∞', '∂', '⋅', '±', '∈', '→', '␣', '~', '\'',
 ];
 
 fn gen_row(rng: &mut Rng, depth: usize, max_len: usize) -> Row {
@@ -747,9 +819,17 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
                 let (mut overs, mut unders) = (vec![], vec![]);
                 for _ in 0..1 + rng.below(2) {
                     let m = marks[rng.below(marks.len())];
-                    if m == '‗' { unders.push(m) } else { overs.push(m) }
+                    if m == '‗' {
+                        unders.push(m)
+                    } else {
+                        overs.push(m)
+                    }
                 }
-                Node::Accent { overs, unders, base }
+                Node::Accent {
+                    overs,
+                    unders,
+                    base,
+                }
             }
             2 => Node::Spacer,
             _ => Node::Sym(ATOMS[rng.below(ATOMS.len())]),
@@ -757,10 +837,20 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
     }
     let d = depth - 1;
     match rng.below(13) {
-        0 => Node::Frac { num: gen_row(rng, d, 3), den: gen_row(rng, d, 3) },
-        1 => Node::Sqrt { arg: gen_row(rng, d, 3), index: [2, 2, 3, 4][rng.below(4)] },
-        2 => Node::Sup { arg: gen_row(rng, d, 2) },
-        3 => Node::Sub { arg: gen_row(rng, d, 2) },
+        0 => Node::Frac {
+            num: gen_row(rng, d, 3),
+            den: gen_row(rng, d, 3),
+        },
+        1 => Node::Sqrt {
+            arg: gen_row(rng, d, 3),
+            index: [2, 2, 3, 4][rng.below(4)],
+        },
+        2 => Node::Sup {
+            arg: gen_row(rng, d, 2),
+        },
+        3 => Node::Sub {
+            arg: gen_row(rng, d, 2),
+        },
         4 => {
             let base: Row = match rng.below(4) {
                 0 => vec![Node::Func("lim".into())],
@@ -768,7 +858,11 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
                 2 => vec![Node::Func("arg".into()), Node::Func("max".into())],
                 _ => vec![Node::Sym(['∑', '∏', '∫', '⋃'][rng.below(4)])],
             };
-            Node::BigOp { base, lower: gen_row(rng, d, 3), upper: gen_row(rng, d, 2) }
+            Node::BigOp {
+                base,
+                lower: gen_row(rng, d, 3),
+                upper: gen_row(rng, d, 2),
+            }
         }
         5 => {
             // Random delimiter block: any pair (mismatched allowed), with
@@ -786,9 +880,16 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             let (l, r) = pairs[rng.below(pairs.len())];
             let nsegs = 1 + rng.below(2); // 1 or 2 segs
             let segs = (0..nsegs).map(|_| gen_row(rng, d, 3)).collect::<Vec<_>>();
-            Node::Delim { left: l, right: r, mids: vec!['|'; nsegs - 1], segs }
+            Node::Delim {
+                left: l,
+                right: r,
+                mids: vec!['|'; nsegs - 1],
+                segs,
+            }
         }
-        7 => Node::Cancel { arg: gen_row(rng, d, 3) },
+        7 => Node::Cancel {
+            arg: gen_row(rng, d, 3),
+        },
         6 => {
             // Grid inside a random known pair (bracket matrix most often).
             let pairs = [('[', ']'), ('[', ']'), ('(', ')'), ('.', '.'), ('{', '.')];
@@ -810,7 +911,10 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
         }
         10 => {
             let t = ["dx", "if", "abc", "T", "if x", "sin", "d"][rng.below(7)];
-            Node::Text { t: t.into(), math: rng.below(2) == 0 }
+            Node::Text {
+                t: t.into(),
+                math: rng.below(2) == 0,
+            }
         }
         11 => Node::Brace {
             over: rng.below(2) == 0,

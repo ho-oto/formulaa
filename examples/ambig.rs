@@ -7,7 +7,7 @@
 
 use mascii::ast::{Node, Row};
 use mascii::parse::parse;
-use mascii::render::{render_row, RenderCtx};
+use mascii::render::{RenderCtx, render_row};
 
 fn syms(s: &str) -> Row {
     s.chars().map(Node::Sym).collect()
@@ -28,13 +28,21 @@ fn main() {
     let ast1 = vec![Node::BigOp {
         base: vec![Node::Sym('∑')],
         lower: syms("n=1"),
-        upper: vec![Node::BigOp { base: vec![Node::Sym('∫')], lower: vec![], upper: vec![] }],
+        upper: vec![Node::BigOp {
+            base: vec![Node::Sym('∫')],
+            lower: vec![],
+            upper: vec![],
+        }],
     }];
 
     // AST 2: integral whose LOWER limit is a sum with lower limit n=1
     let ast2 = vec![Node::BigOp {
         base: vec![Node::Sym('∫')],
-        lower: vec![Node::BigOp { base: vec![Node::Sym('∑')], lower: syms("n=1"), upper: vec![] }],
+        lower: vec![Node::BigOp {
+            base: vec![Node::Sym('∑')],
+            lower: syms("n=1"),
+            upper: vec![],
+        }],
         upper: vec![],
     }];
 

@@ -1,19 +1,19 @@
 use std::fs;
 
+use ratatui::Frame;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block as UiBlock, Borders, Paragraph};
-use ratatui::Frame;
 
-use mascii::render::{render_row, RenderCtx, CURSOR_CHAR};
-use mascii::parse::RegionSpan;
 use mascii::editor::{
     Editor, HL_CLOSE_BASE, HL_LEVELS, HL_OPEN_BASE, JUMP_CHAR_BASE, JUMP_LABELS, SEL_CLOSE,
     SEL_OPEN,
 };
 use mascii::input::{Effect, Key};
+use mascii::parse::RegionSpan;
+use mascii::render::{CURSOR_CHAR, RenderCtx, render_row};
 use mascii::{ast, latex, parse, typst};
 
 const HELP: &str = "\\cmd  ^/_ ( ) insets  Tab exit  Space blank  Enter grid row  ←→↑↓ move  ⇧←→ select  ^G jump  ^B blocks  ^O structure  ^T italic  ^Y copy AA  ^S save  ^Q quit";
@@ -38,7 +38,10 @@ fn main() -> std::io::Result<()> {
         }
         _ => {}
     }
-    let save_path = args.first().cloned().unwrap_or_else(|| "formula.tex".into());
+    let save_path = args
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "formula.tex".into());
     let mut terminal = ratatui::init();
     let mut ed = Editor::new();
     ed.message = format!("mascii — LyX-like math editor (saves to {})", save_path);
@@ -177,7 +180,11 @@ fn write_report(
     let _ = writeln!(report, "mascii roundtrip failure report");
     let _ = writeln!(report, "kind: {}", kind);
     let _ = writeln!(report, "\n--- canonical AA (fed to parse) ---\n{}", aa);
-    let _ = writeln!(report, "\n--- expected AST (normalized editor content) ---\n{:#?}", expected);
+    let _ = writeln!(
+        report,
+        "\n--- expected AST (normalized editor content) ---\n{:#?}",
+        expected
+    );
     match parsed {
         Some(p) => {
             let _ = writeln!(report, "\n--- parsed AST ---\n{:#?}", p);
@@ -186,12 +193,20 @@ fn write_report(
                 "\n--- re-rendered AA from parsed ---\n{}",
                 render_row(p, None, false, &RenderCtx::canonical()).to_text()
             );
-            let _ = writeln!(report, "\n--- LaTeX expected ---\n{}", latex::row_to_latex(expected));
+            let _ = writeln!(
+                report,
+                "\n--- LaTeX expected ---\n{}",
+                latex::row_to_latex(expected)
+            );
             let _ = writeln!(report, "\n--- LaTeX parsed ---\n{}", latex::row_to_latex(p));
         }
         None => {
             let _ = writeln!(report, "\n--- parsed AST ---\n(parse failed)");
-            let _ = writeln!(report, "\n--- LaTeX expected ---\n{}", latex::row_to_latex(expected));
+            let _ = writeln!(
+                report,
+                "\n--- LaTeX expected ---\n{}",
+                latex::row_to_latex(expected)
+            );
         }
     }
     fs::write(&path, report)?;
@@ -199,12 +214,7 @@ fn write_report(
 }
 
 /// Returns true when the app should quit.
-fn handle_key(
-    ed: &mut Editor,
-    code: KeyCode,
-    mods: KeyModifiers,
-    save_path: &str,
-) -> bool {
+fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers, save_path: &str) -> bool {
     // F-keys kept as terminal-specific aliases (^T/^B/^O are often
     // captured by the terminal or OS).
     let key = match code {
@@ -286,7 +296,9 @@ fn draw(f: &mut Frame, ed: &Editor) {
         Some(buf) => Line::from(vec![
             Span::styled(
                 format!(" \\{}", buf),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("▌", Style::default().fg(Color::Yellow)),
             Span::styled(
@@ -384,8 +396,7 @@ fn decorate_line(line: &str) -> Vec<Span<'static>> {
             // Explicit space atom: keep visible but unobtrusive.
             flush(&mut buf, &mut spans);
             spans.push(Span::styled("␣", Style::default().fg(Color::DarkGray)));
-        } else if (JUMP_CHAR_BASE..JUMP_CHAR_BASE + JUMP_LABELS.chars().count() as u32)
-            .contains(&u)
+        } else if (JUMP_CHAR_BASE..JUMP_CHAR_BASE + JUMP_LABELS.chars().count() as u32).contains(&u)
         {
             let label = JUMP_LABELS
                 .chars()
@@ -414,7 +425,9 @@ fn decorate_line(line: &str) -> Vec<Span<'static>> {
             flush(&mut buf, &mut spans);
             spans.push(Span::styled(
                 glyph.to_string(),
-                Style::default().fg(HL_COLORS[level]).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(HL_COLORS[level])
+                    .add_modifier(Modifier::BOLD),
             ));
         } else {
             buf.push(c);
