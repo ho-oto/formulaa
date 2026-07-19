@@ -45,7 +45,9 @@ impl Editor {
             match key {
                 Key::Char(c) if !ctrl => self.jump_to(c),
                 _ => {
-                    self.jump = None;
+                    if let Some(targets) = self.jump.take() {
+                        self.keep_ghosts(&targets);
+                    }
                     self.message.clear();
                 }
             }
@@ -88,6 +90,11 @@ impl Editor {
             return Effect::None;
         }
 
+        // Ghost slots survive only until the next real input; ^G itself
+        // re-labels the identical picture.
+        if !(ctrl && key == Key::Char('g')) {
+            self.ghost.clear();
+        }
         if ctrl {
             match key {
                 Key::Char('q') => return Effect::Quit,

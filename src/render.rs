@@ -54,6 +54,27 @@ pub struct Block {
     /// Cells struck through by \cancel, as (row, col). Emitted as a
     /// combining long solidus (U+0338) after the cell char in text output.
     pub cancel: Vec<(usize, usize)>,
+    /// Editing caret cell (row, col): the glyph right of the insertion
+    /// point. Zero-width metadata — the caret never occupies a column,
+    /// so the layout is identical to the cursor-less render. None in
+    /// canonical output (cursor = None).
+    pub caret: Option<(usize, usize)>,
+    /// Display markers (row, col, char): jump/block labels, selection
+    /// and block-end marks. Like the caret they are zero-width — the
+    /// marker atoms the editor inserts render as empty blocks carrying
+    /// these annotations, so decorations never move the layout. Always
+    /// empty in canonical output.
+    pub marks: Vec<(usize, usize, char)>,
+}
+
+/// Private-use characters the editor uses for display decorations.
+pub fn is_display_marker(c: char) -> bool {
+    (0xE000..=0xE0FF).contains(&(c as u32))
+}
+
+/// A display-marker atom (zero-width; transparent to layout decisions).
+fn is_marker_node(n: &Node) -> bool {
+    matches!(n, Node::Sym(c) if is_display_marker(*c))
 }
 
 impl Block {
@@ -62,7 +83,20 @@ impl Block {
             lines,
             baseline,
             cancel: vec![],
+            caret: None,
+            marks: vec![],
         }
+    }
+
+    fn with_caret(mut self, r: usize, c: usize) -> Self {
+        self.caret = Some((r, c));
+        self
+    }
+
+    /// A zero-width caret marker: contributes no cells, only an
+    /// insertion-point position to `hcat`.
+    fn caret_marker() -> Self {
+        Block::empty().with_caret(0, 0)
     }
 
     pub fn empty() -> Self {
@@ -122,9 +156,24 @@ impl Block {
 
 /// Horizontally concatenate blocks, aligning baselines.
 fn hcat(blocks: &[Block]) -> Block {
-    let blocks: Vec<&Block> = blocks.iter().filter(|b| !b.is_empty()).collect();
+    let blocks: Vec<&Block> = blocks
+        .iter()
+        .filter(|b| !b.is_empty() || b.caret.is_some() || !b.marks.is_empty())
+        .collect();
     if blocks.is_empty() {
         return Block::empty();
+    }
+    if blocks.iter().all(|b| b.is_empty()) {
+        // Only zero-width annotations: collect them at the origin.
+        let mut out = Block::empty();
+        for b in &blocks {
+            if b.caret.is_some() {
+                out.caret = Some((0, 0));
+            }
+            out.marks
+                .extend(b.marks.iter().map(|&(_, _, ch)| (0, 0, ch)));
+        }
+        return out;
     }
     let above = blocks.iter().map(|b| b.baseline).max().unwrap();
     let below = blocks
@@ -136,6 +185,8 @@ fn hcat(blocks: &[Block]) -> Block {
     let width: usize = blocks.iter().map(|b| b.width()).sum();
     let mut grid = vec![vec![' '; width]; height];
     let mut cancel = Vec::new();
+    let mut caret = None;
+    let mut marks = Vec::new();
     let mut x = 0;
     for b in blocks {
         let y0 = above - b.baseline;
@@ -145,12 +196,29 @@ fn hcat(blocks: &[Block]) -> Block {
             }
         }
         cancel.extend(b.cancel.iter().map(|&(r, c)| (y0 + r, x + c)));
+        if let Some((r, c)) = b.caret {
+            caret = Some(if b.is_empty() {
+                // Zero-width marker: caret at this x, on the baseline.
+                (above, x)
+            } else {
+                (y0 + r, x + c)
+            });
+        }
+        marks.extend(b.marks.iter().map(|&(r, c, ch)| {
+            if b.is_empty() {
+                (above, x, ch)
+            } else {
+                (y0 + r, x + c, ch)
+            }
+        }));
         x += b.width();
     }
     Block {
         lines: grid,
         baseline: above,
         cancel,
+        caret,
+        marks,
     }
 }
 
@@ -162,6 +230,24 @@ fn centered_cancel(
 ) -> impl Iterator<Item = (usize, usize)> + '_ {
     let left = (width - b.width()) / 2;
     b.cancel.iter().map(move |&(r, c)| (r + row_off, c + left))
+}
+
+/// Marks of a child centered into `width` at vertical offset.
+fn centered_marks(
+    b: &Block,
+    width: usize,
+    row_off: usize,
+) -> impl Iterator<Item = (usize, usize, char)> + '_ {
+    let left = (width - b.width()) / 2;
+    b.marks
+        .iter()
+        .map(move |&(r, c, ch)| (r + row_off, c + left, ch))
+}
+
+/// Caret of a child centered into `width` at vertical offset.
+fn centered_caret(b: &Block, width: usize, row_off: usize) -> Option<(usize, usize)> {
+    let left = (width - b.width()) / 2;
+    b.caret.map(|(r, c)| (r + row_off, c + left))
 }
 
 /// Pad every line of `b` to `width`, centered.
@@ -297,12 +383,17 @@ pub fn unsubscript_char(c: char) -> Option<char> {
 
 /// If every node in `row` is a plain char with an inline script equivalent,
 /// return the converted chars.
+/// Inline (superscript/subscript codepoint) form of a script row. A
+/// display marker inside the row forces the 2D form — labels overlaid
+/// on the tiny ¹²³ glyphs are unreadable, so a marked script expands
+/// while the marks are alive (jump mode and its ghosts).
 fn inline_script(row: &Row, map: fn(char) -> Option<char>) -> Option<Vec<char>> {
     if row.is_empty() {
         return None;
     }
     row.iter()
         .map(|n| match n {
+            Node::Sym(c) if is_display_marker(*c) => None,
             Node::Sym(c) => map(*c),
             _ => None,
         })
@@ -341,12 +432,25 @@ pub fn render_row(
         _ => None,
     };
 
-    if row.is_empty() {
-        return match (cursor_col, placeholder) {
-            (Some(_), _) => Block::from_chars(vec![CURSOR_CHAR]),
-            (None, true) => Block::from_chars(vec![ctx.placeholder()]),
-            (None, false) => Block::empty(),
+    // Display-marker atoms are zero-width annotations; a row holding
+    // only markers lays out like the empty row it decorates — except
+    // that a marked slot materializes as ⬚ so its label/ghost has a
+    // cell to sit on (that is how ^G reaches the invisible limits of a
+    // bare ∑).
+    if row.iter().all(is_marker_node) {
+        let mut b = match (cursor_col, placeholder, row.is_empty()) {
+            // Caret on the placeholder cell; the geometry matches the
+            // cursor-less render.
+            (Some(_), _, _) => Block::from_chars(vec![ctx.placeholder()]).with_caret(0, 0),
+            (None, true, _) | (None, false, false) => Block::from_chars(vec![ctx.placeholder()]),
+            (None, false, true) => Block::empty(),
         };
+        for n in row {
+            if let Node::Sym(c) = n {
+                b.marks.push((0, 0, *c));
+            }
+        }
+        return b;
     }
 
     // Per-block info driving the spacer rules below.
@@ -355,6 +459,8 @@ pub fn render_row(
         script: bool,
         script_2d: bool,
         cancel: bool,
+        /// Zero-width display annotation: invisible to the fuse rules.
+        marker: bool,
     }
 
     let mut blocks: Vec<(Block, Info)> = Vec::with_capacity(row.len() + 1);
@@ -367,6 +473,7 @@ pub fn render_row(
             None => None,
         };
         let info = Info {
+            marker: is_marker_node(node),
             script: matches!(node, Node::Sup { .. } | Node::Sub { .. }),
             script_2d: match node {
                 Node::Sup { arg } => {
@@ -381,14 +488,25 @@ pub fn render_row(
         };
         let mut block = render_node(node, child_cursor, ctx);
         // A script at the start of a row gets an explicit ⬚ base, so the
-        // picture differs from the row without the script wrapper.
-        if i == 0 && info.script {
+        // picture differs from the row without the script wrapper
+        // (markers are invisible to "start of a row").
+        let first_real = row.iter().position(|n| !is_marker_node(n)).unwrap_or(0);
+        if i == first_real && info.script {
             block = hcat(&[Block::from_chars(vec![ctx.placeholder()]), block]);
         }
         blocks.push((block, info));
     }
     if let Some(col) = cursor_col {
-        blocks.insert(col, (Block::from_chars(vec![CURSOR_CHAR]), Info::default()));
+        blocks.insert(
+            col,
+            (
+                Block::caret_marker(),
+                Info {
+                    marker: true,
+                    ..Info::default()
+                },
+            ),
+        );
     }
 
     // Single-space separators between siblings, inserted only where
@@ -404,10 +522,18 @@ pub fn render_row(
     // anchor (⬚), or the strike scan would fuse raised content.
     let mut spaced: Vec<Block> = Vec::with_capacity(blocks.len() * 2);
     let mut prev: Option<Info> = None;
+    let mut last_edge: Option<char> = None;
     for (block, info) in blocks {
-        let need = match (prev, &spaced.last()) {
-            (Some(p), Some(last)) => {
-                let edges = (last.baseline_edge(false), block.baseline_edge(true));
+        // Zero-width annotations pass through without touching the
+        // neighbour bookkeeping (the fuse rules must behave exactly as
+        // in the undecorated render).
+        if info.marker {
+            spaced.push(block);
+            continue;
+        }
+        let need = match prev {
+            Some(p) => {
+                let edges = (last_edge, block.baseline_edge(true));
                 let fuse = match edges {
                     (Some(a), Some(b)) => {
                         // A band edge fuses with *anything* adjacent (the
@@ -430,7 +556,7 @@ pub fn render_row(
                     }
                     _ => false,
                 };
-                let ragged_cancel = p.cancel && last.baseline_edge(false) == Some(' ');
+                let ragged_cancel = p.cancel && last_edge == Some(' ');
                 fuse || ragged_cancel
             }
             _ => false,
@@ -441,8 +567,10 @@ pub fn render_row(
         } else if need {
             spaced.push(Block::from_chars(vec![' ']));
         }
+        let edge = block.baseline_edge(false);
         spaced.push(block);
         prev = Some(info);
+        last_edge = edge;
     }
     hcat(&spaced)
 }
@@ -464,6 +592,13 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
         Node::Spacer => Block::from_chars(vec![' ']),
         // No automatic spacing anywhere (operators included): spacing is
         // the user's, via formatting Spacers or the semantic ␣ atom.
+        // Display markers (jump/block labels, selection ends) are
+        // zero-width annotations: no cells, only a position.
+        Node::Sym(c) if is_display_marker(*c) => {
+            let mut b = Block::empty();
+            b.marks.push((0, 0, *c));
+            b
+        }
         Node::Sym(c) => Block::from_chars(vec![display_char(*c, ctx)]),
 
         // Upright letters are reserved for function names (plain letters
@@ -521,6 +656,10 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 lines,
                 baseline,
                 cancel,
+                caret: centered_caret(&n, w, 0).or(centered_caret(&d, w, baseline + 1)),
+                marks: centered_marks(&n, w, 0)
+                    .chain(centered_marks(&d, w, baseline + 1))
+                    .collect(),
             }
         }
 
@@ -554,6 +693,12 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 lines,
                 baseline: a.baseline + 1,
                 cancel,
+                caret: a.caret.map(|(r, c)| (r + 1, c + 1)),
+                marks: a
+                    .marks
+                    .iter()
+                    .map(|&(r, c, ch)| (r + 1, c + 1, ch))
+                    .collect(),
             }
         }
 
@@ -569,6 +714,8 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 lines: a.lines,
                 baseline: h,
                 cancel: a.cancel,
+                caret: a.caret,
+                marks: a.marks,
             }
         }
 
@@ -586,6 +733,8 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 lines,
                 baseline: 0,
                 cancel,
+                caret: a.caret.map(|(r, c)| (r + 1, c)),
+                marks: a.marks.iter().map(|&(r, c, ch)| (r + 1, c, ch)).collect(),
             }
         }
 
@@ -626,6 +775,10 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 lines,
                 baseline,
                 cancel,
+                caret: centered_caret(&u, w, 0).or(centered_caret(&l, w, baseline + 1)),
+                marks: centered_marks(&u, w, 0)
+                    .chain(centered_marks(&l, w, baseline + 1))
+                    .collect(),
             }
         }
 
@@ -653,6 +806,10 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                     lines,
                     baseline,
                     cancel,
+                    caret: centered_caret(&l, w, 0).or(centered_caret(&a, w, a_off)),
+                    marks: centered_marks(&l, w, 0)
+                        .chain(centered_marks(&a, w, a_off))
+                        .collect(),
                 }
             } else {
                 let baseline = a.baseline;
@@ -666,6 +823,10 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                     lines,
                     baseline,
                     cancel,
+                    caret: centered_caret(&a, w, 0).or(centered_caret(&l, w, brace_off + 1)),
+                    marks: centered_marks(&a, w, 0)
+                        .chain(centered_marks(&l, w, brace_off + 1))
+                        .collect(),
                 }
             }
         }
@@ -696,6 +857,10 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 lines,
                 baseline,
                 cancel,
+                caret: centered_caret(&o, w, 0).or(centered_caret(&u, w, baseline + 1)),
+                marks: centered_marks(&o, w, 0)
+                    .chain(centered_marks(&u, w, baseline + 1))
+                    .collect(),
             }
         }
 
@@ -714,18 +879,33 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 && *left != '⟨'
                 && *right != '⟩'
                 && let [seg] = &segs[..]
-                && let [Node::Array { rows, cols, cells }] = &seg[..]
+                // Display markers are transparent: a labeled sole-Array
+                // segment still fuses (the label overlays a cell).
+                && let [Node::Array { rows, cols, cells }] =
+                    &seg.iter().filter(|n| !is_marker_node(n)).collect::<Vec<_>>()[..]
             {
+                let ai = seg.iter().position(|n| !is_marker_node(n)).unwrap_or(0);
                 let seg_cursor = cur(Field::Seg(0));
                 let acur = match seg_cursor {
                     Some((path, c)) => match path.first() {
-                        Some(&(0, f)) => Some((f, (&path[1..], c))),
+                        Some(&(i, f)) if i == ai => Some((f, (&path[1..], c))),
                         _ => None,
                     },
                     None => None,
                 };
                 if !matches!(seg_cursor, Some(([], _))) {
-                    return render_fused_grid(*left, *right, *rows, *cols, cells, acur, ctx);
+                    let mut b = render_fused_grid(*left, *right, *rows, *cols, cells, acur, ctx);
+                    // Seg-row markers overlay the delimiter columns.
+                    let (bl, w) = (b.baseline, b.width());
+                    for (i, n) in seg.iter().enumerate() {
+                        if let Node::Sym(c) = n
+                            && is_display_marker(*c)
+                        {
+                            let x = if i < ai { 0 } else { w.saturating_sub(1) };
+                            b.marks.push((bl, x, *c));
+                        }
+                    }
+                    return b;
                 }
             }
             // Segments render as ordinary rows (an Array node inside is a
@@ -765,6 +945,12 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 lines,
                 baseline: body.baseline,
                 cancel,
+                caret: body.caret.map(|(r, c)| (r, c + 1)),
+                marks: body
+                    .marks
+                    .iter()
+                    .map(|&(r, c, ch)| (r, c + 1, ch))
+                    .collect(),
             }
         }
 
@@ -783,6 +969,8 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 lines: a.lines,
                 baseline: a.baseline,
                 cancel,
+                caret: a.caret,
+                marks: a.marks,
             }
         }
 
@@ -851,6 +1039,8 @@ fn render_fused_grid(
     let one_row = rows == 1;
     let mut lines: Vec<Vec<char>> = Vec::new();
     let mut cancel: Vec<(usize, usize)> = Vec::new();
+    let mut caret: Option<(usize, usize)> = None;
+    let mut marks: Vec<(usize, usize, char)> = Vec::new();
     let mut sep_rows: Vec<usize> = Vec::new();
     if one_row {
         lines.push(edge_row('┬'));
@@ -871,12 +1061,23 @@ fn render_fused_grid(
                 lines: center_pad(b, col_w[j]),
                 baseline: b.baseline,
                 cancel: centered_cancel(b, col_w[j], 0).collect(),
+                caret: centered_caret(b, col_w[j], 0),
+                marks: centered_marks(b, col_w[j], 0).collect(),
             });
             parts.push(Block::new(vec![vec![' ']], 0));
         }
         let row_block = hcat(&parts);
         let row_off = lines.len();
         cancel.extend(row_block.cancel.iter().map(|&(r, c)| (r + row_off, c)));
+        if let Some((r, c)) = row_block.caret {
+            caret = Some((r + row_off, c));
+        }
+        marks.extend(
+            row_block
+                .marks
+                .iter()
+                .map(|&(r, c, ch)| (r + row_off, c, ch)),
+        );
         for line in row_block.lines {
             let mut l = line;
             l.resize(width, ' ');
@@ -910,6 +1111,8 @@ fn render_fused_grid(
         lines: out,
         baseline: bl,
         cancel,
+        caret: caret.map(|(r, c)| (r, c + 1)),
+        marks: marks.into_iter().map(|(r, c, ch)| (r, c + 1, ch)).collect(),
     }
 }
 
@@ -966,6 +1169,8 @@ fn render_lattice(
 
     let mut lines: Vec<Vec<char>> = vec![marker_row(0)];
     let mut cancel: Vec<(usize, usize)> = Vec::new();
+    let mut caret: Option<(usize, usize)> = None;
+    let mut marks: Vec<(usize, usize, char)> = Vec::new();
     for i in 0..rows {
         let mut parts: Vec<Block> = Vec::new();
         for j in 0..cols {
@@ -976,12 +1181,23 @@ fn render_lattice(
                 lines: center_pad(b, col_w[j]),
                 baseline: b.baseline,
                 cancel: centered_cancel(b, col_w[j], 0).collect(),
+                caret: centered_caret(b, col_w[j], 0),
+                marks: centered_marks(b, col_w[j], 0).collect(),
             });
             parts.push(Block::new(vec![vec![' ']], 0));
         }
         let row_block = hcat(&parts);
         let row_off = lines.len();
         cancel.extend(row_block.cancel.iter().map(|&(r, c)| (r + row_off, c)));
+        if let Some((r, c)) = row_block.caret {
+            caret = Some((r + row_off, c));
+        }
+        marks.extend(
+            row_block
+                .marks
+                .iter()
+                .map(|&(r, c, ch)| (r + row_off, c, ch)),
+        );
         for line in row_block.lines {
             let mut l = line;
             l.resize(width, ' ');
@@ -994,6 +1210,8 @@ fn render_lattice(
         lines,
         baseline: (h - 1) / 2,
         cancel,
+        caret,
+        marks,
     }
 }
 
@@ -1216,7 +1434,10 @@ mod tests {
         let path = [(0, Field::OpLower)];
         let b = render_row(&root, Some((&path, 0)), false, &RenderCtx::canonical());
         let text = b.to_text();
-        assert!(text.contains(CURSOR_CHAR), "cursor visible:\n{}", text);
+        // The caret is zero-width metadata on the lower slot's ⬚ cell.
+        let (cy, cx) = b.caret.expect("caret present");
+        assert_eq!(b.lines[cy][cx], PLACEHOLDER, "caret on the ⬚:\n{}", text);
+        assert!(cy > b.baseline, "caret in the lower limit:\n{}", text);
         assert!(
             text.contains(PLACEHOLDER),
             "empty upper slot visible:\n{}",

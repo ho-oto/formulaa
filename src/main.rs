@@ -14,7 +14,7 @@ use ratatui::widgets::{Block as UiBlock, Borders, Paragraph};
 use mascii::editor::{BLK_CLOSE, Editor, JUMP_CHAR_BASE, JUMP_LABELS, SEL_CLOSE, SEL_OPEN};
 use mascii::input::{Effect, Key};
 use mascii::parse::RegionSpan;
-use mascii::render::{CURSOR_CHAR, RenderCtx, render_row};
+use mascii::render::{RenderCtx, render_row};
 use mascii::{ast, latex, parse, typst};
 
 const HELP: &str = "\\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ^A start  ⇧←→/⇧↑ select  ^B select block  ^C/^X/^V copy/cut/paste  ^G jump  ^O structure  ^T italic  ^Y copy AA  ^S save  Esc/^Q quit";
@@ -407,9 +407,17 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
     let (root, cursor) = ed.decorated();
     let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
     let block = render_row(&root, cursor_ref, false, &ctx);
-    let (lines, bg) = marker_boxes(&block.to_strings(), &ed.marker_extents());
+    let (lines, bg, cursor_cell) = marker_boxes(
+        &block.to_strings(),
+        &ed.marker_extents(),
+        &block.marks,
+        block.caret,
+    );
 
-    let width = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0) as u16;
+    // Centering anchors on the *render* width: the caret / an end-of-row
+    // label may pad one extra display cell, and letting that change the
+    // centering would shift the whole formula by ±1 as modes toggle.
+    let width = block.width() as u16;
     let height = lines.len() as u16;
     let left = inner.width.saturating_sub(width) / 2;
     let top = inner.height.saturating_sub(height) / 2;
@@ -419,9 +427,10 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
         text.push(Line::raw(""));
     }
     let pad = " ".repeat(left as usize);
-    for (l, bgrow) in lines.iter().zip(&bg) {
+    for (y, (l, bgrow)) in lines.iter().zip(&bg).enumerate() {
+        let ccol = cursor_cell.and_then(|(cy, cx)| (cy == y).then_some(cx));
         let mut spans = vec![Span::raw(pad.clone())];
-        spans.extend(decorate_line(l, bgrow));
+        spans.extend(decorate_line(l, bgrow, ccol));
         text.push(Line::from(spans));
     }
     f.render_widget(Paragraph::new(text), inner);
@@ -431,148 +440,125 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
 /// Selection box background (replaces the old ⟦ ⟧ bracket display).
 const SELECTION_BG: Color = Color::Indexed(89);
 
-/// Convert marker atoms into colored boxes and overlaid labels: every
-/// marker column (selection pair, ^G/^B labels, ^B closes) is removed
-/// from the text so the geometry stays put, box interiors get a
-/// background color (selection in SELECTION_BG, blocks in the
-/// structure-view depth palette), and each label glyph is drawn *over*
-/// the character that follows it instead of occupying a column.
+/// Turn the zero-width display annotations of a rendered block into
+/// colored boxes, overlaid labels and the caret cell. Marks carry
+/// (row, col, char): jump/block labels overlay the glyph at their
+/// position; selection/block mark pairs paint a background box (the
+/// selection in SELECTION_BG, ^B blocks in the structure-view palette
+/// by nesting depth). Nothing is inserted or removed, so the geometry
+/// always equals the undecorated render.
+#[allow(clippy::type_complexity)]
 fn marker_boxes(
     lines: &[String],
-    extents: &[(usize, usize)],
-) -> (Vec<String>, Vec<Vec<Option<Color>>>) {
-    let grid: Vec<Vec<char>> = lines.iter().map(|l| l.chars().collect()).collect();
+    extents: &[(usize, usize, usize)],
+    marks: &[(usize, usize, char)],
+    caret: Option<(usize, usize)>,
+) -> (Vec<String>, Vec<Vec<Option<Color>>>, Option<(usize, usize)>) {
+    let mut grid: Vec<Vec<char>> = lines.iter().map(|l| l.chars().collect()).collect();
+    if grid.is_empty() {
+        grid.push(Vec::new());
+    }
     let labels = JUMP_LABELS.chars().count() as u32;
     let is_label = |c: char| (JUMP_CHAR_BASE..JUMP_CHAR_BASE + labels).contains(&(c as u32));
-    // Markers in column order (every marker owns its own column).
-    let mut marks: Vec<(usize, usize, char)> = Vec::new();
-    for (y, row) in grid.iter().enumerate() {
-        for (x, &c) in row.iter().enumerate() {
-            if c == SEL_OPEN || c == SEL_CLOSE || c == BLK_CLOSE || is_label(c) {
-                marks.push((x, y, c));
-            }
-        }
-    }
-    marks.sort_unstable();
-    // Pair opens with closes (properly nested by construction). A lone
-    // label (jump mode) has no close and yields no box.
-    let mut stack: Vec<(usize, usize, char)> = Vec::new();
-    // (open col, open row, close col, depth, color, open char)
-    #[allow(clippy::type_complexity)]
-    let mut boxes: Vec<(usize, usize, usize, usize, Color, char)> = Vec::new();
-    let mut overlays: Vec<(usize, usize, char)> = Vec::new(); // (row, orig col, label)
-    for &(x, y, c) in &marks {
-        if c == SEL_CLOSE || c == BLK_CLOSE {
-            if let Some((o, oy, oc)) = stack.pop() {
-                let depth = stack.len() + 1;
-                let color = if oc == SEL_OPEN {
-                    SELECTION_BG
-                } else {
-                    DEPTH_BG[(depth - 1) % DEPTH_BG.len()]
-                };
-                boxes.push((o, oy, x, depth, color, oc));
-            }
-        } else {
-            if is_label(c) {
-                overlays.push((y, x, c));
-            }
-            stack.push((x, y, c));
-        }
-    }
-    // A marker column may only be removed when every row is blank, a
-    // marker, or a stretchy filler there (bars shrink consistently) —
-    // centered content in *other* rows can sit under a marker column,
-    // and deleting it would corrupt that row. Unremovable markers are
-    // blanked in place instead (a one-cell gap, but alignment is exact).
-    let filler = |ch: char| matches!(ch, ' ' | '─' | '═' | '┄' | '_');
-    let is_marker = |ch: char| ch == SEL_OPEN || ch == SEL_CLOSE || ch == BLK_CLOSE || is_label(ch);
-    let strip: Vec<usize> = marks
-        .iter()
-        .map(|&(x, _, _)| x)
-        .filter(|&x| {
-            grid.iter()
-                .all(|row| row.get(x).is_none_or(|&ch| filler(ch) || is_marker(ch)))
-        })
-        .collect();
-    let shift = |x: usize| x - strip.iter().take_while(|&&s| s < x).count();
 
-    let mut bg: Vec<Vec<Option<Color>>> = grid
-        .iter()
-        .map(|row| vec![None; row.len() - strip.iter().filter(|&&s| s < row.len()).count()])
-        .collect();
-    // Exact vertical extents come from the editor; a ^B label char
-    // encodes its target index, the selection has a single entry. The
-    // char grid alone cannot separate a block's rows from other content
-    // sharing its columns.
-    let extent_of = |oc: char| {
-        if oc == SEL_OPEN {
-            extents.first().copied()
-        } else {
-            extents.get((oc as u32 - JUMP_CHAR_BASE) as usize).copied()
+    let mut bg: Vec<Vec<Option<Color>>> = grid.iter().map(|row| vec![None; row.len()]).collect();
+    // Boxes: pair opens (selection start, ^B label) with closes within
+    // each row, nesting by position.
+    let mut boxes: Vec<(usize, usize, usize, Color)> = Vec::new(); // (row, open, close, color) sorted later
+    let mut order: Vec<usize> = Vec::new(); // paint order key: depth
+    let mut by_row: std::collections::BTreeMap<usize, Vec<(usize, char)>> =
+        std::collections::BTreeMap::new();
+    for &(y, x, c) in marks {
+        by_row.entry(y).or_default().push((x, c));
+    }
+    for (y, mut row_marks) in by_row.clone() {
+        row_marks.sort_unstable();
+        let mut stack: Vec<(usize, char)> = Vec::new();
+        for (x, c) in row_marks {
+            if c == SEL_CLOSE || c == BLK_CLOSE {
+                if let Some((o, oc)) = stack.pop() {
+                    let (color, depth) = if oc == SEL_OPEN {
+                        (SELECTION_BG, 0)
+                    } else {
+                        let idx = (oc as u32 - JUMP_CHAR_BASE) as usize;
+                        let d = extents.get(idx).map_or(0, |&(_, _, d)| d);
+                        (DEPTH_BG[d % DEPTH_BG.len()], d)
+                    };
+                    boxes.push((y, o, x, color));
+                    order.push(depth);
+                }
+            } else {
+                stack.push((x, c));
+            }
         }
-    };
-    // Outer boxes first so nested ones paint over them.
-    boxes.sort_by_key(|&(_, _, _, d, _, _)| d);
-    for &(o, oy, close, _, color, oc) in &boxes {
-        let (t, b) = match extent_of(oc) {
-            Some((above, below)) => (
+    }
+    // Outer (shallow) boxes first so nested ones paint over them.
+    let mut idx: Vec<usize> = (0..boxes.len()).collect();
+    idx.sort_by_key(|&i| order[i]);
+    for i in idx {
+        let (oy, o, close, color) = boxes[i];
+        // Which extent? Selection has one entry; a ^B box finds its
+        // extent through its label char.
+        let ext = by_row
+            .get(&oy)
+            .and_then(|ms| ms.iter().find(|&&(x, _)| x == o))
+            .map(|&(_, c)| c)
+            .and_then(|c| {
+                if c == SEL_OPEN {
+                    extents.first()
+                } else if is_label(c) {
+                    extents.get((c as u32 - JUMP_CHAR_BASE) as usize)
+                } else {
+                    None
+                }
+            });
+        let (t, b) = match ext {
+            Some(&(above, below, _)) => (
                 oy.saturating_sub(above),
                 (oy + below).min(grid.len().saturating_sub(1)),
             ),
-            // Fallback: rows showing content between the markers.
-            None => {
-                let rows: Vec<usize> = (0..grid.len())
-                    .filter(|&y| {
-                        (o + 1..close).any(|x| grid[y].get(x).is_some_and(|&ch| ch != ' '))
-                    })
-                    .collect();
-                match (rows.first(), rows.last()) {
-                    (Some(&t), Some(&b)) => (t, b),
-                    _ => continue,
-                }
-            }
+            None => (oy, oy),
         };
         for row in bg.iter_mut().take(b + 1).skip(t) {
-            for x in o + 1..close {
-                if strip.binary_search(&x).is_err() {
-                    let sx = shift(x);
-                    if sx < row.len() {
-                        row[sx] = Some(color);
-                    }
+            for x in o..close {
+                if x < row.len() {
+                    row[x] = Some(color);
                 }
             }
         }
     }
-    let mut stripped: Vec<Vec<char>> = grid
-        .iter()
-        .map(|row| {
-            row.iter()
-                .enumerate()
-                .filter(|(x, _)| strip.binary_search(x).is_err())
-                .map(|(_, &c)| if is_marker(c) { ' ' } else { c })
-                .collect()
-        })
-        .collect();
-    // Labels sit on top of the glyph that followed them.
-    for &(y, x, label) in &overlays {
-        let sx = shift(x);
-        let row = &mut stripped[y];
-        if sx < row.len() {
-            row[sx] = label;
-        } else {
-            row.push(label);
+    // Labels overlay the glyph at their position.
+    for &(y, x, c) in marks {
+        if is_label(c) {
+            let row = &mut grid[y];
+            if x >= row.len() {
+                row.resize(x + 1, ' ');
+                bg[y].resize(x + 1, None);
+            }
+            row[x] = c;
         }
     }
-    (stripped.into_iter().map(String::from_iter).collect(), bg)
+    // The caret cell (padded blank at the row end).
+    let cursor_cell = caret.map(|(y, x)| {
+        if x >= grid[y].len() {
+            grid[y].resize(x + 1, ' ');
+            bg[y].resize(x + 1, None);
+        }
+        (y, x)
+    });
+    (
+        grid.into_iter().map(String::from_iter).collect(),
+        bg,
+        cursor_cell,
+    )
 }
 
 /// Turn a rendered line into spans: private-use marker chars become
 /// colored jump/block labels, the cursor glyph blinks, and box
 /// backgrounds from `marker_boxes` are applied to plain glyphs.
-fn decorate_line(line: &str, bg: &[Option<Color>]) -> Vec<Span<'static>> {
-    let cursor_style = Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK);
+fn decorate_line(line: &str, bg: &[Option<Color>], cursor: Option<usize>) -> Vec<Span<'static>> {
+    let cursor_style =
+        Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD | Modifier::SLOW_BLINK);
     let label_style = Style::default()
         .fg(Color::Black)
         .bg(Color::Yellow)
@@ -593,13 +579,15 @@ fn decorate_line(line: &str, bg: &[Option<Color>]) -> Vec<Span<'static>> {
     for (i, c) in line.chars().enumerate() {
         let u = c as u32;
         let cell_bg = bg.get(i).copied().flatten();
-        if c == CURSOR_CHAR {
+        if cursor == Some(i) {
+            // Terminal-style caret: reverse video on the glyph right of
+            // the insertion point.
             flush(&mut buf, buf_bg, &mut spans);
             let style = match cell_bg {
                 Some(color) => cursor_style.bg(color),
                 None => cursor_style,
             };
-            spans.push(Span::styled(CURSOR_CHAR.to_string(), style));
+            spans.push(Span::styled(c.to_string(), style));
         } else if c == '␣' {
             // Explicit space atom: keep visible but unobtrusive.
             flush(&mut buf, buf_bg, &mut spans);
@@ -693,13 +681,29 @@ fn styled_depth(s: String, depth: usize) -> Span<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mascii::input::Key;
+
+    /// Full display pipeline: decorated AST -> render -> marker_boxes.
+    fn display(ed: &Editor) -> Vec<String> {
+        let (root, cursor) = ed.decorated();
+        let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+        let ctx = RenderCtx { italic: true };
+        let block = render_row(&root, cursor_ref, false, &ctx);
+        let (lines, _, _) = marker_boxes(
+            &block.to_strings(),
+            &ed.marker_extents(),
+            &block.marks,
+            block.caret,
+        );
+        lines
+    }
 
     #[test]
-    fn marker_boxes_strip_markers_and_paint_cells() {
-        // One-line selection: ⟦ab⟧ → markers vanish, a/b get the bg.
-        let lines = vec![format!(" {}ab{} ", SEL_OPEN, SEL_CLOSE)];
-        let (stripped, bg) = marker_boxes(&lines, &[(0, 0)]);
-        assert_eq!(stripped, vec![" ab ".to_string()]);
+    fn selection_box_paints_without_touching_the_text() {
+        let lines = vec![" ab ".to_string()];
+        let marks = [(0, 1, SEL_OPEN), (0, 3, SEL_CLOSE)];
+        let (out, bg, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None);
+        assert_eq!(out, lines, "text must be untouched");
         assert_eq!(
             bg[0],
             vec![None, Some(SELECTION_BG), Some(SELECTION_BG), None]
@@ -707,47 +711,166 @@ mod tests {
     }
 
     #[test]
-    fn marker_boxes_cover_multiline_content() {
-        // A selected fraction: the box spans all three rows.
-        let lines = vec![
-            "  1  ".to_string(),
-            format!("{}───{}", SEL_OPEN, SEL_CLOSE),
-            "  2  ".to_string(),
-        ];
-        let (stripped, bg) = marker_boxes(&lines, &[(1, 1)]);
-        assert_eq!(stripped[1], "───");
+    fn selection_box_covers_the_block_extent_only() {
+        // A selected fraction: rows from the extent, not from content
+        // scanning — the denominator row below the box stays unpainted
+        // when the extent says so.
+        let lines = vec![" 1 ".to_string(), "───".to_string(), " 2 ".to_string()];
+        let marks = [(1, 0, SEL_OPEN), (1, 3, SEL_CLOSE)];
+        let (_, bg, _) = marker_boxes(&lines, &[(1, 1, 0)], &marks, None);
         assert!(bg.iter().all(|row| row.iter().all(|c| c.is_some())));
+        let (_, bg, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None);
+        assert!(
+            bg[2].iter().all(|c| c.is_none()),
+            "extent must bound the box"
+        );
     }
 
     #[test]
-    fn unsafe_marker_columns_are_blanked_not_removed() {
-        // The ⟧ column carries the denominator's `2` in another row —
-        // removing that column would delete the 2. It must be kept,
-        // with the marker cell blanked (exact alignment, 1-cell gap).
-        let lines = vec![
-            format!("{}ab{}", SEL_OPEN, SEL_CLOSE),
-            "────".to_string(),
-            "   2".to_string(),
-        ];
-        let (stripped, bg) = marker_boxes(&lines, &[(0, 0)]);
-        assert_eq!(stripped[0], "ab ");
-        assert_eq!(stripped[1], "───");
-        assert_eq!(stripped[2], "  2", "denominator content must survive");
-        assert_eq!(bg[0], vec![Some(SELECTION_BG), Some(SELECTION_BG), None]);
-        // The box must not leak into the bar/denominator rows even
-        // though they have content under the same columns.
-        assert!(bg[1].iter().all(|c| c.is_none()), "bar row painted");
-        assert!(bg[2].iter().all(|c| c.is_none()), "den row painted");
-    }
-
-    #[test]
-    fn jump_labels_overlay_without_shifting() {
+    fn labels_overlay_and_caret_pads() {
         let label = char::from_u32(JUMP_CHAR_BASE).unwrap();
-        // Label before 'x': the label column vanishes and the label is
-        // drawn over 'x' — the line keeps its original width.
-        let lines = vec![format!("{}xy", label)];
-        let (stripped, bg) = marker_boxes(&lines, &[]);
-        assert_eq!(stripped[0].chars().collect::<Vec<_>>(), vec![label, 'y']);
-        assert!(bg[0].iter().all(|c| c.is_none()));
+        let lines = vec!["xy".to_string()];
+        let (out, _, cursor) = marker_boxes(&lines, &[], &[(0, 0, label)], Some((0, 2)));
+        let chars: Vec<char> = out[0].chars().collect();
+        assert_eq!(chars[0], label, "label over the glyph");
+        assert_eq!(chars[1], 'y');
+        assert_eq!(cursor, Some((0, 2)));
+        assert_eq!(chars.len(), 3, "caret cell padded at the row end");
+    }
+
+    #[test]
+    fn caret_display_never_shifts_the_layout() {
+        // (x^a, not x^2: an inlinable script like ² must re-expand to 2D
+        // while the caret is inside it — that shift is inherent.)
+        let mut ed = Editor::new();
+        for k in "x^a".chars() {
+            ed.input(Key::Char(k), false, false);
+        }
+        ed.input(Key::Tab, false, false);
+        ed.input(Key::Char('+'), false, false);
+        ed.input(Key::Char('/'), false, false);
+        ed.input(Key::Char('/'), false, false);
+        ed.input(Key::Char('1'), false, false);
+        ed.input(Key::Down, false, false);
+        ed.input(Key::Char('2'), false, false);
+        let ctx = RenderCtx { italic: true };
+        let plain: Vec<String> = render_row(&ed.root, None, false, &ctx)
+            .to_strings()
+            .iter()
+            .map(|l| l.trim_end().to_string())
+            .collect();
+        // Every cursor position must display with the same geometry as
+        // the cursor-less render (the caret is an overlay, not a column).
+        for ((p, c), _, _) in ed.jump_targets() {
+            ed.path = p;
+            ed.col = c;
+            let got: Vec<String> = display(&ed)
+                .iter()
+                .map(|l| l.trim_end().to_string())
+                .collect();
+            assert_eq!(
+                got, plain,
+                "layout shifted at path {:?} col {}",
+                ed.path, ed.col
+            );
+        }
+    }
+
+    #[test]
+    fn ghost_slots_keep_jump_reentry_stable() {
+        // \sum then exit: the empty band shows as a bare ∑. The first
+        // ^G materializes the limit slots (a necessary shift); after
+        // cancelling, the slots stay as ghost ⬚ until the next input,
+        // so the second ^G overlays the identical picture.
+        let mut ed = Editor::new();
+        ed.input(Key::Char('\\'), false, false);
+        for k in "sum".chars() {
+            ed.input(Key::Char(k), false, false);
+        }
+        ed.input(Key::Enter, false, false);
+        ed.input(Key::Tab, false, false);
+        let plain = display(&ed);
+        ed.input(Key::Char('g'), false, true);
+        let jump1 = display(&ed);
+        assert_ne!(plain, jump1, "slots must materialize under ^G");
+        ed.input(Key::Esc, false, false); // cancel: slots become ghosts
+        let ghost = display(&ed);
+        assert!(
+            ghost.concat().contains('⬚'),
+            "ghost slots stay visible:\n{}",
+            ghost.join("\n")
+        );
+        ed.input(Key::Char('g'), false, true);
+        let jump2 = display(&ed);
+        assert_eq!(jump1, jump2, "re-entering ^G must not shift");
+        assert_eq!(jump2.len(), ghost.len());
+        for (m, e) in jump2.iter().zip(&ghost) {
+            let (m, e): (Vec<char>, Vec<char>) = (m.chars().collect(), e.chars().collect());
+            for x in 0..m.len().max(e.len()) {
+                let (mc, ec) = (
+                    m.get(x).copied().unwrap_or(' '),
+                    e.get(x).copied().unwrap_or(' '),
+                );
+                assert!(
+                    mc == ec || (0xE000..0xE100).contains(&(mc as u32)),
+                    "ghost/jump mismatch at {}: {:?} vs {:?}",
+                    x,
+                    mc,
+                    ec
+                );
+            }
+        }
+        // Any real input clears the ghosts.
+        ed.input(Key::Esc, false, false);
+        ed.input(Key::Char('x'), false, false);
+        assert!(!display(&ed).concat().contains('⬚'));
+    }
+
+    #[test]
+    fn mode_displays_keep_the_editing_geometry() {
+        // Formulas whose editing view differs from the plain one: an
+        // empty-limit ∑ band, a fused matrix, an inline superscript.
+        // Entering ^G / ^B must keep the geometry — cells may only
+        // change where a label got overlaid.
+        for keys in [
+            vec!["\\", "s", "u", "m", "\n", "x"],
+            vec!["\\", "p", "m", "a", "t", "r", "i", "x", "\n", "a", ">", "b"],
+            vec!["x", "^", "2"],
+        ] {
+            let mut ed = Editor::new();
+            for k in keys {
+                match k {
+                    "\n" => ed.input(Key::Enter, false, false),
+                    ">" => ed.input(Key::Right, false, false),
+                    k => ed.input(Key::Char(k.chars().next().unwrap()), false, false),
+                };
+            }
+            let editing = display(&ed);
+            for key in ['g', 'b'] {
+                ed.input(Key::Char(key), false, true);
+                let mode = display(&ed);
+                assert_eq!(mode.len(), editing.len(), "height changed in ^{}", key);
+                for (y, (m, e)) in mode.iter().zip(&editing).enumerate() {
+                    let (m, e): (Vec<char>, Vec<char>) = (m.chars().collect(), e.chars().collect());
+                    for x in 0..m.len().max(e.len()) {
+                        let (mc, ec) = (
+                            m.get(x).copied().unwrap_or(' '),
+                            e.get(x).copied().unwrap_or(' '),
+                        );
+                        let label = (0xE000..0xE100).contains(&(mc as u32));
+                        assert!(
+                            mc == ec || label,
+                            "^{} shifted cell ({}, {}): {:?} vs {:?}",
+                            key,
+                            y,
+                            x,
+                            mc,
+                            ec
+                        );
+                    }
+                }
+                ed.input(Key::Esc, false, false);
+            }
+        }
     }
 }

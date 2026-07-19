@@ -178,6 +178,20 @@ fn ctrl_a_jumps_to_document_start() {
 }
 
 #[test]
+fn vertical_exits_a_grid_at_its_edge() {
+    // ↓ on the bottom row leaves the matrix (after it); ↑ on the top
+    // row leaves before it.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\pmatrix a Down b Down x");
+    assert!(ed.path.is_empty(), "path: {:?}", ed.path);
+    assert!(latex(&ed).ends_with('x'), "latex: {}", latex(&ed));
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\pmatrix a Up y");
+    assert!(ed.path.is_empty());
+    assert!(latex(&ed).starts_with('y'), "latex: {}", latex(&ed));
+}
+
+#[test]
 fn click_moves_the_cursor() {
     // Flat row: clicking between a and + lands the cursor at col 1.
     let mut ed = Editor::new();
@@ -229,7 +243,7 @@ fn block_select_mode_selects_a_structure() {
     // The label marker must actually appear in the decorated view
     // (this display path once silently missed the block branch).
     let (root, cursor) = ed.decorated();
-    assert!(cursor.is_none(), "cursor hidden while labels are shown");
+    assert!(cursor.is_some(), "cursor stays threaded during modes");
     assert!(
         root.iter().any(
             |n| matches!(n, mascii::ast::Node::Sym(c) if (0xE000..0xE100).contains(&(*c as u32)))
@@ -261,8 +275,19 @@ impl Rng {
 }
 
 /// The same invariant the TUI's RoundtripGuard enforces at runtime,
-/// checked after every keystroke of a random session.
+/// checked after every keystroke of a random session — plus "the caret
+/// survives every render composition" (a missed propagation would show
+/// no cursor at all).
 fn assert_roundtrip(ed: &Editor, history: &[String]) {
+    let (droot, cursor) = ed.decorated();
+    if let Some((p, c)) = cursor {
+        let b = render_row(&droot, Some((&p[..], c)), false, &RenderCtx::canonical());
+        assert!(
+            b.caret.is_some(),
+            "caret lost\n--- keys ---\n{}",
+            history.join(" ")
+        );
+    }
     let row = normalize(&ed.root);
     if row.is_empty() {
         return;

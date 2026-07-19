@@ -73,8 +73,11 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
 - 行内の「全高空白列」は同一基線の兄弟の区切りとしてのみ許される。
   構造ブロックに無条件マージンを足すとスクリプト分割が壊れる
   (docs/design.md §9)。
-- エディタのカーソル表示(`▌`)がある描画は正準形ではない。パース対象は
-  カーソルなし描画のみ。
+- カーソルは `Block.caret`(幅ゼロのメタデータ、全合成で伝搬)。描画は
+  カーソル有無でジオメトリが変わらない(TUI は反転表示、wasm のテキスト
+  画面だけ ▌ を上書き描画)。パース対象はカーソルなし描画のみ。
+  render_node の新アームでは caret の伝搬を忘れない(cancel と同じ
+  オフセットで写す。忘れると tests/ui.rs の caret 生存チェックが落ちる)。
 - `Sqrt` は `index: u8`(2/3/4 = √∛∜)を持つ。`Node::Accent` の base は
   1 文字(Row ではない)。
 - 括弧は `Node::Delim{left,right,mids,segs}` に統一(旧 Paren/Matrix は廃止)。
@@ -88,7 +91,8 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
 - ratatui のイベントは `KeyEventKind::Press` のみ処理(Windows の重複対策)。
 - ジャンプ(Ctrl+G)・ブロック選択(Ctrl+B)・選択範囲は私用領域文字の
   マーカー原子を表示用クローン AST に挿入する方式(editor.rs `decorated`)。
-  U+E000–E0FF は表示マーカー予約。TUI 側はマーカー対を列ごと除去して
-  背景色ボックスに変換する(main.rs `marker_boxes`)。構造ビュー(Ctrl+O)
-  は正準描画を `parse_with_regions` に通して矩形+深さを回収し背景色を
-  塗る(main.rs `draw_structure`)。
+  U+E000–E0FF は表示マーカー予約。マーカー原子は**幅ゼロで描画**され
+  `Block.marks` として伝搬(レイアウト不変)。TUI 側は marks から
+  ラベル重ね書きと背景ボックスを塗る(main.rs `marker_boxes`)。
+  構造ビュー(Ctrl+O)は正準描画を `parse_with_regions` に通して
+  矩形+深さを回収し背景色を塗る(main.rs `draw_structure`)。

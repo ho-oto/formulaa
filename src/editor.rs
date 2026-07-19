@@ -26,6 +26,10 @@ pub struct Editor {
     /// label key; each target is (parent row path, node index) of a
     /// structure node, and picking one selects the whole block.
     pub block: Option<Vec<BlockRef>>,
+    /// Empty slots kept materialized after jump mode ends (the ⬚ cells
+    /// ^G labeled stay visible until the next input, so toggling ^G
+    /// twice does not shift the layout).
+    pub ghost: Vec<Vec<(usize, Field)>>,
     /// Structure view: paint every block's background by nesting depth (Ctrl+O).
     pub structure: bool,
     /// Selection anchor column in the current row (Shift+←/→). The selected
@@ -50,6 +54,10 @@ pub const SEL_CLOSE: char = '\u{E0F1}';
 /// End-of-block marker paired with a ^B label (display only, like the
 /// labels themselves; the TUI turns the pair into a colored box).
 pub const BLK_CLOSE: char = '\u{E0F2}';
+/// Ghost-slot marker: keeps an empty slot materialized (⬚) after jump
+/// mode ends, so re-entering ^G does not shift the layout. No label,
+/// no box — just the slot.
+pub const SLOT_GHOST: char = '\u{E0F3}';
 
 impl Default for Editor {
     fn default() -> Self {
@@ -159,6 +167,7 @@ impl Editor {
             italic: true,
             jump: None,
             block: None,
+            ghost: Vec::new(),
             structure: false,
             select_anchor: None,
             select_path: Vec::new(),
@@ -210,12 +219,9 @@ impl Editor {
 
     /// Mouse click at canvas cell (x, y): move the cursor to the
     /// nearest boundary. Probe-based: each candidate position is laid
-    /// out with its cursor and the rendered ▌ cell is compared against
-    /// the click point (the displayed grid differs from a probe grid by
-    /// at most a column around the two cursors, so nearest-match lands
-    /// on the intended or an adjacent boundary).
+    /// out and its caret cell compared against the click point.
     pub fn click(&mut self, x: usize, y: usize) {
-        use crate::render::{CURSOR_CHAR, RenderCtx, render_row};
+        use crate::render::{RenderCtx, render_row};
         self.jump = None;
         self.block = None;
         self.select_anchor = None;
@@ -226,12 +232,10 @@ impl Editor {
         candidates.push(((self.path.clone(), self.col), false, false));
         let mut best: Option<(usize, CursorPos)> = None;
         for ((p, c), _, _) in candidates {
+            // The caret is zero-width metadata, so every probe has the
+            // same geometry as the display — the match is exact.
             let block = render_row(&self.root, Some((&p[..], c)), false, &ctx);
-            let Some((cy, cx)) = block.lines.iter().enumerate().find_map(|(row, line)| {
-                line.iter()
-                    .position(|&ch| ch == CURSOR_CHAR)
-                    .map(|col| (row, col))
-            }) else {
+            let Some((cy, cx)) = block.caret else {
                 continue;
             };
             let score = cy.abs_diff(y) * 1000 + cx.abs_diff(x);
@@ -354,6 +358,29 @@ impl Editor {
                 self.path.push((i, t));
                 self.col = self.col.min(len);
                 return;
+            }
+        }
+        // ↑/↓ at the top/bottom row of a grid: exit the matrix, landing
+        // before/after it in the surrounding row (stepping out of the
+        // wrapping delimiter as well).
+        if let Some(&(i, Field::Cell(c))) = self.path.last() {
+            let parent_path = &self.path[..self.path.len() - 1];
+            if let Node::Array { cols, cells, .. } = &row_at(&self.root, parent_path)[i] {
+                let at_edge = if up {
+                    c < *cols
+                } else {
+                    c + cols >= cells.len()
+                };
+                if at_edge {
+                    self.path.pop();
+                    let mut idx = i;
+                    if let Some(&(d, Field::Seg(_))) = self.path.last() {
+                        self.path.pop();
+                        idx = d;
+                    }
+                    self.col = if up { idx } else { idx + 1 };
+                    return;
+                }
             }
         }
         // Bare big operator to the left of the cursor: promote it to a
@@ -895,8 +922,24 @@ impl Editor {
         self.jump = Some(picked);
     }
 
+    /// Remember which labeled rows change their rendering while marked:
+    /// empty slots (materialized as ⬚) and inline-script args (expanded
+    /// to 2D). They keep that form until the next non-^G input, so
+    /// re-entering ^G never shifts the layout.
+    pub fn keep_ghosts(&mut self, targets: &[(usize, CursorPos)]) {
+        self.ghost.clear();
+        for (_, (p, _)) in targets {
+            let keep = row_at(&self.root, p).is_empty()
+                || matches!(p.last(), Some((_, Field::SupArg | Field::SubArg)));
+            if keep && !self.ghost.contains(p) {
+                self.ghost.push(p.clone());
+            }
+        }
+    }
+
     pub fn jump_to(&mut self, label: char) {
         if let Some(targets) = self.jump.take() {
+            self.keep_ghosts(&targets);
             if let Some(idx) = JUMP_LABELS.chars().position(|c| c == label)
                 && let Some((_, (p, c))) = targets.iter().find(|(rank, _)| *rank == idx)
             {
@@ -913,8 +956,14 @@ impl Editor {
     /// order: (parent row path, node index).
     pub fn block_targets(&self) -> Vec<BlockRef> {
         fn walk(row: &Row, path: &mut Vec<(usize, Field)>, out: &mut Vec<BlockRef>) {
+            // A grid that is a delimiter segment's sole node fuses with
+            // the delimiter — label atoms inside the segment would break
+            // that shape, and the enclosing Delim target covers it.
+            let fused_array = row.len() == 1
+                && matches!(row[0], Node::Array { .. })
+                && matches!(path.last(), Some((_, Field::Seg(_))));
             for (i, node) in row.iter().enumerate() {
-                if !node.fields().is_empty() {
+                if !node.fields().is_empty() && !fused_array {
                     out.push((path.clone(), i));
                 }
                 for f in node.fields() {
@@ -967,20 +1016,34 @@ impl Editor {
     /// (= document) order. Computed by laying out the covered slice —
     /// the char grid alone cannot tell a block's rows apart from other
     /// content (e.g. a denominator centered under the same columns).
-    pub fn marker_extents(&self) -> Vec<(usize, usize)> {
+    pub fn marker_extents(&self) -> Vec<(usize, usize, usize)> {
         use crate::render::{RenderCtx, render_row};
-        let extent = |slice: &[Node]| -> (usize, usize) {
-            let b = render_row(&slice.to_vec(), None, false, &RenderCtx::canonical());
-            let (h, bl) = (b.height(), b.baseline);
-            (bl.min(h), h.saturating_sub(bl + 1))
-        };
+        let extent =
+            |slice: &[Node], cursor: Option<(Vec<(usize, Field)>, usize)>, depth: usize| {
+                let cur = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+                let b = render_row(&slice.to_vec(), cur, false, &RenderCtx::canonical());
+                let (h, bl) = (b.height(), b.baseline);
+                (bl.min(h), h.saturating_sub(bl + 1), depth)
+            };
         if let Some(targets) = &self.block {
             targets
                 .iter()
-                .map(|(p, i)| extent(&row_at(&self.root, p)[*i..*i + 1]))
+                .map(|(p, i)| {
+                    // If the cursor is inside this block, lay the slice
+                    // out in its editing view (matches the display).
+                    let cur = (self.path.len() > p.len()
+                        && self.path[..p.len()] == p[..]
+                        && self.path[p.len()].0 == *i)
+                        .then(|| {
+                            let mut rel = self.path[p.len()..].to_vec();
+                            rel[0].0 = 0;
+                            (rel, self.col)
+                        });
+                    extent(&row_at(&self.root, p)[*i..*i + 1], cur, p.len())
+                })
                 .collect()
         } else if let Some((lo, hi)) = self.selection() {
-            vec![extent(&self.cur_row()[lo..hi])]
+            vec![extent(&self.cur_row()[lo..hi], None, 0)]
         } else {
             Vec::new()
         }
@@ -994,15 +1057,36 @@ impl Editor {
     /// labels / brackets; they never appear in a real document.
     pub fn decorated(&self) -> (Row, Option<CursorPos>) {
         let mut root = self.root.clone();
+        // Nudge the cursor position past a marker inserted at slot `k`
+        // of the row at `at`, so the cursor can stay threaded through
+        // mode displays (keeping the editing-view geometry: ⬚ limit
+        // slots, unfused matrices, expanded inline scripts).
+        fn bump(path: &mut [(usize, Field)], col: &mut usize, at: &[(usize, Field)], k: usize) {
+            let d = at.len();
+            if path.len() >= d && path[..d] == *at {
+                if path.len() > d {
+                    if path[d].0 >= k {
+                        path[d].0 += 1;
+                    }
+                } else if *col > k {
+                    *col += 1;
+                }
+            }
+        }
         if let Some(targets) = &self.jump {
+            let mut path = self.path.clone();
+            let mut col = self.col;
             // Reverse document order keeps not-yet-inserted positions valid.
             for (rank, (p, c)) in targets.iter().rev() {
                 let mark = char::from_u32(JUMP_CHAR_BASE + *rank as u32).unwrap();
                 row_at_mut(&mut root, p).insert(*c, Node::Sym(mark));
+                bump(&mut path, &mut col, p, *c);
             }
-            return (root, None);
+            return (root, Some((path, col)));
         }
         if let Some(targets) = &self.block {
+            let mut path = self.path.clone();
+            let mut col = self.col;
             // Label sits immediately left of its block and a close marker
             // right after it, so the display can paint the block's extent
             // (reverse document order keeps positions valid).
@@ -1011,11 +1095,21 @@ impl Editor {
                 let row = row_at_mut(&mut root, p);
                 row.insert(i + 1, Node::Sym(BLK_CLOSE));
                 row.insert(*i, Node::Sym(mark));
+                bump(&mut path, &mut col, p, i + 1);
+                bump(&mut path, &mut col, p, *i);
             }
-            return (root, None);
+            return (root, Some((path, col)));
         }
-        let path = self.path.clone();
+        let mut path = self.path.clone();
         let mut col = self.col;
+        // Deepest rows first: inserting into an ancestor row would shift
+        // the node indices a deeper ghost path still needs.
+        let mut ghosts: Vec<&Vec<(usize, Field)>> = self.ghost.iter().collect();
+        ghosts.sort_by_key(|p| std::cmp::Reverse(p.len()));
+        for p in ghosts {
+            row_at_mut(&mut root, p).insert(0, Node::Sym(SLOT_GHOST));
+            bump(&mut path, &mut col, p, 0);
+        }
         if let Some((lo, hi)) = self.selection() {
             let row = row_at_mut(&mut root, &path);
             row.insert(hi, Node::Sym(SEL_CLOSE));
@@ -1201,12 +1295,18 @@ impl Editor {
                     .filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric()))
                 {
                     // \op*<name> (\operatorname*): upright operator that
-                    // takes under-limits — a ┄band┄ with a Text base.
-                    self.insert_and_enter(Node::BigOp {
-                        base: vec![Node::Text {
+                    // takes under-limits — a ┄band┄ with a Text base
+                    // (dictionary words fall back to the Func they are).
+                    let base = if is_func_name(t) {
+                        Node::Func(t.to_string())
+                    } else {
+                        Node::Text {
                             t: t.to_string(),
                             math: true,
-                        }],
+                        }
+                    };
+                    self.insert_and_enter(Node::BigOp {
+                        base: vec![base],
                         lower: vec![],
                         upper: vec![],
                     });
@@ -1230,15 +1330,20 @@ impl Editor {
                             }
                     })
                 {
-                    // \rm<chars> = \mathrm, \text<chars> = \text.
-                    let col = self.col;
-                    self.cur_row_mut().insert(
-                        col,
+                    // \rm<chars> = \mathrm, \text<chars> = \text. An
+                    // upright dictionary word IS the function (the letter
+                    // -run rule reads it back as Func anyway), so \opsin
+                    // falls back to \sin instead of a quoted 'sin'.
+                    let node = if math && is_func_name(t) {
+                        Node::Func(t.to_string())
+                    } else {
                         Node::Text {
                             t: t.to_string(),
                             math,
-                        },
-                    );
+                        }
+                    };
+                    let col = self.col;
+                    self.cur_row_mut().insert(col, node);
                     self.col += 1;
                 } else if cmd.starts_with("delim") || cmd.starts_with("lr") {
                     self.message =
@@ -1346,6 +1451,14 @@ mod tests {
         let mut ed = Editor::new();
         ed.execute("opvol");
         assert_eq!(row_to_latex(&ed.root), "\\mathrm{vol}");
+        // A dictionary word falls back to the Func it names.
+        let mut ed = Editor::new();
+        ed.execute("opsin");
+        assert_eq!(ed.root, vec![Node::Func("sin".into())]);
+        let mut ed = Editor::new();
+        ed.execute("op*max");
+        assert!(matches!(&ed.root[0],
+            Node::BigOp { base, .. } if base == &vec![Node::Func("max".into())]));
         // \op*<name> = operator band taking under-limits.
         let mut ed = Editor::new();
         ed.execute("op*esssup");

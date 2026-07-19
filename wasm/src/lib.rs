@@ -7,10 +7,10 @@
 //!   webviews (see editors/ in the repository).
 
 use mascii::ast::normalize;
-use mascii::editor::{Editor, BLK_CLOSE, SEL_CLOSE, SEL_OPEN};
+use mascii::editor::{Editor, BLK_CLOSE, JUMP_CHAR_BASE, JUMP_LABELS, SEL_CLOSE, SEL_OPEN};
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
-use mascii::render::{render_row, RenderCtx};
+use mascii::render::{render_row, RenderCtx, CURSOR_CHAR};
 use mascii::typst::row_to_typst;
 use wasm_bindgen::prelude::*;
 
@@ -77,15 +77,48 @@ impl MasciiEditor {
         let ctx = RenderCtx {
             italic: self.ed.italic,
         };
-        let text = render_row(&root, cursor_ref, false, &ctx).to_text();
-        text.chars()
-            .map(|c| match c {
+        let block = render_row(&root, cursor_ref, false, &ctx);
+        // Caret and decorations are zero-width metadata; the text screen
+        // draws them over the glyphs (▌ caret, ⟦ ⟧ selection ends,
+        // a/s/d… jump and block labels).
+        let mut lines: Vec<Vec<char>> = block
+            .to_strings()
+            .iter()
+            .map(|l| l.chars().collect())
+            .collect();
+        if lines.is_empty() {
+            lines.push(Vec::new());
+        }
+        let put = |lines: &mut Vec<Vec<char>>, r: usize, c: usize, ch: char| {
+            let row = &mut lines[r];
+            if c >= row.len() {
+                row.resize(c + 1, ' ');
+            }
+            row[c] = ch;
+        };
+        for &(r, c, m) in &block.marks {
+            let ch = match m {
                 SEL_OPEN => '⟦',
-                SEL_CLOSE => '⟧',
-                BLK_CLOSE => '⟧',
-                c => c,
-            })
-            .collect()
+                SEL_CLOSE | BLK_CLOSE => '⟧',
+                m => {
+                    let idx = (m as u32).wrapping_sub(JUMP_CHAR_BASE) as usize;
+                    match JUMP_LABELS.chars().nth(idx) {
+                        Some(l) => l,
+                        // Ghost-slot markers and friends: no overlay.
+                        None => continue,
+                    }
+                }
+            };
+            put(&mut lines, r, c, ch);
+        }
+        if let Some((r, c)) = block.caret {
+            put(&mut lines, r, c, CURSOR_CHAR);
+        }
+        lines
+            .into_iter()
+            .map(|l| l.into_iter().collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     /// Mouse click at cell (x, y) of the rendered screen: moves the
