@@ -639,10 +639,12 @@ fn render_node(
 /// rows/columns *including the outer edges*, so the extent and the cell
 /// boundaries are explicit without any delimiter (LaTeX \begin{matrix}).
 /// Baseline = vertical center of the whole lattice.
-/// Delimiter fused with a sole grid segment: the delimiter columns carry
-/// the lattice's row junctions (┠ ┨, or the brace vertex on the baseline
-/// row), and the ┬ ┴ column markers sit on the delimiter's own top and
-/// bottom rows.
+/// Delimiter fused with a sole grid segment, in the minimal shape:
+/// - rows>=2 and cols>=2: separator rows carry only ┼ at the crossings
+/// - one row: ┬ / ┴ marker rows above and below the cells
+/// - one column: ┠ ┨ junctions in the delimiter columns
+///
+/// The older ┬┴+┠┨ shape stays legal input; fmt tightens it.
 #[allow(clippy::too_many_arguments)]
 fn render_fused_grid(
     left: char,
@@ -686,10 +688,16 @@ fn render_fused_grid(
         r
     };
 
-    let mut lines: Vec<Vec<char>> = vec![edge_row('┬')];
+    let one_row = rows == 1;
+    let mut lines: Vec<Vec<char>> = Vec::new();
     let mut cancel: Vec<(usize, usize)> = Vec::new();
+    let mut sep_rows: Vec<usize> = Vec::new();
+    if one_row {
+        lines.push(edge_row('┬'));
+    }
     for i in 0..rows {
         if i > 0 {
+            sep_rows.push(lines.len());
             lines.push(edge_row('┼'));
         }
         let mut parts: Vec<Block> = Vec::new();
@@ -715,58 +723,30 @@ fn render_fused_grid(
             lines.push(l);
         }
     }
-    lines.push(edge_row('┴'));
+    if one_row {
+        lines.push(edge_row('┴'));
+    }
     let h = lines.len();
     let bl = (h - 1) / 2;
-    // Marker rows for the delimiter-column junctions (the rows we wrote
-    // via edge_row('┼'); with a single column they are the blank rows).
-    let marker_rows: Vec<bool> = {
-        lines
-            .iter()
-            .enumerate()
-            .map(|(r, line)| {
-                r != 0
-                    && r != h - 1
-                    && (marker_x.iter().any(|&mx| line[mx] == '┼')
-                        || (marker_x.is_empty() && line.iter().all(|&c| c == ' ')))
-            })
-            .collect()
-    };
-    let lcol = fused_delim_column(left, true, h, bl, &marker_rows);
-    let rcol = fused_delim_column(right, false, h, bl, &marker_rows);
+    // Single column: the delimiter columns carry the row junctions.
+    let junction = cols == 1;
+    let lcol = delim_column(left, true, h, bl);
+    let rcol = delim_column(right, false, h, bl);
     let mut out = Vec::with_capacity(h);
     for (r, line) in lines.into_iter().enumerate() {
+        let (lc, rc) = if junction && sep_rows.contains(&r) {
+            ('┠', '┨')
+        } else {
+            (lcol[r], rcol[r])
+        };
         let mut row = Vec::with_capacity(width + 2);
-        row.push(lcol[r]);
+        row.push(lc);
         row.extend(line);
-        row.push(rcol[r]);
+        row.push(rc);
         out.push(row);
     }
     let cancel = cancel.into_iter().map(|(r, c)| (r, c + 1)).collect();
     Block { lines: out, baseline: bl, cancel }
-}
-
-/// Delimiter column for a fused grid: ┠ / ┨ on the internal marker rows
-/// (the brace vertex still claims the baseline row when it lands on a
-/// cell row; on a marker row the junction wins and the baseline is
-/// recovered as the extent center instead).
-fn fused_delim_column(
-    spec: char,
-    left: bool,
-    h: usize,
-    bl: usize,
-    marker_rows: &[bool],
-) -> Vec<char> {
-    let base = delim_column(spec, left, h, bl);
-    (0..h)
-        .map(|r| {
-            if marker_rows[r] {
-                if left { '┠' } else { '┨' }
-            } else {
-                base[r]
-            }
-        })
-        .collect()
 }
 
 fn render_lattice(
@@ -986,10 +966,7 @@ mod tests {
                 cells: vec![sym_row("a"), sym_row("b"), sym_row("c"), sym_row("d")],
             }]],
         }];
-        assert_eq!(
-            plain(&root),
-            vec!["⎡   ┬   ⎤", "⎢ a   b ⎥", "┠   ┼   ┨", "⎢ c   d ⎥", "⎣   ┴   ⎦"]
-        );
+        assert_eq!(plain(&root), vec!["⎡ a   b ⎤", "⎢   ┼   ⎥", "⎣ c   d ⎦"]);
     }
 
     #[test]

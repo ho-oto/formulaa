@@ -174,10 +174,13 @@ fn right_col_spec(c: char) -> Option<char> {
     })
 }
 
-/// Fused-grid markers of a delimiter block, if its interior is one: the
-/// top/bottom rows must contain nothing but ┬ / ┴ (a *nested* lattice can
-/// put stray ┬ on the top row otherwise), and at least one marker must
-/// exist. Returns (marker_cols, marker_rows).
+/// Fused-grid markers of a delimiter block, if its interior is one.
+/// Canonical shapes: pure ┼-rows (multi-row × multi-col), ┬/┴ edge rows
+/// (one row), ┠/┨ junctions in the delimiter columns (one column) — and
+/// any mix of these is accepted as input. A "pure" row contains nothing
+/// but blanks and its marker (a nested structure always shows some other
+/// glyph on that row). Returns (marker_cols, marker_rows, t, b) with the
+/// cell area rows t..=b.
 #[allow(clippy::type_complexity)]
 fn fused_grid_markers(
     g: &Grid,
@@ -185,24 +188,55 @@ fn fused_grid_markers(
     bot: usize,
     col: usize,
     close: usize,
-) -> Option<(Vec<usize>, Vec<usize>)> {
-    if close <= col + 1 || bot <= top + 1 {
+) -> Option<(Vec<usize>, Vec<usize>, usize, usize)> {
+    if close <= col + 1 || bot <= top {
         return None;
     }
-    let clean = |r: usize, mark: char| {
-        (col + 1..close).all(|c2| g.at(r, c2) == ' ' || g.at(r, c2) == mark)
+    let pure = |r: usize, mark: char| {
+        let mut seen = false;
+        for c2 in col + 1..close {
+            let ch = g.at(r, c2);
+            if ch == mark {
+                seen = true;
+            } else if ch != ' ' {
+                return None;
+            }
+        }
+        seen.then(|| (col + 1..close).filter(|&c2| g.at(r, c2) == mark).collect::<Vec<_>>())
     };
-    if !clean(top, '┬') || !clean(bot, '┴') {
-        return None;
+    let (mut t, mut b) = (top, bot);
+    let mut cols_marks: Option<Vec<usize>> = None;
+    if let Some(cs) = pure(top, '┬') {
+        cols_marks = Some(cs);
+        t = top + 1;
     }
-    let marker_cols: Vec<usize> = (col + 1..close).filter(|&c2| g.at(top, c2) == '┬').collect();
-    let marker_rows: Vec<usize> = (top + 1..bot)
-        .filter(|&r| g.at(r, col) == '┠' || g.at(r, close) == '┨')
-        .collect();
+    if let Some(cs) = pure(bot, '┴') {
+        if let Some(prev) = &cols_marks {
+            if *prev != cs {
+                return None;
+            }
+        } else {
+            cols_marks = Some(cs);
+        }
+        b = bot - 1;
+    }
+    let mut marker_rows: Vec<usize> = Vec::new();
+    for r in t..=b {
+        if let Some(cs) = pure(r, '┼') {
+            match &cols_marks {
+                Some(prev) if *prev != cs => return None,
+                _ => cols_marks = Some(cs),
+            }
+            marker_rows.push(r);
+        } else if g.at(r, col) == '┠' || g.at(r, close) == '┨' {
+            marker_rows.push(r);
+        }
+    }
+    let marker_cols = cols_marks.unwrap_or_default();
     if marker_cols.is_empty() && marker_rows.is_empty() {
         return None;
     }
-    Some((marker_cols, marker_rows))
+    Some((marker_cols, marker_rows, t, b))
 }
 
 /// Like `open_spec`, resolving a fused-grid junction (┠) by walking its
@@ -1035,19 +1069,13 @@ fn parse_delim(
     // rows in the left column mean the interior is one grid whose edges
     // are the delimiter columns themselves.
     {
-        if let Some((marker_cols, marker_rows)) = fused_grid_markers(g, top, bot, col, close_col)
+        if let Some((marker_cols, marker_rows, t, b)) =
+            fused_grid_markers(g, top, bot, col, close_col)
         {
-            for &r in &marker_rows {
-                for &c2 in &marker_cols {
-                    if g.at(r, c2) != '┼' {
-                        return err("broken fused grid (expected ┼)", r, c2);
-                    }
-                }
-            }
             let (rows_n, cols_n) = (marker_rows.len() + 1, marker_cols.len() + 1);
-            let row_edges: Vec<usize> = std::iter::once(top)
-                .chain(marker_rows.iter().copied())
-                .chain(std::iter::once(bot))
+            let row_edges: Vec<i64> = std::iter::once(t as i64 - 1)
+                .chain(marker_rows.iter().map(|&r| r as i64))
+                .chain(std::iter::once(b as i64 + 1))
                 .collect();
             let col_edges: Vec<usize> = std::iter::once(col)
                 .chain(marker_cols.iter().copied())
@@ -1057,8 +1085,8 @@ fn parse_delim(
             for ri in 0..rows_n {
                 for ci in 0..cols_n {
                     let cell = Rect {
-                        t: row_edges[ri] + 1,
-                        b: row_edges[ri + 1] - 1,
+                        t: (row_edges[ri] + 1) as usize,
+                        b: (row_edges[ri + 1] - 1) as usize,
                         l: col_edges[ci] + 1,
                         r: col_edges[ci + 1] - 1,
                     };
