@@ -8,6 +8,7 @@ LyX 風 TUI 数式エディタ + AA⇄AST 相互変換ツール。Rust / ratatui
 cargo test                      # 全テスト(ユニット + ラウンドトリップ)
 cargo check -p mascii-wasm --target wasm32-unknown-unknown  # wasm 側
 cargo clippy --all-targets     # 警告ゼロを維持
+cargo fmt                      # コミット前に必ず整形(リポジトリ全体が rustfmt 準拠)
 cargo run                      # TUI エディタ
 cargo run --example demo       # レンダリングのサンプル出力(TUI なし)
 cargo run --example ambig      # バンド記法が解決した曖昧性の回帰デモ
