@@ -124,9 +124,11 @@ fn trim(g: &Grid, mut rect: Rect) -> Option<Rect> {
 /// bracket-protected against cell/script splitting like any other pair.
 const OPEN_BRACKETS: &[char] = &[
     '(', '⎛', '⎜', '⎝', '[', '⎡', '⎢', '⎣', '{', '⎧', '⎨', '⎩', '⟨', '⎸', '▏', '┌', '├', '└',
+    '┠',
 ];
 const CLOSE_BRACKETS: &[char] = &[
     ')', '⎞', '⎟', '⎠', ']', '⎤', '⎥', '⎦', '}', '⎫', '⎬', '⎭', '⟩', '⎹', '▕', '┐', '┤', '┘',
+    '┨',
 ];
 
 /// Delimiter spec char for a glyph that can appear on the *baseline row*
@@ -140,8 +142,88 @@ fn open_spec(c: char) -> Option<char> {
         '⟨' => '⟨',
         '⎸' => '|',
         '▏' => '.',
+        // ┠ (fused-grid junction) resolves its family via the column walk
+        // in open_spec_at; standalone it only marks "an open side".
+        '┠' => return None,
         _ => return None,
     })
+}
+
+/// Family of *any* glyph a left delimiter column can contain (used by the
+/// junction-resolution walk; ⎪ is shared with right braces, so it only
+/// appears via the walk's own continue set).
+fn left_col_spec(c: char) -> Option<char> {
+    Some(match c {
+        '(' | '⎛' | '⎜' | '⎝' => '(',
+        '[' | '⎡' | '⎢' | '⎣' => '[',
+        '{' | '⎧' | '⎨' | '⎩' => '{',
+        '⎸' => '|',
+        '▏' => '.',
+        _ => return None,
+    })
+}
+
+fn right_col_spec(c: char) -> Option<char> {
+    Some(match c {
+        ')' | '⎞' | '⎟' | '⎠' => ')',
+        ']' | '⎤' | '⎥' | '⎦' => ']',
+        '}' | '⎫' | '⎬' | '⎭' => '}',
+        '⎹' => '|',
+        '▕' => '.',
+        _ => return None,
+    })
+}
+
+/// Fused-grid markers of a delimiter block, if its interior is one: the
+/// top/bottom rows must contain nothing but ┬ / ┴ (a *nested* lattice can
+/// put stray ┬ on the top row otherwise), and at least one marker must
+/// exist. Returns (marker_cols, marker_rows).
+#[allow(clippy::type_complexity)]
+fn fused_grid_markers(
+    g: &Grid,
+    top: usize,
+    bot: usize,
+    col: usize,
+    close: usize,
+) -> Option<(Vec<usize>, Vec<usize>)> {
+    if close <= col + 1 || bot <= top + 1 {
+        return None;
+    }
+    let clean = |r: usize, mark: char| {
+        (col + 1..close).all(|c2| g.at(r, c2) == ' ' || g.at(r, c2) == mark)
+    };
+    if !clean(top, '┬') || !clean(bot, '┴') {
+        return None;
+    }
+    let marker_cols: Vec<usize> = (col + 1..close).filter(|&c2| g.at(top, c2) == '┬').collect();
+    let marker_rows: Vec<usize> = (top + 1..bot)
+        .filter(|&r| g.at(r, col) == '┠' || g.at(r, close) == '┨')
+        .collect();
+    if marker_cols.is_empty() && marker_rows.is_empty() {
+        return None;
+    }
+    Some((marker_cols, marker_rows))
+}
+
+/// Like `open_spec`, resolving a fused-grid junction (┠) by walking its
+/// column to a family-distinct glyph (through ⎪ and further junctions).
+fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
+    let ch = g.at(row, col);
+    if ch != '┠' {
+        return open_spec(ch);
+    }
+    let h = g.g.len();
+    let walk = |range: &mut dyn Iterator<Item = usize>| -> Option<char> {
+        for r in range {
+            match left_col_spec(g.at(r, col)) {
+                Some(s) => return Some(s),
+                None if matches!(g.at(r, col), '┠' | '⎪') => continue,
+                None => return None,
+            }
+        }
+        None
+    };
+    walk(&mut (0..row).rev()).or_else(|| walk(&mut (row + 1..h)))
 }
 
 fn close_spec(c: char) -> Option<char> {
@@ -156,16 +238,37 @@ fn close_spec(c: char) -> Option<char> {
     })
 }
 
+/// Like `close_spec`, resolving a fused-grid junction (┨) by walking its
+/// column to a family-distinct glyph (through ⎪ and further junctions).
+fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
+    let ch = g.at(row, col);
+    if ch != '┨' {
+        return close_spec(ch);
+    }
+    let h = g.g.len();
+    let walk = |range: &mut dyn Iterator<Item = usize>| -> Option<char> {
+        for r in range {
+            match right_col_spec(g.at(r, col)) {
+                Some(s) => return Some(s),
+                None if matches!(g.at(r, col), '┨' | '⎪') => continue,
+                None => return None,
+            }
+        }
+        None
+    };
+    walk(&mut (0..row).rev()).or_else(|| walk(&mut (row + 1..h)))
+}
+
 /// Every glyph a left delimiter column of `spec` can contain (for the
 /// vertical-extent scan).
 fn left_family(spec: char) -> &'static [char] {
     match spec {
-        '(' => &['(', '⎛', '⎜', '⎝'],
-        '[' => &['[', '⎡', '⎢', '⎣'],
-        '{' => &['{', '⎧', '⎪', '⎨', '⎩'],
+        '(' => &['(', '⎛', '⎜', '⎝', '┠'],
+        '[' => &['[', '⎡', '⎢', '⎣', '┠'],
+        '{' => &['{', '⎧', '⎪', '⎨', '⎩', '┠'],
         '⟨' => &['⟨', '╱', '╲'],
-        '|' => &['⎸'],
-        _ => &['▏'],
+        '|' => &['⎸', '┠'],
+        _ => &['▏', '┠'],
     }
 }
 
@@ -267,17 +370,29 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
     let first = *occupied.first().unwrap();
     let last = *occupied.last().unwrap();
     match g.at(first, c) {
-        // Delimiter columns: baseline of the inner region (a lattice
-        // inside answers with its own ┌├└ center rule).
+        // Delimiter columns: a fused grid (┠ junctions in this column or
+        // ┬ markers on the top row) centers on the extent; otherwise the
+        // baseline is that of the inner region (a lattice inside answers
+        // with its own ┌├└ center rule).
         '⎡' | '[' | '⎛' | '⎸' | '▏' => {
+            if let Ok(close) = match_delim(g, first, c, rect.r) {
+                if fused_grid_markers(g, first, last, c, close).is_some() {
+                    return Ok((first + last) / 2);
+                }
+            }
             find_baseline(g, Rect { t: first, b: last, l: c + 1, r: rect.r })
         }
         '(' => Ok(first),
         // Brace / angle columns carry their vertex on the baseline row.
-        '⎧' | '⎪' | '⎨' | '⎩' => occupied
+        '⎧' | '⎪' | '⎨' | '⎩' | '┠' => occupied
             .iter()
             .find(|&&r| g.at(r, c) == '⎨')
             .copied()
+            // A fused grid whose baseline lands on a junction row shows ┠
+            // there instead of the vertex; the grid centers on the extent.
+            .or_else(|| {
+                (first..=last).any(|r| g.at(r, c) == '┠').then_some((first + last) / 2)
+            })
             .ok_or(())
             .or_else(|_| err("brace column without ⎨", first, c)),
         '⟨' | '╱' | '╲' => occupied
@@ -579,7 +694,7 @@ fn parse_region(
                 out.push(Node::Sym(')'));
                 col += 1;
             }
-            _ if open_spec(ch).is_some() => {
+            _ if open_spec_at(g, bl, col).is_some() => {
                 let (node, close_col) = parse_delim(g, rect, bl, col, depth, trace, in_cancel)?;
                 out.push(node);
                 col = close_col + 1;
@@ -873,10 +988,62 @@ fn parse_delim(
     trace: &mut Vec<RegionSpan>,
     in_cancel: bool,
 ) -> Result<(Node, usize)> {
-    let left = open_spec(g.at(bl, col)).unwrap();
+    let left = match open_spec_at(g, bl, col) {
+        Some(sp) => sp,
+        None => return err("cannot resolve delimiter family", bl, col),
+    };
     let close_col = match_delim(g, bl, col, rect.r)?;
-    let right = close_spec(g.at(bl, close_col)).unwrap();
+    let right = match close_spec_at(g, bl, close_col) {
+        Some(sp) => sp,
+        None => return err("cannot resolve delimiter family", bl, close_col),
+    };
     let (top, bot) = vertical_extent(g, rect, col, bl, left_family(left));
+
+    // Fused grid: ┬ markers on the delimiter's top row and/or ┠ junction
+    // rows in the left column mean the interior is one grid whose edges
+    // are the delimiter columns themselves.
+    {
+        if let Some((marker_cols, marker_rows)) = fused_grid_markers(g, top, bot, col, close_col)
+        {
+            for &r in &marker_rows {
+                for &c2 in &marker_cols {
+                    if g.at(r, c2) != '┼' {
+                        return err("broken fused grid (expected ┼)", r, c2);
+                    }
+                }
+            }
+            let (rows_n, cols_n) = (marker_rows.len() + 1, marker_cols.len() + 1);
+            let row_edges: Vec<usize> = std::iter::once(top)
+                .chain(marker_rows.iter().copied())
+                .chain(std::iter::once(bot))
+                .collect();
+            let col_edges: Vec<usize> = std::iter::once(col)
+                .chain(marker_cols.iter().copied())
+                .chain(std::iter::once(close_col))
+                .collect();
+            let mut cells = Vec::with_capacity(rows_n * cols_n);
+            for ri in 0..rows_n {
+                for ci in 0..cols_n {
+                    let cell = Rect {
+                        t: row_edges[ri] + 1,
+                        b: row_edges[ri + 1] - 1,
+                        l: col_edges[ci] + 1,
+                        r: col_edges[ci + 1] - 1,
+                    };
+                    let row = if cell.t > cell.b || cell.l > cell.r {
+                        vec![]
+                    } else {
+                        parse_region(g, cell, None, depth + 1, trace, in_cancel)?
+                    };
+                    cells.push(row);
+                }
+            }
+            let array = Node::Array { rows: rows_n, cols: cols_n, cells };
+            let node =
+                Node::Delim { left, right, mids: vec![], segs: vec![vec![array]] };
+            return Ok((node, close_col));
+        }
+    }
 
     let mid_cols = if close_col > col + 1 {
         mid_columns(g, Rect { t: top, b: bot, l: col + 1, r: close_col - 1 })

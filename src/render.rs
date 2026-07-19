@@ -540,7 +540,31 @@ fn render_node(
             Block { lines, baseline, cancel }
         }
 
-        Node::Delim { left, right, mids: _, segs } => {
+        Node::Delim { left, right, mids, segs } => {
+            // A sole Array segment fuses with the delimiter: the delimiter
+            // columns absorb the lattice edges (junction rows show ┠ ┨,
+            // column markers ┬ ┴ ride the delimiter's top/bottom rows).
+            // Angles keep their vertex geometry and wrap a bare lattice
+            // instead.
+            if mids.is_empty() && *left != '⟨' && *right != '⟩' {
+                if let [seg] = &segs[..] {
+                    if let [Node::Array { rows, cols, cells }] = &seg[..] {
+                        let seg_cursor = cur(Field::Seg(0));
+                        let acur = match seg_cursor {
+                            Some((path, c)) => match path.first() {
+                                Some(&(0, f)) => Some((f, (&path[1..], c))),
+                                _ => None,
+                            },
+                            None => None,
+                        };
+                        if !matches!(seg_cursor, Some(([], _))) {
+                            return render_fused_grid(
+                                *left, *right, *rows, *cols, cells, acur, ctx,
+                            );
+                        }
+                    }
+                }
+            }
             // Segments render as ordinary rows (an Array node inside is a
             // grid body); 1-column gaps between them become full-height │
             // middles after concatenation.
@@ -601,6 +625,136 @@ fn render_node(
 /// rows/columns *including the outer edges*, so the extent and the cell
 /// boundaries are explicit without any delimiter (LaTeX \begin{matrix}).
 /// Baseline = vertical center of the whole lattice.
+/// Delimiter fused with a sole grid segment: the delimiter columns carry
+/// the lattice's row junctions (┠ ┨, or the brace vertex on the baseline
+/// row), and the ┬ ┴ column markers sit on the delimiter's own top and
+/// bottom rows.
+#[allow(clippy::too_many_arguments)]
+fn render_fused_grid(
+    left: char,
+    right: char,
+    rows: usize,
+    cols: usize,
+    cells: &[Row],
+    cursor: Option<(Field, CursorRef)>,
+    ctx: &RenderCtx,
+) -> Block {
+    let blocks: Vec<Block> = cells
+        .iter()
+        .enumerate()
+        .map(|(i, cell)| {
+            let cur = match cursor {
+                Some((Field::Cell(ci), c)) if ci == i => Some(c),
+                _ => None,
+            };
+            render_row(cell, cur, true, ctx)
+        })
+        .collect();
+    let col_w: Vec<usize> = (0..cols)
+        .map(|j| (0..rows).map(|i| blocks[i * cols + j].width()).max().unwrap_or(1))
+        .collect();
+    // Interior: pad cell pad, with a marker column between cells.
+    let mut marker_x: Vec<usize> = Vec::new();
+    let mut x = 0;
+    for (j, w) in col_w.iter().enumerate() {
+        x += w + 2;
+        if j + 1 < cols {
+            marker_x.push(x);
+            x += 1;
+        }
+    }
+    let width = x;
+    let edge_row = |mark: char| {
+        let mut r = vec![' '; width];
+        for &mx in &marker_x {
+            r[mx] = mark;
+        }
+        r
+    };
+
+    let mut lines: Vec<Vec<char>> = vec![edge_row('┬')];
+    let mut cancel: Vec<(usize, usize)> = Vec::new();
+    for i in 0..rows {
+        if i > 0 {
+            lines.push(edge_row('┼'));
+        }
+        let mut parts: Vec<Block> = Vec::new();
+        for j in 0..cols {
+            if j > 0 {
+                parts.push(Block::new(vec![vec![' ']], 0));
+            }
+            parts.push(Block::new(vec![vec![' ']], 0));
+            let b = &blocks[i * cols + j];
+            parts.push(Block {
+                lines: center_pad(b, col_w[j]),
+                baseline: b.baseline,
+                cancel: centered_cancel(b, col_w[j], 0).collect(),
+            });
+            parts.push(Block::new(vec![vec![' ']], 0));
+        }
+        let row_block = hcat(&parts);
+        let row_off = lines.len();
+        cancel.extend(row_block.cancel.iter().map(|&(r, c)| (r + row_off, c)));
+        for line in row_block.lines {
+            let mut l = line;
+            l.resize(width, ' ');
+            lines.push(l);
+        }
+    }
+    lines.push(edge_row('┴'));
+    let h = lines.len();
+    let bl = (h - 1) / 2;
+    // Marker rows for the delimiter-column junctions (the rows we wrote
+    // via edge_row('┼'); with a single column they are the blank rows).
+    let marker_rows: Vec<bool> = {
+        lines
+            .iter()
+            .enumerate()
+            .map(|(r, line)| {
+                r != 0
+                    && r != h - 1
+                    && (marker_x.iter().any(|&mx| line[mx] == '┼')
+                        || (marker_x.is_empty() && line.iter().all(|&c| c == ' ')))
+            })
+            .collect()
+    };
+    let lcol = fused_delim_column(left, true, h, bl, &marker_rows);
+    let rcol = fused_delim_column(right, false, h, bl, &marker_rows);
+    let mut out = Vec::with_capacity(h);
+    for (r, line) in lines.into_iter().enumerate() {
+        let mut row = Vec::with_capacity(width + 2);
+        row.push(lcol[r]);
+        row.extend(line);
+        row.push(rcol[r]);
+        out.push(row);
+    }
+    let cancel = cancel.into_iter().map(|(r, c)| (r, c + 1)).collect();
+    Block { lines: out, baseline: bl, cancel }
+}
+
+/// Delimiter column for a fused grid: ┠ / ┨ on the internal marker rows
+/// (the brace vertex still claims the baseline row when it lands on a
+/// cell row; on a marker row the junction wins and the baseline is
+/// recovered as the extent center instead).
+fn fused_delim_column(
+    spec: char,
+    left: bool,
+    h: usize,
+    bl: usize,
+    marker_rows: &[bool],
+) -> Vec<char> {
+    let base = delim_column(spec, left, h, bl);
+    (0..h)
+        .map(|r| {
+            if marker_rows[r] {
+                if left { '┠' } else { '┨' }
+            } else {
+                base[r]
+            }
+        })
+        .collect()
+}
+
 fn render_lattice(
     rows: usize,
     cols: usize,
@@ -820,13 +974,7 @@ mod tests {
         }];
         assert_eq!(
             plain(&root),
-            vec![
-                "⎡┌   ┬   ┐⎤",
-                "⎢  a   b  ⎥",
-                "⎢├   ┼   ┤⎥",
-                "⎢  c   d  ⎥",
-                "⎣└   ┴   ┘⎦"
-            ]
+            vec!["⎡   ┬   ⎤", "⎢ a   b ⎥", "┠   ┼   ┨", "⎢ c   d ⎥", "⎣   ┴   ⎦"]
         );
     }
 

@@ -353,12 +353,24 @@ fn normalize_node(node: &Node) -> Node {
             over: normalize(over),
             under: normalize(under),
         },
-        Node::Delim { left, right, mids, segs } => Node::Delim {
-            left: *left,
-            right: *right,
-            mids: mids.clone(),
-            segs: segs.iter().map(normalize).collect(),
-        },
+        Node::Delim { left, right, mids, segs } => {
+            let segs = segs
+                .iter()
+                .map(|seg| {
+                    // A sole 1×1 grid is indistinguishable from its cell in
+                    // the fused picture — canonical form is the plain row.
+                    // Iterate: splicing can surface a new sole Array.
+                    let mut seg = normalize(seg);
+                    loop {
+                        seg = match &seg[..] {
+                            [Node::Array { rows: 1, cols: 1, cells }] => normalize(&cells[0]),
+                            _ => break seg,
+                        };
+                    }
+                })
+                .collect();
+            Node::Delim { left: *left, right: *right, mids: mids.clone(), segs }
+        }
         Node::Cancel { arg } => {
             // A cancel strikes every cell of its subtree, so any Cancel
             // nested anywhere inside it (even deep in a fraction) is the
