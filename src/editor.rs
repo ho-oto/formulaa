@@ -765,14 +765,16 @@ impl Editor {
                     } else {
                         self.insert_sym(c);
                     }
-                } else if let Some(t) = cmd
+                } else if let Some((t, math)) = cmd
                     .strip_prefix("rm")
-                    .or_else(|| cmd.strip_prefix("text"))
-                    .filter(|t| !t.is_empty() && !t.contains('"'))
+                    .map(|t| (t, true))
+                    .or_else(|| cmd.strip_prefix("text").map(|t| (t, false)))
+                    .filter(|(t, _)| !t.is_empty() && !t.contains('"') && !t.contains('\''))
                 {
-                    // \rm<chars> / \text<chars>: roman/text run "…".
+                    // \rm<chars> = \mathrm, \text<chars> = \text.
                     let col = self.col;
-                    self.cur_row_mut().insert(col, Node::Text(t.to_string()));
+                    self.cur_row_mut()
+                        .insert(col, Node::Text { t: t.to_string(), math });
                     self.col += 1;
                 } else {
                     self.message = format!("unknown command: \\{}", cmd);

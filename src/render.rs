@@ -360,6 +360,14 @@ pub fn render_row(
                         // general ┄piece┄ grammar munches non-space runs).
                         a == OP_BAND
                             || b == OP_BAND
+                            // Adjacent upright letter runs (Func / bare
+                            // Text) would fuse into one token.
+                            || (a.is_ascii_alphabetic() && b.is_ascii_alphabetic())
+                            // A prime next to quotable content (letters,
+                            // digits, ␣, another prime) could read as a
+                            // 'mathrm quote'.
+                            || (a == '\'' && (b == '\'' || b.is_ascii_alphanumeric() || b == '␣'))
+                            || (b == '\'' && (a == '\'' || a.is_ascii_alphanumeric() || a == '␣'))
                             || (a == b && (a == FRAC_BAR || a == DOUBLE_BODY))
                             || (a == FRAC_BAR && (b == '>' || b == '→'))
                             || (a == DOUBLE_BODY && (b == '>' || b == '⇒'))
@@ -412,13 +420,24 @@ fn render_node(
         // render math-italic), which is what makes them parseable.
         Node::Func(name) => Block::from_chars(name.chars().collect()),
 
-        // Quoted roman/text run; interior spaces drawn as ␣ so the quotes
+        // Upright run. \mathrm draws bare when self-identifying (>= 2
+        // ASCII letters, not a dictionary word), else 'single-quoted';
+        // \text always "double-quotes". Interior spaces are ␣ so quotes
         // never contain structurally meaningful blank columns.
-        Node::Text(t) => {
-            let mut chars = vec!['"'];
-            chars.extend(t.chars().map(|c| if c == ' ' { '␣' } else { c }));
-            chars.push('"');
-            Block::from_chars(chars)
+        Node::Text { t, math } => {
+            let bare = *math
+                && t.chars().count() >= 2
+                && t.chars().all(|c| c.is_ascii_alphabetic())
+                && !crate::symbols::is_func_name(t);
+            if bare {
+                Block::from_chars(t.chars().collect())
+            } else {
+                let q = if *math { '\'' } else { '"' };
+                let mut chars = vec![q];
+                chars.extend(t.chars().map(|c| if c == ' ' { '␣' } else { c }));
+                chars.push(q);
+                Block::from_chars(chars)
+            }
         }
 
         // Marks in the cells directly above/below the base, stacking

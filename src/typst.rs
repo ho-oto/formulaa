@@ -92,7 +92,13 @@ fn node_to_typst(node: &Node) -> String {
             }
             s
         }
-        Node::Text(t) => format!("\"{}\"", t),
+        Node::Text { t, math } => {
+            if *math {
+                format!("upright({})", if t.chars().count() == 1 { t.clone() } else { format!("\"{}\"", t) })
+            } else {
+                format!("\"{}\"", t)
+            }
+        }
         Node::Brace { over, arg, label } => {
             let cmd = if *over { "overbrace" } else { "underbrace" };
             if label.is_empty() {

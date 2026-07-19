@@ -467,7 +467,7 @@ fn arrows_and_text() {
         n(bigop('∫', vec![], vec![])),
         s("f"),
         n(paren(s("x"))),
-        n(Node::Text("dx".into())),
+        n(Node::Text { t: "dx".into(), math: true }),
     ]);
     roundtrip("mathrm-dx", &row);
 }

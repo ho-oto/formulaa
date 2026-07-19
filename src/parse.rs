@@ -19,7 +19,7 @@ use crate::render::{
 /// Left-edge glyphs of a grid lattice column (see render::LATTICE_CHARS).
 const LATTICE_LEFT: &[char] = &['┌', '├', '└'];
 const LATTICE_TOP: &[char] = &['┌', '┬', '┐'];
-use crate::symbols::{bigop_by_char, func_prefix, is_over_mark, is_under_mark};
+use crate::symbols::{bigop_by_char, is_over_mark, is_under_mark};
 
 const RADICALS: &[(char, u8)] = &[('√', 2), ('∛', 3), ('∜', 4)];
 
@@ -678,8 +678,8 @@ fn parse_region(
                 col = run_end + 1;
             }
             '"' => {
-                // Quoted roman/text run ("dx", "if ␣ x"): flat baseline
-                // chars up to the closing quote; ␣ maps back to a space.
+                // "double-quoted" \text run: flat baseline chars up to
+                // the closing quote; ␣ maps back to a space.
                 let mut close = None;
                 for c2 in col + 1..=rect.r {
                     if g.at(bl, c2) == '"' {
@@ -696,8 +696,41 @@ fn parse_region(
                         c2 => c2,
                     })
                     .collect();
-                out.push(Node::Text(t));
+                out.push(Node::Text { t, math: false });
                 col = close + 1;
+            }
+            '\'' => {
+                // 'single-quoted' \mathrm run — but only when a closing
+                // quote exists and the content is nonempty ASCII
+                // alphanumerics/␣; anything else keeps ' as the prime
+                // atom (canonical output spaces primes away from letter
+                // runs and quotes, so the two never collide).
+                let quoted = (col + 1..=rect.r)
+                    .take_while(|&c2| g.at(bl, c2) != ' ')
+                    .find(|&c2| g.at(bl, c2) == '\'')
+                    .filter(|&close| {
+                        close > col + 1
+                            && (col + 1..close).all(|c2| {
+                                let ch2 = g.at(bl, c2);
+                                ch2.is_ascii_alphanumeric() || ch2 == '␣'
+                            })
+                    });
+                match quoted {
+                    Some(close) => {
+                        let t: String = (col + 1..close)
+                            .map(|c2| match g.at(bl, c2) {
+                                '␣' => ' ',
+                                c2 => c2,
+                            })
+                            .collect();
+                        out.push(Node::Text { t, math: true });
+                        col = close + 1;
+                    }
+                    None => {
+                        out.push(Node::Sym('\''));
+                        col += 1;
+                    }
+                }
             }
             '~' => {
                 // Lenient input: '~' doubles as the band char (easier to
@@ -802,20 +835,26 @@ fn parse_region(
                 col = run_end + 1;
             }
             _ if ch.is_ascii_alphabetic() => {
-                // Upright ASCII letters: function names (canonical), with
-                // leftover letters accepted as plain atoms (lenient input).
+                // Upright ASCII letter run: a dictionary word is a
+                // function, anything longer is a \mathrm text run, and a
+                // *lone* single letter is an italic variable — unless it
+                // is glued to another letter (d𝑦 = roman differential).
                 let run_end =
                     scan_while_same_flag(g, bl, col, rect.r, |c| c.is_ascii_alphabetic());
                 let word: String = (col..=run_end).map(|c| g.at(bl, c)).collect();
-                let mut rest = word.as_str();
-                while !rest.is_empty() {
-                    if let Some(f) = func_prefix(rest) {
-                        out.push(Node::Func(f.to_string()));
-                        rest = &rest[f.len()..];
+                if word.chars().count() == 1 {
+                    let prev_letter = col > rect.l && g.at(bl, col - 1).is_alphabetic();
+                    let next_letter =
+                        run_end < rect.r && g.at(bl, run_end + 1).is_alphabetic();
+                    if prev_letter || next_letter {
+                        out.push(Node::Text { t: word, math: true });
                     } else {
-                        out.push(Node::Sym(rest.chars().next().unwrap()));
-                        rest = &rest[1..];
+                        out.push(Node::Sym(ch));
                     }
+                } else if crate::symbols::is_func_name(&word) {
+                    out.push(Node::Func(word));
+                } else {
+                    out.push(Node::Text { t: word, math: true });
                 }
                 col = run_end + 1;
             }
@@ -1375,10 +1414,24 @@ mod tests {
 
     #[test]
     fn parses_handwritten_ascii() {
+        // Lone ASCII letters are italic variables…
         let row = parse("x+1").unwrap();
         assert_eq!(row_to_latex(&row), "x+1");
+        let row = parse("a sin y").unwrap();
+        assert_eq!(row_to_latex(&row), "a\\sin y");
+        // …but letter *runs* are \mathrm unless they are dictionary words,
+        // and a single letter glued to another letter is roman too (d𝑦).
+        let row = parse("asiny").unwrap();
+        assert_eq!(row_to_latex(&row), "\\mathrm{asiny}");
         let row = parse("E=mc²").unwrap();
-        assert_eq!(row_to_latex(&row), "E=mc^{2}");
+        assert_eq!(row_to_latex(&row), "E=\\mathrm{mc}^{2}");
+        let row = parse("d𝑦").unwrap();
+        assert_eq!(row_to_latex(&row), "\\mathrm{d}y");
+        // 'single quotes' force \mathrm; primes survive elsewhere.
+        let row = parse("'d'x").unwrap();
+        assert_eq!(row_to_latex(&row), "\\mathrm{d}x");
+        let row = parse("𝑥''").unwrap();
+        assert_eq!(row_to_latex(&row), "x''");
     }
 
     #[test]

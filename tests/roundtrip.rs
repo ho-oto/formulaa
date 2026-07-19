@@ -528,7 +528,7 @@ fn text_runs() {
             n(bigop('∫', vec![], vec![])),
             s("f"),
             n(paren(s("x"))),
-            n(Node::Text("dx".into())),
+            n(Node::Text { t: "dx".into(), math: true }),
         ]),
     );
     roundtrip(
@@ -540,7 +540,7 @@ fn text_runs() {
             vec![n(array(
                 2,
                 2,
-                vec![s("x"), s("x≥0"), s("-x"), n(Node::Text("other wise".into()))],
+                vec![s("x"), s("x≥0"), s("-x"), n(Node::Text { t: "other wise".into(), math: false })],
             ))],
         )),
     );
@@ -717,7 +717,7 @@ impl Rng {
 
 const ATOMS: &[char] = &[
     'a', 'b', 'c', 'x', 'y', 'z', 'A', 'B', 'N', '0', '1', '2', '7', '+',
-    '-', '=', '<', 'α', 'β', 'π', 'λ', '∞', '∂', '⋅', '±', '∈', '→', '␣', '~',
+    '-', '=', '<', 'α', 'β', 'π', 'λ', '∞', '∂', '⋅', '±', '∈', '→', '␣', '~', '\'',
 ];
 
 fn gen_row(rng: &mut Rng, depth: usize, max_len: usize) -> Row {
@@ -798,7 +798,10 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             let cells = (0..rows * cols).map(|_| gen_row(rng, d, 2)).collect();
             Node::Array { rows, cols, cells }
         }
-        10 => Node::Text(["dx", "if", "abc", "T", "if x"][rng.below(5)].into()),
+        10 => {
+            let t = ["dx", "if", "abc", "T", "if x", "sin", "d"][rng.below(7)];
+            Node::Text { t: t.into(), math: rng.below(2) == 0 }
+        }
         11 => Node::Brace {
             over: rng.below(2) == 0,
             arg: gen_row(rng, d, 3),

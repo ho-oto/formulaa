@@ -28,8 +28,9 @@ mascii fmt      formula.txt     # AA → 正準AA(手書きAAの正規化・整�
 cargo run --example demo        # レンダリングのサンプルを表示
 ```
 
-手書きAAもある程度受理します(ASCII の `x+1`、`E=mc²`、`┄` の代わりの
-`~∑~` バンドなど)。
+手書きAAもある程度受理します(ASCII の `x+1`、`E=m c²`、`┄` の代わりの
+`~∑~` バンドなど。英字は単独1文字=イタリック変数、2文字以上のランは
+辞書語なら関数・それ以外は \mathrm)。
 
 TUI は毎編集後に AA→AST の逆変換を自動検査し、ラウンドトリップが壊れる
 編集を見つけると `mascii_debug/roundtrip-N.txt` にレポートを保存します

@@ -540,7 +540,7 @@ A attach(stretch(->), t: (f), b: (n → ∞)) B
 ### mathrm-dx
 
 ```
-∫𝑓(𝑥)"dx"
+∫𝑓(𝑥)dx
 ```
 
 LaTeX:
@@ -552,7 +552,7 @@ LaTeX:
 Typst:
 
 ```typst
-∫ f lr(( x )) "dx"
+∫ f lr(( x )) upright("dx")
 ```
 
 ## 極限関数
@@ -579,8 +579,8 @@ lim_(x → 0) f lr(( x ))
 ### argmax
 
 ```
-┄argmax┄ 𝑓(𝑥)
-  𝑥∈𝑆
+┄arg┄max┄ 𝑓(𝑥)
+   𝑥∈𝑆
 ```
 
 LaTeX:

@@ -18,10 +18,11 @@ pub enum Node {
     /// Named function/operator rendered upright (sin, cos, log, ...).
     /// Only names from `symbols::FUNCS` are valid (parse relies on this).
     Func(String),
-    /// Roman/text run (\mathrm / \text), rendered as "…" with upright
-    /// chars — the quotes are what keep hand-typed ASCII (lenient italic
-    /// atoms) unambiguous. Interior spaces are drawn as ␣.
-    Text(String),
+    /// Upright run. `math: true` is \mathrm (drawn bare when it is >= 2
+    /// ASCII letters and not a dictionary word, else 'single-quoted');
+    /// `math: false` is \text, always "double-quoted". Interior spaces
+    /// are drawn as ␣ inside quotes.
+    Text { t: String, math: bool },
     /// Accented base character (x̂ ẋ v̄ a⃗ …): over-marks stack upward and
     /// under-marks downward in the cells directly above/below the base,
     /// innermost first. Flat lists (not nesting) are deliberate: the
@@ -91,7 +92,9 @@ impl Node {
     /// Editable fields in cursor-traversal order (empty for atoms).
     pub fn fields(&self) -> Vec<Field> {
         match self {
-            Node::Sym(_) | Node::Spacer | Node::Func(_) | Node::Text(_) | Node::Accent { .. } => vec![],
+            Node::Sym(_) | Node::Spacer | Node::Func(_) | Node::Text { .. } | Node::Accent { .. } => {
+                vec![]
+            }
             Node::Frac { .. } => vec![Field::FracNum, Field::FracDen],
             Node::Sqrt { .. } => vec![Field::SqrtArg],
             Node::Sup { .. } => vec![Field::SupArg],
@@ -198,7 +201,7 @@ pub fn normalize(row: &Row) -> Row {
                 continue;
             }
             // An empty text run has no picture of its own worth keeping.
-            Node::Text(t) if t.is_empty() => continue,
+            Node::Text { t, .. } if t.is_empty() => continue,
             _ => {}
         }
         // Scripts and cancels merge *across* spacers: the blank column a
@@ -264,9 +267,11 @@ fn strip_cancels(row: &Row) -> Row {
     for n in row {
         match n {
             Node::Cancel { arg } => out.extend(strip_cancels(arg)),
-            Node::Sym(_) | Node::Spacer | Node::Func(_) | Node::Text(_) | Node::Accent { .. } => {
-                out.push(n.clone())
-            }
+            Node::Sym(_)
+            | Node::Spacer
+            | Node::Func(_)
+            | Node::Text { .. }
+            | Node::Accent { .. } => out.push(n.clone()),
             Node::Frac { num, den } => out.push(Node::Frac {
                 num: strip_cancels(num),
                 den: strip_cancels(den),
@@ -315,7 +320,7 @@ pub fn strip_spacers(row: &Row) -> Row {
     for n in row {
         match n {
             Node::Spacer => {}
-            Node::Sym(_) | Node::Func(_) | Node::Text(_) | Node::Accent { .. } => {
+            Node::Sym(_) | Node::Func(_) | Node::Text { .. } | Node::Accent { .. } => {
                 out.push(n.clone())
             }
             Node::Frac { num, den } => out.push(Node::Frac {
@@ -366,7 +371,7 @@ fn normalize_node(node: &Node) -> Node {
             let _ = (overs, unders);
             Node::Sym(*base)
         }
-        Node::Sym(_) | Node::Spacer | Node::Func(_) | Node::Text(_) | Node::Accent { .. } => {
+        Node::Sym(_) | Node::Spacer | Node::Func(_) | Node::Text { .. } | Node::Accent { .. } => {
             node.clone()
         }
         Node::Frac { num, den } => Node::Frac { num: normalize(num), den: normalize(den) },

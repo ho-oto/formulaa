@@ -64,12 +64,11 @@ fn node_to_latex(node: &Node) -> String {
             }
             s
         }
-        // \text keeps interior spaces; \mathrm for pure symbol runs.
-        Node::Text(t) => {
-            if t.contains(' ') {
-                format!("\\text{{{}}}", t)
-            } else {
+        Node::Text { t, math } => {
+            if *math {
                 format!("\\mathrm{{{}}}", t)
+            } else {
+                format!("\\text{{{}}}", t)
             }
         }
         Node::Brace { over, arg, label } => {
