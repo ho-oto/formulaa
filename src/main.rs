@@ -11,7 +11,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block as UiBlock, Borders, Paragraph};
 
-use mascii::editor::{BLK_CLOSE, Editor, JUMP_CHAR_BASE, JUMP_LABELS, SEL_CLOSE, SEL_OPEN};
+use mascii::editor::{
+    BLK_CLOSE, Editor, JUMP_CHAR_BASE, JUMP_LABELS, JUMP_RANK_BASE, SEL_CLOSE, SEL_OPEN,
+};
 use mascii::input::{Effect, Key};
 use mascii::parse::RegionSpan;
 use mascii::render::{RenderCtx, render_row};
@@ -412,6 +414,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
         &ed.marker_extents(),
         &block.marks,
         block.caret,
+        ed.jump.is_some().then_some(ed.jump_selected),
     );
 
     // Centering anchors on the *render* width: the caret / an end-of-row
@@ -439,6 +442,10 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
 
 /// Selection box background (replaces the old ⟦ ⟧ bracket display).
 const SELECTION_BG: Color = Color::Indexed(89);
+/// Unlabeled jump markers (beyond the label alphabet).
+const UNLABELED_BG: Color = Color::Indexed(238);
+/// The arrow-selected jump marker.
+const SELECTED_BG: Color = Color::Indexed(172);
 
 /// Turn the zero-width display annotations of a rendered block into
 /// colored boxes, overlaid labels and the caret cell. Marks carry
@@ -453,6 +460,7 @@ fn marker_boxes(
     extents: &[(usize, usize, usize)],
     marks: &[(usize, usize, char)],
     caret: Option<(usize, usize)>,
+    selected: Option<usize>,
 ) -> (Vec<String>, Vec<Vec<Option<Color>>>, Option<(usize, usize)>) {
     let mut grid: Vec<Vec<char>> = lines.iter().map(|l| l.chars().collect()).collect();
     if grid.is_empty() {
@@ -527,15 +535,40 @@ fn marker_boxes(
             }
         }
     }
-    // Labels overlay the glyph at their position.
+    // Labels overlay the glyph at their position. Jump markers carry
+    // their rank: within the label alphabet they show the label letter,
+    // beyond it a highlight cell; the arrow-selected marker gets its
+    // own color either way.
+    let rank_of = |c: char| {
+        let u = c as u32;
+        (JUMP_RANK_BASE..JUMP_RANK_BASE + 0x400)
+            .contains(&u)
+            .then(|| (u - JUMP_RANK_BASE) as usize)
+    };
     for &(y, x, c) in marks {
-        if is_label(c) {
-            let row = &mut grid[y];
-            if x >= row.len() {
-                row.resize(x + 1, ' ');
-                bg[y].resize(x + 1, None);
+        let rank = rank_of(c);
+        if !(is_label(c) || rank.is_some()) {
+            continue;
+        }
+        let row = &mut grid[y];
+        if x >= row.len() {
+            row.resize(x + 1, ' ');
+            bg[y].resize(x + 1, None);
+        }
+        match rank {
+            None => row[x] = c, // a ^B label
+            Some(r) => {
+                let is_sel = selected == Some(r);
+                if let Some(label) = JUMP_LABELS.chars().nth(r) {
+                    // Re-encode as a display label char for styling.
+                    row[x] = char::from_u32(JUMP_CHAR_BASE + r as u32).unwrap_or(label);
+                } else if bg[y][x].is_none() {
+                    bg[y][x] = Some(UNLABELED_BG);
+                }
+                if is_sel {
+                    bg[y][x] = Some(SELECTED_BG);
+                }
             }
-            row[x] = c;
         }
     }
     // The caret cell (padded blank at the row end).
@@ -603,7 +636,12 @@ fn decorate_line(line: &str, bg: &[Option<Color>], cursor: Option<usize>) -> Vec
                 .nth((u - JUMP_CHAR_BASE) as usize)
                 .unwrap();
             flush(&mut buf, buf_bg, &mut spans);
-            spans.push(Span::styled(label.to_string(), label_style));
+            // The arrow-selected marker keeps its highlight color.
+            let style = match cell_bg {
+                Some(color) => label_style.bg(color),
+                None => label_style,
+            };
+            spans.push(Span::styled(label.to_string(), style));
         } else {
             if cell_bg != buf_bg {
                 flush(&mut buf, buf_bg, &mut spans);
@@ -694,6 +732,7 @@ mod tests {
             &ed.marker_extents(),
             &block.marks,
             block.caret,
+            ed.jump.is_some().then_some(ed.jump_selected),
         );
         lines
     }
@@ -702,7 +741,7 @@ mod tests {
     fn selection_box_paints_without_touching_the_text() {
         let lines = vec![" ab ".to_string()];
         let marks = [(0, 1, SEL_OPEN), (0, 3, SEL_CLOSE)];
-        let (out, bg, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None);
+        let (out, bg, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None, None);
         assert_eq!(out, lines, "text must be untouched");
         assert_eq!(
             bg[0],
@@ -717,9 +756,9 @@ mod tests {
         // when the extent says so.
         let lines = vec![" 1 ".to_string(), "───".to_string(), " 2 ".to_string()];
         let marks = [(1, 0, SEL_OPEN), (1, 3, SEL_CLOSE)];
-        let (_, bg, _) = marker_boxes(&lines, &[(1, 1, 0)], &marks, None);
+        let (_, bg, _) = marker_boxes(&lines, &[(1, 1, 0)], &marks, None, None);
         assert!(bg.iter().all(|row| row.iter().all(|c| c.is_some())));
-        let (_, bg, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None);
+        let (_, bg, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None, None);
         assert!(
             bg[2].iter().all(|c| c.is_none()),
             "extent must bound the box"
@@ -730,7 +769,7 @@ mod tests {
     fn labels_overlay_and_caret_pads() {
         let label = char::from_u32(JUMP_CHAR_BASE).unwrap();
         let lines = vec!["xy".to_string()];
-        let (out, _, cursor) = marker_boxes(&lines, &[], &[(0, 0, label)], Some((0, 2)));
+        let (out, _, cursor) = marker_boxes(&lines, &[], &[(0, 0, label)], Some((0, 2)), None);
         let chars: Vec<char> = out[0].chars().collect();
         assert_eq!(chars[0], label, "label over the glyph");
         assert_eq!(chars[1], 'y');
@@ -761,7 +800,11 @@ mod tests {
             .collect();
         // Every cursor position must display with the same geometry as
         // the cursor-less render (the caret is an overlay, not a column).
-        for ((p, c), _, _) in ed.jump_targets() {
+        for cand in ed.jump_candidates() {
+            if cand.is_cursor {
+                continue;
+            }
+            let (p, c) = cand.pos;
             ed.path = p;
             ed.col = c;
             let got: Vec<String> = display(&ed)

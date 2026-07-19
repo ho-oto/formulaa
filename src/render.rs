@@ -67,9 +67,10 @@ pub struct Block {
     pub marks: Vec<(usize, usize, char)>,
 }
 
-/// Private-use characters the editor uses for display decorations.
+/// Private-use characters the editor uses for display decorations and
+/// coordinate probes (the whole BMP private-use area).
 pub fn is_display_marker(c: char) -> bool {
-    (0xE000..=0xE0FF).contains(&(c as u32))
+    (0xE000..=0xF8FF).contains(&(c as u32))
 }
 
 /// A display-marker atom (zero-width; transparent to layout decisions).

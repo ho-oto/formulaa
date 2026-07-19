@@ -44,6 +44,12 @@ impl Editor {
         if self.jump.is_some() {
             match key {
                 Key::Char(c) if !ctrl => self.jump_to(c),
+                // Arrow keys move the marker selection; Enter confirms.
+                Key::Left => self.jump_select(-1, 0),
+                Key::Right => self.jump_select(1, 0),
+                Key::Up => self.jump_select(0, -1),
+                Key::Down => self.jump_select(0, 1),
+                Key::Enter => self.jump_confirm(),
                 _ => {
                     if let Some(targets) = self.jump.take() {
                         self.keep_ghosts(&targets);

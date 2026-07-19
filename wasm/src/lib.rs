@@ -7,7 +7,9 @@
 //!   webviews (see editors/ in the repository).
 
 use mascii::ast::normalize;
-use mascii::editor::{Editor, BLK_CLOSE, JUMP_CHAR_BASE, JUMP_LABELS, SEL_CLOSE, SEL_OPEN};
+use mascii::editor::{
+    Editor, BLK_CLOSE, JUMP_CHAR_BASE, JUMP_LABELS, JUMP_RANK_BASE, SEL_CLOSE, SEL_OPEN,
+};
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
 use mascii::render::{render_row, RenderCtx, CURSOR_CHAR};
@@ -101,10 +103,15 @@ impl MasciiEditor {
                 SEL_OPEN => '⟦',
                 SEL_CLOSE | BLK_CLOSE => '⟧',
                 m => {
-                    let idx = (m as u32).wrapping_sub(JUMP_CHAR_BASE) as usize;
+                    let u = m as u32;
+                    let idx = if (JUMP_RANK_BASE..JUMP_RANK_BASE + 0x400).contains(&u) {
+                        (u - JUMP_RANK_BASE) as usize
+                    } else {
+                        u.wrapping_sub(JUMP_CHAR_BASE) as usize
+                    };
                     match JUMP_LABELS.chars().nth(idx) {
                         Some(l) => l,
-                        // Ghost-slot markers and friends: no overlay.
+                        // Ghost slots / unlabeled markers: no overlay.
                         None => continue,
                     }
                 }

@@ -20,8 +20,11 @@ pub struct Editor {
     pub italic: bool,
     /// EasyMotion-style jump: Some(targets) while waiting for a label
     /// key. Document-ordered (needed for marker insertion); each entry
-    /// carries its label rank (0 = key 'a' = closest to the cursor).
+    /// carries its rank (0 = key 'a' = best candidate).
     pub jump: Option<Vec<(usize, CursorPos)>>,
+    /// Arrow-key selection inside jump mode: the rank of the marker
+    /// currently highlighted (Enter jumps to it).
+    pub jump_selected: usize,
     /// Block-select mode (Ctrl+B): Some(targets) while waiting for a
     /// label key; each target is (parent row path, node index) of a
     /// structure node, and picking one selects the whole block.
@@ -58,6 +61,38 @@ pub const BLK_CLOSE: char = '\u{E0F2}';
 /// mode ends, so re-entering ^G does not shift the layout. No label,
 /// no box — just the slot.
 pub const SLOT_GHOST: char = '\u{E0F3}';
+/// Jump markers encode their rank as JUMP_RANK_BASE + rank (rank 0 =
+/// label 'a'; ranks beyond the label alphabet display as unlabeled
+/// highlights, reachable via arrow-key selection).
+pub const JUMP_RANK_BASE: u32 = 0xE100;
+/// Coordinate-probe marks (never displayed): one render with every
+/// candidate marked yields the position → cell coordinate table.
+const PROBE_BASE: u32 = 0xF000;
+/// docs/jump-spec.md §5 — tuning knobs.
+const JUMP_W_Y: usize = 3;
+const JUMP_R_MIN: usize = 2;
+/// α = 1 / JUMP_ALPHA_DIV.
+const JUMP_ALPHA_DIV: usize = 4;
+const JUMP_C_GHOST: usize = 4;
+/// Rank-char capacity (E100..E4FF).
+const JUMP_MAX_RANKS: usize = 0x400;
+
+/// A jump candidate position with the flags the selection rules need
+/// (docs/jump-spec.md §2–3).
+#[derive(Clone, Debug)]
+pub struct JumpCand {
+    pub pos: CursorPos,
+    /// The row is empty (an unfilled slot).
+    pub empty: bool,
+    /// End-of-cell position of a grid.
+    pub cell_end: bool,
+    /// Interior of a spaceless atom run (hard-filtered).
+    pub interior: bool,
+    /// Start or end of its row (col 0 / col len).
+    pub bound: bool,
+    /// The current cursor position itself.
+    pub is_cursor: bool,
+}
 
 impl Default for Editor {
     fn default() -> Self {
@@ -166,6 +201,7 @@ impl Editor {
             message: String::new(),
             italic: true,
             jump: None,
+            jump_selected: 0,
             block: None,
             ghost: Vec::new(),
             structure: false,
@@ -218,32 +254,21 @@ impl Editor {
     }
 
     /// Mouse click at canvas cell (x, y): move the cursor to the
-    /// nearest boundary. Probe-based: each candidate position is laid
-    /// out and its caret cell compared against the click point.
+    /// nearest position, using the single-render coordinate table.
     pub fn click(&mut self, x: usize, y: usize) {
-        use crate::render::{RenderCtx, render_row};
         self.jump = None;
         self.block = None;
         self.select_anchor = None;
-        let ctx = RenderCtx {
-            italic: self.italic,
-        };
-        let mut candidates = self.jump_targets();
-        candidates.push(((self.path.clone(), self.col), false, false));
-        let mut best: Option<(usize, CursorPos)> = None;
-        for ((p, c), _, _) in candidates {
-            // The caret is zero-width metadata, so every probe has the
-            // same geometry as the display — the match is exact.
-            let block = render_row(&self.root, Some((&p[..], c)), false, &ctx);
-            let Some((cy, cx)) = block.caret else {
-                continue;
-            };
-            let score = cy.abs_diff(y) * 1000 + cx.abs_diff(x);
-            if best.as_ref().is_none_or(|(s, _)| score < *s) {
-                best = Some((score, (p, c)));
-            }
-        }
-        if let Some((_, (p, c))) = best {
+        let cands = self.jump_candidates();
+        let positions: Vec<&CursorPos> = cands.iter().map(|c| &c.pos).collect();
+        let coords = self.position_coords(&positions);
+        // (Run interiors stay clickable — the marker-density rules are
+        // for ^G labels, not for a precise pointer.)
+        let best = (0..cands.len())
+            .filter_map(|i| coords[i].map(|xy| (i, xy)))
+            .min_by_key(|&(_, (cy, cx))| cy.abs_diff(y) * 1000 + cx.abs_diff(x));
+        if let Some((i, _)) = best {
+            let (p, c) = cands[i].pos.clone();
             self.path = p;
             self.col = c;
         }
@@ -800,126 +825,274 @@ impl Editor {
 
     // ----- jump mode (EasyMotion-style) -----
 
-    /// Jump candidates in true document order (column, then that
-    /// node's children, then the next column): every cursor position,
-    /// flagged as (position, is_empty_slot, is_cell_end). `start_jump`
-    /// thins this out; the order doubles as the distance metric.
-    #[allow(clippy::type_complexity)]
-    pub fn jump_targets(&self) -> Vec<(CursorPos, bool, bool)> {
+    /// Every cursor position in true document order (column, then that
+    /// node's children, then the next column), with the flags the jump
+    /// selection needs. Document order is required by the coordinate
+    /// probe (marker insertion invalidates later positions otherwise).
+    pub fn jump_candidates(&self) -> Vec<JumpCand> {
+        fn flat_atom(n: &Node) -> bool {
+            matches!(n, Node::Sym(c) if *c != '␣')
+        }
         fn walk(
             row: &Row,
             path: &mut Vec<(usize, Field)>,
             in_cell: bool,
-            out: &mut Vec<(CursorPos, bool, bool)>,
+            cursor: &(&[(usize, Field)], usize),
+            out: &mut Vec<JumpCand>,
         ) {
+            fn is_cur(
+                cursor: &(&[(usize, Field)], usize),
+                path: &[(usize, Field)],
+                col: usize,
+            ) -> bool {
+                cursor.0 == path && cursor.1 == col
+            }
             if row.is_empty() {
-                out.push(((path.clone(), 0), true, in_cell));
+                out.push(JumpCand {
+                    pos: (path.clone(), 0),
+                    empty: true,
+                    cell_end: in_cell,
+                    interior: false,
+                    bound: true,
+                    is_cursor: is_cur(cursor, path, 0),
+                });
                 return;
             }
             for (i, node) in row.iter().enumerate() {
-                out.push(((path.clone(), i), false, false));
+                out.push(JumpCand {
+                    pos: (path.clone(), i),
+                    empty: false,
+                    cell_end: false,
+                    interior: i > 0 && flat_atom(&row[i - 1]) && flat_atom(node),
+                    bound: i == 0,
+                    is_cursor: is_cur(cursor, path, i),
+                });
                 for f in node.fields() {
                     path.push((i, f));
-                    walk(node.field(f), path, matches!(f, Field::Cell(_)), out);
+                    walk(
+                        node.field(f),
+                        path,
+                        matches!(f, Field::Cell(_)),
+                        cursor,
+                        out,
+                    );
                     path.pop();
                 }
             }
-            out.push(((path.clone(), row.len()), false, in_cell));
+            out.push(JumpCand {
+                pos: (path.clone(), row.len()),
+                empty: false,
+                cell_end: in_cell,
+                interior: false,
+                bound: true,
+                is_cursor: is_cur(cursor, path, row.len()),
+            });
         }
         let mut out = Vec::new();
-        walk(&self.root, &mut Vec::new(), false, &mut out);
-        out.retain(|((p, c), _, _)| !(p == &self.path && *c == self.col));
+        walk(
+            &self.root,
+            &mut Vec::new(),
+            false,
+            &(&self.path[..], self.col),
+            &mut out,
+        );
         out
     }
 
-    /// Max number of jump labels shown at once.
-    pub const JUMP_MAX: usize = 16;
+    /// Physical cell coordinates of the given document-ordered
+    /// positions: one render with every position carrying a zero-width
+    /// probe mark — the geometry (and thus every coordinate) is
+    /// identical to the displayed render.
+    fn position_coords(&self, positions: &[&CursorPos]) -> Vec<Option<(usize, usize)>> {
+        use crate::render::{RenderCtx, render_row};
+        let n = positions.len().min(0x800);
+        let mut root = self.root.clone();
+        for (idx, (p, c)) in positions.iter().take(n).enumerate().rev() {
+            let mark = char::from_u32(PROBE_BASE + idx as u32).unwrap();
+            row_at_mut(&mut root, p).insert(*c, Node::Sym(mark));
+        }
+        let b = render_row(&root, None, false, &RenderCtx::canonical());
+        let mut out = vec![None; positions.len()];
+        for &(y, x, ch) in &b.marks {
+            let u = ch as u32;
+            if u >= PROBE_BASE {
+                let i = (u - PROBE_BASE) as usize;
+                if i < out.len() {
+                    out[i] = Some((y, x));
+                }
+            }
+        }
+        out
+    }
 
     pub fn start_jump(&mut self) {
-        let targets = self.jump_targets();
-        if targets.is_empty() {
+        use std::cmp::Reverse;
+        let cands = self.jump_candidates();
+        let positions: Vec<&CursorPos> = cands.iter().map(|c| &c.pos).collect();
+        let coords = self.position_coords(&positions);
+        let Some(cur_i) = cands.iter().position(|c| c.is_cursor) else {
+            self.message = "no jump targets".into();
+            return;
+        };
+        let Some((cy, cx)) = coords[cur_i] else {
+            self.message = "no jump targets".into();
+            return;
+        };
+        let dist2 =
+            |a: (usize, usize), b: (usize, usize)| JUMP_W_Y * a.0.abs_diff(b.0) + a.1.abs_diff(b.1);
+        let dist = |i: usize| coords[i].map(|xy| dist2(xy, (cy, cx)));
+
+        // Hard filter (spec §2): the cursor itself, run interiors, and
+        // anything the probe could not place.
+        let usable: Vec<usize> = (0..cands.len())
+            .filter(|&i| !cands[i].is_cursor && !cands[i].interior && coords[i].is_some())
+            .collect();
+
+        // Classes (spec §3). B: bounds of every row enclosing the cursor.
+        let ancestor_bound = |i: usize| {
+            let (p, _) = &cands[i].pos;
+            cands[i].bound && p.len() <= self.path.len() && self.path[..p.len()] == p[..]
+        };
+        let cursor_grid = {
+            let grid_key = |p: &[(usize, Field)]| -> Option<(usize, Vec<(usize, Field)>)> {
+                let k = p.iter().rposition(|(_, f)| matches!(f, Field::Cell(_)))?;
+                Some((p[k].0, p[..k].to_vec()))
+            };
+            grid_key(&self.path)
+        };
+        let same_grid = |i: usize| {
+            let k = cands[i]
+                .pos
+                .0
+                .iter()
+                .rposition(|(_, f)| matches!(f, Field::Cell(_)));
+            match (k, &cursor_grid) {
+                (Some(k), Some((gi, gp))) => {
+                    cands[i].pos.0[k].0 == *gi && cands[i].pos.0[..k] == gp[..]
+                }
+                _ => false,
+            }
+        };
+        let class = |i: usize| {
+            if cands[i].empty {
+                0
+            } else if ancestor_bound(i) {
+                1
+            } else if cands[i].cell_end {
+                2
+            } else {
+                3
+            }
+        };
+
+        // One arrow press away (spec §4.1): same row, adjacent column.
+        let arrow1 = |a: &CursorPos, b: &CursorPos| a.0 == b.0 && a.1.abs_diff(b.1) <= 1;
+
+        // Priority classes first (by distance), then the general pool.
+        let mut order = usable.clone();
+        order.sort_by_key(|&i| (class(i), dist(i).unwrap_or(usize::MAX), !same_grid(i)));
+        let mut chosen: Vec<usize> = Vec::new();
+        let cursor_pos = (self.path.clone(), self.col);
+        for &i in &order {
+            if chosen.len() >= JUMP_MAX_RANKS {
+                break;
+            }
+            let pos = &cands[i].pos;
+            let xy = coords[i].unwrap();
+            if arrow1(pos, &cursor_pos) {
+                continue;
+            }
+            if chosen.iter().any(|&j| arrow1(pos, &cands[j].pos)) {
+                continue;
+            }
+            if class(i) == 3 {
+                // Density control (spec §4.2) + materialization cost.
+                let mut d = dist(i).unwrap();
+                if matches!(pos.0.last(), Some((_, Field::SupArg | Field::SubArg))) {
+                    d += JUMP_C_GHOST;
+                }
+                let radius = JUMP_R_MIN.max(d / JUMP_ALPHA_DIV);
+                let near = chosen
+                    .iter()
+                    .filter_map(|&j| coords[j])
+                    .chain([(cy, cx)])
+                    .map(|xy2| dist2(xy, xy2))
+                    .min()
+                    .unwrap_or(usize::MAX);
+                if near < radius {
+                    continue;
+                }
+            }
+            chosen.push(i);
+        }
+        if chosen.is_empty() {
             self.message = "no jump targets".into();
             return;
         }
-        let cursor_seq = targets
+        // Ranks = selection order; markers need document order.
+        let mut picked: Vec<(usize, CursorPos)> = chosen
             .iter()
             .enumerate()
-            .filter(|(_, ((p, _), _, _))| p == &self.path)
-            .min_by_key(|(_, ((_, c), _, _))| c.abs_diff(self.col))
-            .map(|(k, _)| k)
-            .unwrap_or(0);
-        // Unfilled slots first (nearest first, capped at half the budget
-        // so movement anchors keep their share) …
-        let mut picked_idx: Vec<usize> = Vec::new();
-        let mut empties: Vec<usize> = (0..targets.len()).filter(|&k| targets[k].1).collect();
-        empties.sort_by_key(|&k| k.abs_diff(cursor_seq));
-        let taken_empties = empties.len().min(Self::JUMP_MAX / 2);
-        picked_idx.extend(empties.drain(..taken_empties));
-        // … then grid cells: editing the neighbour of a matrix/vector
-        // entry is common, so each cell's end gets an early anchor,
-        // the cursor's own grid first (a few slots stay reserved for
-        // the distance anchors below).
-        let grid_key = |p: &[(usize, Field)]| -> Option<(usize, Vec<(usize, Field)>)> {
-            let k = p.iter().rposition(|(_, f)| matches!(f, Field::Cell(_)))?;
-            Some((p[k].0, p[..k].to_vec()))
-        };
-        let cursor_grid = grid_key(&self.path);
-        let mut cells: Vec<usize> = (0..targets.len())
-            .filter(|&k| targets[k].2 && !targets[k].1 && !picked_idx.contains(&k))
+            .map(|(rank, &i)| (rank, cands[i].pos.clone()))
             .collect();
-        cells.sort_by_key(|&k| {
-            let same = cursor_grid.is_some() && grid_key(&targets[k].0.0) == cursor_grid;
-            (!same, k.abs_diff(cursor_seq))
-        });
-        let reserve = 4;
-        cells.truncate((Self::JUMP_MAX - picked_idx.len()).saturating_sub(reserve));
-        picked_idx.extend(cells);
-        // … then movement anchors: per side of the cursor, halving
-        // distances from the far end (L, L/2, …, 1) so the far end, the
-        // middle grounds and the vicinity are all one keystroke away.
-        let budget = Self::JUMP_MAX - picked_idx.len();
-        let free = |k: usize| !targets[k].1 && !picked_idx.contains(&k);
-        let left: Vec<usize> = (0..cursor_seq).rev().filter(|&k| free(k)).collect();
-        let right: Vec<usize> = (cursor_seq..targets.len()).filter(|&k| free(k)).collect();
-        let halving = |list: &[usize]| -> Vec<usize> {
-            let mut out = Vec::new();
-            let mut d = list.len();
-            while d >= 1 {
-                out.push(list[d - 1]);
-                if d == 1 {
-                    break;
-                }
-                d /= 2;
-            }
-            out
-        };
-        let mut anchors: Vec<usize> = halving(&left).into_iter().chain(halving(&right)).collect();
-        anchors.sort_by_key(|&k| k.abs_diff(cursor_seq));
-        anchors.dedup();
-        // Over budget: drop the most redundant middle anchors — the
-        // nearest and the farthest always survive.
-        while anchors.len() > budget && anchors.len() > 2 {
-            let (mut worst, mut gap) = (1, usize::MAX);
-            for i in 1..anchors.len() - 1 {
-                let g = anchors[i + 1].abs_diff(cursor_seq) - anchors[i - 1].abs_diff(cursor_seq);
-                if g < gap {
-                    gap = g;
-                    worst = i;
-                }
-            }
-            anchors.remove(worst);
-        }
-        anchors.truncate(budget);
-        picked_idx.extend(anchors);
-        // Ranks follow pick order ('a' = best); markers need doc order.
-        let mut picked: Vec<(usize, CursorPos)> = picked_idx
-            .iter()
-            .enumerate()
-            .map(|(rank, &k)| (rank, targets[k].0.clone()))
-            .collect();
-        picked.sort_by_key(|&(rank, _)| picked_idx[rank]);
-        self.message = "jump: press a label key (Esc cancels)".into();
+        picked.sort_by_key(|&(rank, _)| chosen[rank]);
+        let _ = Reverse(0); // (kept for potential ordering tweaks)
+        self.message = "jump: label key / arrows + Enter (Esc cancels)".into();
         self.jump = Some(picked);
+        self.jump_selected = 0;
+    }
+
+    /// Move the arrow-key selection to the nearest marker in the given
+    /// direction (dx, dy ∈ {-1, 0, 1}).
+    pub fn jump_select(&mut self, dx: i32, dy: i32) {
+        let coords = self.jump_marker_coords();
+        let Some(&(_, cur)) = coords.iter().find(|(r, _)| *r == self.jump_selected) else {
+            return;
+        };
+        let best = coords
+            .iter()
+            .filter(|(r, _)| *r != self.jump_selected)
+            .filter(|(_, xy)| {
+                let (gx, gy) = (xy.1 as i64 - cur.1 as i64, xy.0 as i64 - cur.0 as i64);
+                (dx != 0 && gx.signum() == dx as i64 || dy != 0 && gy.signum() == dy as i64)
+                    && (dx != 0 || gx.abs() <= gy.abs() * 2)
+                    && (dy != 0 || gy.abs() <= gx.abs() * 2)
+            })
+            .min_by_key(|(_, xy)| JUMP_W_Y * xy.0.abs_diff(cur.0) + xy.1.abs_diff(cur.1));
+        if let Some(&(r, _)) = best {
+            self.jump_selected = r;
+        }
+    }
+
+    /// Enter: jump to the arrow-selected marker.
+    pub fn jump_confirm(&mut self) {
+        let rank = self.jump_selected;
+        if let Some(targets) = self.jump.take() {
+            self.keep_ghosts(&targets);
+            if let Some((_, (p, c))) = targets.iter().find(|(r, _)| *r == rank) {
+                self.path = p.clone();
+                self.col = *c;
+            }
+            self.message.clear();
+        }
+    }
+
+    /// Live cell coordinates of the current jump markers, decoded from
+    /// the decorated render (rank chars carry their identity).
+    fn jump_marker_coords(&self) -> Vec<(usize, (usize, usize))> {
+        use crate::render::{RenderCtx, render_row};
+        let (root, cursor) = self.decorated();
+        let cur = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+        let b = render_row(&root, cur, false, &RenderCtx::canonical());
+        b.marks
+            .iter()
+            .filter_map(|&(y, x, ch)| {
+                let u = ch as u32;
+                (JUMP_RANK_BASE..JUMP_RANK_BASE + JUMP_MAX_RANKS as u32)
+                    .contains(&u)
+                    .then(|| ((u - JUMP_RANK_BASE) as usize, (y, x)))
+            })
+            .collect()
     }
 
     /// Remember which labeled rows change their rendering while marked:
@@ -1078,7 +1251,7 @@ impl Editor {
             let mut col = self.col;
             // Reverse document order keeps not-yet-inserted positions valid.
             for (rank, (p, c)) in targets.iter().rev() {
-                let mark = char::from_u32(JUMP_CHAR_BASE + *rank as u32).unwrap();
+                let mark = char::from_u32(JUMP_RANK_BASE + *rank as u32).unwrap();
                 row_at_mut(&mut root, p).insert(*c, Node::Sym(mark));
                 bump(&mut path, &mut col, p, *c);
             }
@@ -1511,9 +1684,9 @@ mod tests {
     }
 
     #[test]
-    fn jump_targets_and_jump() {
+    fn jump_v2_basic_flow() {
         let mut ed = Editor::new();
-        // x + 1/2 with cursor at the end of the top row
+        // x + 1/2 with cursor at the end of the top row.
         ed.insert_sym('x');
         ed.insert_sym('+');
         ed.execute("frac");
@@ -1521,45 +1694,60 @@ mod tests {
         ed.vertical(false);
         ed.insert_sym('2');
         ed.exit_inset();
-        // Every position, in document order, minus the cursor's own:
-        // top row (0, 1, 2; 3 = cursor), num (0, 1), den (0, 1).
-        let targets = ed.jump_targets();
-        assert_eq!(targets.len(), 7);
-        assert!(targets.iter().all(|(_, empty, _)| !empty));
+        let before = (ed.path.clone(), ed.col);
         ed.start_jump();
         assert!(ed.jump.is_some());
-        // 'a' = nearest anchor: top-row col 2, right before the fraction.
+        // 'a' exists and jumping moves the cursor to a valid position.
         ed.jump_to('a');
         assert!(ed.jump.is_none());
-        assert_eq!((ed.path.len(), ed.col), (0, 2));
+        assert_ne!((ed.path.clone(), ed.col), before);
+        assert!(ed.col <= ed.cur_row().len());
     }
 
     #[test]
-    fn jump_anchors_balance_near_and_far() {
+    fn jump_skips_run_interiors_and_arrow1_neighbours() {
         let mut ed = Editor::new();
-        // Twelve filled fractions; cursor back at the far left.
-        for _ in 0..12 {
-            ed.execute("frac");
-            ed.insert_sym('1');
-            ed.vertical(false);
-            ed.insert_sym('2');
-            ed.exit_inset();
+        for c in "abcde".chars() {
+            ed.insert_sym(c);
         }
         ed.home();
         ed.start_jump();
         let targets = ed.jump.as_ref().unwrap();
-        assert!(targets.len() <= Editor::JUMP_MAX);
-        // Anchors must reach both the vicinity and the far end (top-row
-        // node index of the target path as a rough position).
-        let pos = |p: &Vec<(usize, Field)>, c: usize| p.first().map_or(c, |&(i, _)| i);
+        // Interior of the spaceless run: no marker between the atoms.
         assert!(
-            targets.iter().any(|(_, (p, c))| pos(p, *c) >= 8),
-            "no far anchor: {:?}",
+            targets
+                .iter()
+                .all(|(_, (p, c))| !(p.is_empty() && (1..5).contains(c))),
+            "interior marked: {:?}",
             targets
         );
+        // Nothing one arrow press from the cursor (col 0 → col 1 is
+        // interior anyway; check no duplicate adjacent markers).
+        for (i, (_, (p1, c1))) in targets.iter().enumerate() {
+            for (_, (p2, c2)) in targets.iter().skip(i + 1) {
+                assert!(
+                    !(p1 == p2 && c1.abs_diff(*c2) <= 1),
+                    "adjacent markers at {:?}",
+                    (p1, c1, c2)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn jump_marks_ancestor_bounds() {
+        let mut ed = Editor::new();
+        ed.insert_sym('x');
+        ed.insert_sym('+');
+        ed.execute("frac");
+        ed.insert_sym('1');
+        // Cursor deep in the numerator: the top row's start must carry
+        // a marker (class B), reachable in one label press.
+        ed.start_jump();
+        let targets = ed.jump.as_ref().unwrap();
         assert!(
-            targets.iter().any(|(_, (p, c))| pos(p, *c) <= 2),
-            "no near anchor: {:?}",
+            targets.iter().any(|(_, (p, c))| p.is_empty() && *c == 0),
+            "top-row start unmarked: {:?}",
             targets
         );
     }
@@ -1584,7 +1772,7 @@ mod tests {
     }
 
     #[test]
-    fn jump_prefers_empty_slots_and_caps_labels() {
+    fn jump_prefers_empty_slots() {
         let mut ed = Editor::new();
         // A fraction with an empty denominator, cursor back at top level.
         ed.insert_sym('x');
@@ -1596,15 +1784,40 @@ mod tests {
         ed.jump_to('a');
         assert_eq!(ed.path.last().unwrap().1, Field::FracDen);
         assert_eq!(ed.cur_row().len(), 0);
-        // Label count never exceeds JUMP_MAX.
+    }
+
+    #[test]
+    fn jump_arrow_selection_moves_and_confirms() {
         let mut ed = Editor::new();
-        for _ in 0..20 {
-            ed.execute("frac");
-            ed.exit_inset();
-            ed.right();
-        }
+        ed.insert_sym('x');
+        ed.insert_sym('+');
+        ed.execute("frac");
+        ed.insert_sym('1');
+        ed.vertical(false);
+        ed.insert_sym('2');
+        ed.exit_inset();
         ed.start_jump();
-        assert!(ed.jump.as_ref().unwrap().len() <= Editor::JUMP_MAX);
+        let initial = ed.jump_selected;
+        // Some direction must move the selection to another marker.
+        for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+            ed.jump_select(dx, dy);
+            if ed.jump_selected != initial {
+                break;
+            }
+        }
+        assert_ne!(ed.jump_selected, initial, "selection did not move");
+        let rank = ed.jump_selected;
+        let expect = ed
+            .jump
+            .as_ref()
+            .unwrap()
+            .iter()
+            .find(|(r, _)| *r == rank)
+            .map(|(_, pos)| pos.clone())
+            .unwrap();
+        ed.jump_confirm();
+        assert!(ed.jump.is_none());
+        assert_eq!((ed.path.clone(), ed.col), expect);
     }
 
     #[test]
