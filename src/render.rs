@@ -384,6 +384,18 @@ pub fn unsubscript_char(c: char) -> Option<char> {
 
 /// If every node in `row` is a plain char with an inline script equivalent,
 /// return the converted chars.
+/// Would this row render as an inline (codepoint) script, absent any
+/// cursor or markers? Used by the editor to tell which positions are
+/// currently invisible on screen.
+pub fn is_inline_script_row(row: &Row, superscript: bool) -> bool {
+    let map = if superscript {
+        superscript_char
+    } else {
+        subscript_char
+    };
+    inline_script(row, map).is_some()
+}
+
 /// Inline (superscript/subscript codepoint) form of a script row. A
 /// display marker inside the row forces the 2D form — labels overlaid
 /// on the tiny ¹²³ glyphs are unreadable, so a marked script expands

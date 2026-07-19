@@ -192,6 +192,57 @@ fn vertical_exits_a_grid_at_its_edge() {
 }
 
 #[test]
+fn free_cursor_mode_snaps_on_enter() {
+    // x + 1/2, cursor at the top-row end; ^F, move down, Enter → the
+    // free cursor over the denominator area snaps into the denominator.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"x + \frac 1 Down 2 Tab C-f Down Enter");
+    assert!(
+        matches!(ed.path.last(), Some((_, mascii::ast::Field::FracDen))),
+        "path: {:?}",
+        ed.path
+    );
+    // Esc cancels back to the original position.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a+b");
+    let before = (ed.path.clone(), ed.col);
+    type_script(&mut ed, "C-f Left Left Esc");
+    assert_eq!((ed.path.clone(), ed.col), before);
+    assert!(ed.free.is_none());
+}
+
+#[test]
+fn free_cursor_auto_expands_collapsed_elements() {
+    // x² + ∑ (both collapsed); walking the free cursor toward them
+    // materializes the ∑ slots and expands the ² (with hysteresis:
+    // they stay open while the cursor is nearby).
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"x ^ 2 Tab + \sum Tab C-f");
+    assert!(ed.ghost.is_empty());
+    type_script(&mut ed, "Left");
+    assert!(
+        !ed.ghost.is_empty(),
+        "approaching the bare ∑ must materialize its slots"
+    );
+    // Walk further left towards the ²: it expands too, and the ∑
+    // ghosts persist within the hysteresis radius.
+    for _ in 0..4 {
+        type_script(&mut ed, "Left");
+    }
+    assert!(
+        ed.ghost
+            .iter()
+            .any(|p| matches!(p.last(), Some((_, mascii::ast::Field::SupArg)))),
+        "ghosts: {:?}",
+        ed.ghost
+    );
+    // Enter snaps somewhere valid; ghosts survive until real input.
+    type_script(&mut ed, "Enter");
+    assert!(ed.free.is_none());
+    assert!(ed.col <= ed.cur_row().len());
+}
+
+#[test]
 fn click_moves_the_cursor() {
     // Flat row: clicking between a and + lands the cursor at col 1.
     let mut ed = Editor::new();

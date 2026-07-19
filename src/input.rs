@@ -72,6 +72,19 @@ impl Editor {
             return Effect::None;
         }
 
+        // Free-cursor mode: arrows move the cell cursor, Enter snaps.
+        if self.free.is_some() {
+            match key {
+                Key::Left => self.free_move(-1, 0),
+                Key::Right => self.free_move(1, 0),
+                Key::Up => self.free_move(0, -1),
+                Key::Down => self.free_move(0, 1),
+                Key::Enter => self.free_confirm(),
+                _ => self.free_cancel(),
+            }
+            return Effect::None;
+        }
+
         // Minibuffer (`\command`) mode captures most keys.
         if self.minibuffer.is_some() {
             match key {
@@ -107,6 +120,7 @@ impl Editor {
                 Key::Char('s') => return Effect::SaveTex,
                 Key::Char('y') => return Effect::CopyAa,
                 Key::Char('a') => self.document_start(),
+                Key::Char('f') => self.start_free(),
                 Key::Char('g') => self.start_jump(),
                 Key::Char('b') => self.start_block_select(),
                 Key::Char('t') => self.italic = !self.italic,

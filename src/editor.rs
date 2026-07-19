@@ -25,6 +25,8 @@ pub struct Editor {
     /// Arrow-key selection inside jump mode: the rank of the marker
     /// currently highlighted (Enter jumps to it).
     pub jump_selected: usize,
+    /// Free-cursor mode (^F): Some while active.
+    pub free: Option<FreeCursor>,
     /// Block-select mode (Ctrl+B): Some(targets) while waiting for a
     /// label key; each target is (parent row path, node index) of a
     /// structure node, and picking one selects the whole block.
@@ -74,8 +76,48 @@ const JUMP_R_MIN: usize = 2;
 /// α = 1 / JUMP_ALPHA_DIV.
 const JUMP_ALPHA_DIV: usize = 4;
 const JUMP_C_GHOST: usize = 4;
+/// ^F auto-expansion hysteresis: collapsed elements expand within
+/// R_IN of the free cursor and fold back only beyond R_OUT (measured
+/// against the element's *visible anchor* in the current display
+/// frame, so the expansion itself cannot oscillate the test).
+const FREE_EXPAND_IN: usize = 3;
+const FREE_EXPAND_OUT: usize = 8;
 /// Rank-char capacity (E100..E4FF).
 const JUMP_MAX_RANKS: usize = 0x400;
+
+/// Free-cursor mode (^F): a display-cell cursor moved with the arrow
+/// keys; Enter snaps to the nearest editable position. Both the free
+/// cell and the snap preview are shown.
+#[derive(Clone, Debug)]
+pub struct FreeCursor {
+    /// Current display cell (row, col).
+    pub at: (usize, usize),
+    /// Nearest editable position (the snap target) …
+    pub snap: CursorPos,
+    /// … and its display cell.
+    pub snap_at: (usize, usize),
+}
+
+/// Adjust a position for one SLOT_GHOST inserted at col 0 of every
+/// ghost row. All comparisons use the *original* coordinates — nudging
+/// incrementally breaks on nested ghosts (an outer adjustment makes the
+/// inner ghost's prefix no longer match).
+fn ghost_adjust(
+    ghost: &[Vec<(usize, Field)>],
+    p: &[(usize, Field)],
+    c: usize,
+) -> (Vec<(usize, Field)>, usize) {
+    let mut p2 = p.to_vec();
+    let mut c2 = c;
+    for g in ghost {
+        if p.len() > g.len() && p[..g.len()] == g[..] {
+            p2[g.len()].0 += 1;
+        } else if p == &g[..] {
+            c2 += 1;
+        }
+    }
+    (p2, c2)
+}
 
 /// A jump candidate position with the flags the selection rules need
 /// (docs/jump-spec.md §2–3).
@@ -202,6 +244,7 @@ impl Editor {
             italic: true,
             jump: None,
             jump_selected: 0,
+            free: None,
             block: None,
             ghost: Vec::new(),
             structure: false,
@@ -254,24 +297,229 @@ impl Editor {
     }
 
     /// Mouse click at canvas cell (x, y): move the cursor to the
-    /// nearest position, using the single-render coordinate table.
+    /// nearest position (single-render coordinate table).
     pub fn click(&mut self, x: usize, y: usize) {
         self.jump = None;
         self.block = None;
+        self.free = None;
         self.select_anchor = None;
-        let cands = self.jump_candidates();
-        let positions: Vec<&CursorPos> = cands.iter().map(|c| &c.pos).collect();
-        let coords = self.position_coords(&positions);
-        // (Run interiors stay clickable — the marker-density rules are
-        // for ^G labels, not for a precise pointer.)
-        let best = (0..cands.len())
-            .filter_map(|i| coords[i].map(|xy| (i, xy)))
-            .min_by_key(|&(_, (cy, cx))| cy.abs_diff(y) * 1000 + cx.abs_diff(x));
-        if let Some((i, _)) = best {
-            let (p, c) = cands[i].pos.clone();
-            self.path = p;
-            self.col = c;
+        if let Some((pos, _)) = self.nearest_position(x, y) {
+            self.path = pos.0;
+            self.col = pos.1;
         }
+    }
+
+    /// Nearest editable position to a display cell, with its own cell
+    /// (shared by mouse clicks and the ^F snap preview). Run interiors
+    /// stay reachable — density rules only apply to ^G labels. Only
+    /// positions actually visible on screen participate, so the
+    /// coordinates match the display exactly.
+    fn nearest_position(&self, x: usize, y: usize) -> Option<(CursorPos, (usize, usize))> {
+        let cands = self.jump_candidates();
+        let coords = self.display_coords(&cands);
+        (0..cands.len())
+            .filter_map(|i| coords[i].map(|xy| (i, xy)))
+            .min_by_key(|&(_, (cy, cx))| cy.abs_diff(y) * 1000 + cx.abs_diff(x))
+            .map(|(i, xy)| (cands[i].pos.clone(), xy))
+    }
+
+    /// Is this position visible in the current display? Rows collapse
+    /// when they are inline scripts or empty optional slots, unless a
+    /// ghost mark or the cursor keeps them open.
+    fn display_visible(&self, pos: &CursorPos) -> bool {
+        use crate::render::is_inline_script_row;
+        let mut row: &Row = &self.root;
+        let mut prefix: Vec<(usize, Field)> = Vec::new();
+        for &(i, f) in &pos.0 {
+            prefix.push((i, f));
+            let child: &Row = row[i].field(f);
+            let ghosted = self.ghost.iter().any(|g| g == &prefix);
+            let d = prefix.len() - 1;
+            // The cursor anywhere inside this node keeps its slots open.
+            let editing = self.path.len() > d
+                && self.path[..d] == prefix[..d]
+                && self.path[d].0 == prefix[d].0;
+            let visible = match f {
+                Field::SupArg => ghosted || editing || !is_inline_script_row(child, true),
+                Field::SubArg => ghosted || editing || !is_inline_script_row(child, false),
+                Field::OpLower
+                | Field::OpUpper
+                | Field::ArrowOver
+                | Field::ArrowUnder
+                | Field::BraceLabel => ghosted || editing || !child.is_empty(),
+                _ => true,
+            };
+            if !visible {
+                return false;
+            }
+            row = child;
+        }
+        true
+    }
+
+    /// Coordinates in the *display* geometry: ghost rows materialized,
+    /// probes only on visible positions (invisible ones get None).
+    fn display_coords(&self, cands: &[JumpCand]) -> Vec<Option<(usize, usize)>> {
+        use crate::render::{RenderCtx, render_row};
+        let n = cands.len().min(0x800);
+        let mut root = self.root.clone();
+        // Ghosts first (deepest rows first), then the probes with their
+        // paths nudged past the ghost insertions — mixing the orders
+        // corrupts whichever set is inserted second.
+        let mut ghosts: Vec<&Vec<(usize, Field)>> = self.ghost.iter().collect();
+        ghosts.sort_by_key(|p| std::cmp::Reverse(p.len()));
+        for p in ghosts {
+            row_at_mut(&mut root, p).insert(0, Node::Sym(SLOT_GHOST));
+        }
+        for (idx, cand) in cands.iter().take(n).enumerate().rev() {
+            if !self.display_visible(&cand.pos) {
+                continue;
+            }
+            let (p, c) = &cand.pos;
+            let (p2, c2) = ghost_adjust(&self.ghost, p, *c);
+            let mark = char::from_u32(PROBE_BASE + idx as u32).unwrap();
+            row_at_mut(&mut root, &p2).insert(c2, Node::Sym(mark));
+        }
+        let b = render_row(&root, None, false, &RenderCtx::canonical());
+        let mut out = vec![None; cands.len()];
+        for &(y, x, ch) in &b.marks {
+            let u = ch as u32;
+            if u >= PROBE_BASE {
+                let i = (u - PROBE_BASE) as usize;
+                if i < out.len() {
+                    out[i] = Some((y, x));
+                }
+            }
+        }
+        out
+    }
+
+    // ----- free-cursor mode (^F) -----
+
+    pub fn start_free(&mut self) {
+        self.select_anchor = None;
+        let start = self
+            .nearest_position_of_cursor()
+            .unwrap_or(((self.path.clone(), self.col), (0, 0)));
+        self.free = Some(FreeCursor {
+            at: start.1,
+            snap: start.0,
+            snap_at: start.1,
+        });
+        self.message = "free move: arrows, Enter snaps (Esc cancels)".into();
+    }
+
+    /// The cursor's own display cell (in the display frame).
+    fn nearest_position_of_cursor(&self) -> Option<(CursorPos, (usize, usize))> {
+        let cands = self.jump_candidates();
+        let coords = self.display_coords(&cands);
+        let i = cands.iter().position(|c| c.is_cursor)?;
+        coords[i].map(|xy| (cands[i].pos.clone(), xy))
+    }
+
+    pub fn free_move(&mut self, dx: i32, dy: i32) {
+        use crate::render::{RenderCtx, render_row};
+        let Some(f) = &self.free else {
+            return;
+        };
+        // (Clamping happens after the re-anchor step, against the
+        // ghost-materialized display frame.)
+        let at = (
+            f.at.0.saturating_add_signed(dy as isize),
+            f.at.1.saturating_add_signed(dx as isize),
+        );
+        // Collapsed elements (inline scripts, invisible slots) expand
+        // automatically while the free cursor is near them. Proximity is
+        // measured in the *current display frame* against the element's
+        // always-visible anchor (the position before its node in the
+        // parent row), with hysteresis (R_IN/R_OUT) so the expansion
+        // shift cannot make the test oscillate.
+        let cands = self.jump_candidates();
+        let disp = self.display_coords(&cands);
+        let coord_of = |pos: &CursorPos| {
+            cands
+                .iter()
+                .position(|c| &c.pos == pos)
+                .and_then(|i| disp[i])
+        };
+        let mut ghosts: Vec<Vec<(usize, Field)>> = Vec::new();
+        for cand in &cands {
+            let expandable = matches!(
+                cand.pos.0.last(),
+                Some((
+                    _,
+                    Field::SupArg
+                        | Field::SubArg
+                        | Field::OpLower
+                        | Field::OpUpper
+                        | Field::ArrowOver
+                        | Field::ArrowUnder
+                        | Field::BraceLabel
+                ))
+            );
+            if !expandable || ghosts.contains(&cand.pos.0) {
+                continue;
+            }
+            let row_path = &cand.pos.0;
+            let anchor = (
+                row_path[..row_path.len() - 1].to_vec(),
+                row_path[row_path.len() - 1].0,
+            );
+            let Some((ay, ax)) = coord_of(&anchor) else {
+                continue;
+            };
+            let d = JUMP_W_Y * ay.abs_diff(at.0) + ax.abs_diff(at.1);
+            let was = self.ghost.contains(row_path);
+            if d <= FREE_EXPAND_IN || (was && d <= FREE_EXPAND_OUT) {
+                ghosts.push(row_path.clone());
+            }
+        }
+        self.ghost = ghosts;
+        // Expansion can shift the whole canvas (a band adds a row above
+        // the baseline). Re-anchor the free cursor by however much the
+        // previous snap target moved between the two frames, so the
+        // cell cursor stays glued to the content instead of floating.
+        let mut at = at;
+        if let Some(prev) = &self.free {
+            let cands2 = self.jump_candidates();
+            let disp2 = self.display_coords(&cands2);
+            if let Some((ny, nx)) = cands2
+                .iter()
+                .position(|c| c.pos == prev.snap)
+                .and_then(|i| disp2[i])
+            {
+                at.0 =
+                    at.0.saturating_add_signed(ny as isize - prev.snap_at.0 as isize);
+                at.1 =
+                    at.1.saturating_add_signed(nx as isize - prev.snap_at.1 as isize);
+            }
+        }
+        // Clamp to the display frame (ghosts included).
+        let (droot, _) = self.decorated();
+        let b = render_row(&droot, None, false, &RenderCtx::canonical());
+        let (h, w) = (b.height().max(1), b.width().max(1));
+        at.0 = at.0.min(h - 1);
+        at.1 = at.1.min(w);
+        if let Some((snap, snap_at)) = self.nearest_position(at.1, at.0) {
+            self.free = Some(FreeCursor { at, snap, snap_at });
+        } else if let Some(f) = &mut self.free {
+            f.at = at;
+        }
+    }
+
+    /// Enter: land on the snap target.
+    pub fn free_confirm(&mut self) {
+        if let Some(f) = self.free.take() {
+            self.path = f.snap.0;
+            self.col = f.snap.1;
+            self.message.clear();
+        }
+    }
+
+    pub fn free_cancel(&mut self) {
+        self.free = None;
+        self.ghost.clear();
+        self.message.clear();
     }
 
     /// Ctrl+A: jump to the very start of the whole formula.
@@ -1276,13 +1524,17 @@ impl Editor {
         let mut path = self.path.clone();
         let mut col = self.col;
         // Deepest rows first: inserting into an ancestor row would shift
-        // the node indices a deeper ghost path still needs.
+        // the node indices a deeper ghost path still needs. The cursor
+        // is adjusted in one batch against the original coordinates
+        // (incremental nudging breaks on nested ghosts).
         let mut ghosts: Vec<&Vec<(usize, Field)>> = self.ghost.iter().collect();
         ghosts.sort_by_key(|p| std::cmp::Reverse(p.len()));
         for p in ghosts {
             row_at_mut(&mut root, p).insert(0, Node::Sym(SLOT_GHOST));
-            bump(&mut path, &mut col, p, 0);
         }
+        let adjusted = ghost_adjust(&self.ghost, &path, col);
+        path = adjusted.0;
+        col = adjusted.1;
         if let Some((lo, hi)) = self.selection() {
             let row = row_at_mut(&mut root, &path);
             row.insert(hi, Node::Sym(SEL_CLOSE));

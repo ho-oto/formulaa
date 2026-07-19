@@ -19,7 +19,7 @@ use mascii::parse::RegionSpan;
 use mascii::render::{RenderCtx, render_row};
 use mascii::{ast, latex, parse, typst};
 
-const HELP: &str = "\\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ^A start  ⇧←→/⇧↑ select  ^B select block  ^C/^X/^V copy/cut/paste  ^G jump  ^O structure  ^T italic  ^Y copy AA  ^S save  Esc/^Q quit";
+const HELP: &str = "\\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ^A start  ⇧←→/⇧↑ select  ^B select block  ^F free move  ^C/^X/^V copy/cut/paste  ^G jump  ^O structure  ^T italic  ^Y copy AA  ^S save  Esc/^Q quit";
 
 /// Context-sensitive last line: generic keys normally, the relevant
 /// commands when the cursor is inside a grid cell or a delimiter.
@@ -409,17 +409,40 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
     let (root, cursor) = ed.decorated();
     let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
     let block = render_row(&root, cursor_ref, false, &ctx);
-    let (lines, bg, cursor_cell) = marker_boxes(
+    let (lines, mut bg, mut cursor_cell) = marker_boxes(
         &block.to_strings(),
         &ed.marker_extents(),
         &block.marks,
         block.caret,
         ed.jump.is_some().then_some(ed.jump_selected),
     );
+    let mut lines = lines;
+    // ^F: the free cursor itself gets the prominent caret style; the
+    // snap preview is the subtler colored cell.
+    if let Some(f) = &ed.free {
+        let (sy, sx) = f.snap_at;
+        if sy < lines.len() {
+            let mut row: Vec<char> = lines[sy].chars().collect();
+            if sx >= row.len() {
+                row.resize(sx + 1, ' ');
+                bg[sy].resize(sx + 1, None);
+                lines[sy] = row.into_iter().collect();
+            }
+            let last = bg[sy].len().saturating_sub(1);
+            bg[sy][sx.min(last)] = Some(FREE_BG);
+        }
+        let (fy, fx) = f.at;
+        if fy < lines.len() {
+            let mut row: Vec<char> = lines[fy].chars().collect();
+            if fx >= row.len() {
+                row.resize(fx + 1, ' ');
+                bg[fy].resize(fx + 1, None);
+                lines[fy] = row.into_iter().collect();
+            }
+            cursor_cell = Some((fy, fx));
+        }
+    }
 
-    // Centering anchors on the *render* width: the caret / an end-of-row
-    // label may pad one extra display cell, and letting that change the
-    // centering would shift the whole formula by ±1 as modes toggle.
     let width = block.width() as u16;
     let height = lines.len() as u16;
     let left = inner.width.saturating_sub(width) / 2;
@@ -446,6 +469,8 @@ const SELECTION_BG: Color = Color::Indexed(89);
 const UNLABELED_BG: Color = Color::Indexed(238);
 /// The arrow-selected jump marker.
 const SELECTED_BG: Color = Color::Indexed(172);
+/// The ^F snap-preview cell (the free cursor uses the caret style).
+const FREE_BG: Color = Color::Indexed(24);
 
 /// Turn the zero-width display annotations of a rendered block into
 /// colored boxes, overlaid labels and the caret cell. Marks carry
