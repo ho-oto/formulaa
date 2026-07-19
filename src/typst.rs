@@ -85,11 +85,23 @@ fn node_to_typst(node: &Node) -> String {
         Node::Sup { arg } => format!("^{}", grouped(arg)),
         Node::Sub { arg } => format!("_{}", grouped(arg)),
         Node::BigOp { base, lower, upper } => {
-            let mut s = match &base[..] {
-                // \op*<name>: an upright operator with under-limits.
-                [Node::Text { t, math: true }] => format!("op(\"{}\", limits: #true)", t),
-                [_] => row_to_typst(base),
-                _ => format!("limits({})", row_to_typst(base)),
+            // \op* word pieces (Text among them) become one op("…").
+            let words: Option<Vec<&str>> = base
+                .iter()
+                .map(|n| match n {
+                    Node::Text { t, math: true } => Some(t.as_str()),
+                    Node::Func(f) => Some(f.as_str()),
+                    _ => None,
+                })
+                .collect();
+            let mut s = match words {
+                Some(ws) if base.iter().any(|n| matches!(n, Node::Text { .. })) => {
+                    format!("op(\"{}\", limits: #true)", ws.join(" "))
+                }
+                _ => match &base[..] {
+                    [_] => row_to_typst(base),
+                    _ => format!("limits({})", row_to_typst(base)),
+                },
             };
             if !lower.is_empty() {
                 s.push_str(&format!("_{}", grouped(lower)));

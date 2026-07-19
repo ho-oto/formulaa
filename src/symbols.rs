@@ -285,6 +285,12 @@ pub fn bigop_by_name(name: &str) -> Option<char> {
     BIG_OPS.iter().find(|(n, _)| *n == name).map(|&(_, c)| c)
 }
 
+/// Functions that take under-limits (the minibuffer command inserts a
+/// ┄band┄; ↑/↓ can lift a bare one back into its band).
+pub const LIMIT_FUNCS: &[&str] = &[
+    "lim", "liminf", "limsup", "max", "min", "sup", "inf", "det", "gcd", "Pr",
+];
+
 pub fn bigop_by_char(c: char) -> bool {
     BIG_OPS.iter().any(|&(_, op)| op == c)
 }

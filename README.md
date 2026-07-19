@@ -83,10 +83,13 @@ TUI は毎編集後に AA→AST の逆変換を自動検査し、ラウンドト
 - 大型演算子: `\sum` `\prod` `\int` `\oint` `\bigcup` …(挿入直後は下極限、
   `↑` で上極限へ)。`\lim` `\max` `\inf` `\det` `\Pr` なども同じバンドで
   下極限に入る(`┄lim┄`)。`\argmax` `\argmin` は複数ピースの
-  `┄arg┄max┄`(基底の自由編集は今後の UI 課題)
+  `┄arg┄max┄`
 - 関数名: `\sin` `\cos` `\log` `\lim` …(立体で表示)。任意名は
-  `\op<name>`(=\operatorname、AST 上は \mathrm と同じ)、
-  `\op*<name>`(=\operatorname*、`┄name┄` バンドで下極限に入る)
+  `\op` / `\op*` — その場に名前入力ボックスが開き、確定でそのまま
+  立体ラン(=\mathrm)/ 演算子バンド(=\operatorname*、下極限へ)に
+  なる。スペース区切りは `┄ess┄sup┄` のような複数ピースに
+  (`ess sup` → \operatorname*{ess sup})。Esc で取消、
+  名前以外のキーはそのまま確定して通常動作
 - アクセント: `\hat` `\vec` `\bar` `\dot` `\tilde` `\underline`
   (直前の1文字に付く。続けて実行すると縦に重ね掛け)
 - 伸縮矢印: `\xto` `\xfrom`(→ ←)、`\xTo` `\xFrom`(⇒ ⇐)— 上下にラベル

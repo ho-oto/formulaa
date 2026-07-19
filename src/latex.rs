@@ -61,10 +61,21 @@ fn node_to_latex(node: &Node) -> String {
         Node::BigOp { base, lower, upper } => {
             // \sum_{..}^{..}, \lim_{..}, \arg\max_{..} — the base row's
             // own serialization already yields the operator commands.
-            // A lone Text base is \op*<name>: \operatorname* keeps the
-            // limits underneath (plain \mathrm would set them aside).
-            let mut s = match &base[..] {
-                [Node::Text { t, math: true }] => format!("\\operatorname*{{{}}}", t),
+            // Word pieces with a Text among them are an \op* name
+            // (┄ess┄sup┄): \operatorname* keeps the limits underneath
+            // (plain \mathrm would set them aside).
+            let words: Option<Vec<&str>> = base
+                .iter()
+                .map(|n| match n {
+                    Node::Text { t, math: true } => Some(t.as_str()),
+                    Node::Func(f) => Some(f.as_str()),
+                    _ => None,
+                })
+                .collect();
+            let mut s = match words {
+                Some(ws) if base.iter().any(|n| matches!(n, Node::Text { .. })) => {
+                    format!("\\operatorname*{{{}}}", ws.join(" "))
+                }
                 _ => row_to_latex(base),
             };
             if !lower.is_empty() {

@@ -121,6 +121,23 @@ fn esc_cancels_modes_before_quitting() {
 }
 
 #[test]
+fn op_box_via_keys() {
+    // \op* opens the in-place name box; Space separates band pieces,
+    // Enter commits into the lower limit.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\op* ess Space sup Enter n Tab");
+    assert_eq!(latex(&ed), "\\operatorname*{ess sup}_{n}");
+    // Arrow keys (anything not part of the name) commit the box too.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\op vol Right +1");
+    assert_eq!(latex(&ed), "\\mathrm{vol}+1");
+    // Esc cancels.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\op foo Esc");
+    assert!(ed.root.is_empty());
+}
+
+#[test]
 fn enter_at_top_level_breaks_the_line() {
     let mut ed = Editor::new();
     type_script(&mut ed, "a+b Enter =c");

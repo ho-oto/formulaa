@@ -5,7 +5,7 @@
 //! the AST. Every layout rule here has a matching rule in the parser —
 //! change them in lockstep and keep the roundtrip tests green.
 
-use crate::ast::{Field, Node, Row};
+use crate::ast::{Field, Node, Row, promotable_base};
 
 pub const CURSOR_CHAR: char = '▌';
 /// Placeholder for an empty mandatory slot, and explicit base of a script
@@ -859,8 +859,10 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             let u = render_row(upper, cur(Field::OpUpper), editing, ctx);
             let l = render_row(lower, cur(Field::OpLower), editing, ctx);
             let b = render_row(base, None, true, ctx);
-            if u.is_empty() && l.is_empty() && cursor.is_none() {
-                // Transient un-normalized state: just the base.
+            if u.is_empty() && l.is_empty() && cursor.is_none() && promotable_base(base) {
+                // Transient un-normalized state (a bare-able ∑ / lim):
+                // just the base. Non-promotable bases (\op* names) keep
+                // their band even without limits.
                 return b;
             }
             // Band marks the horizontal extent of the limits; the base is

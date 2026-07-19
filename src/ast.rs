@@ -59,9 +59,10 @@ pub enum Node {
     },
     /// Band with under/over limits: anything sandwiched in ┄ without
     /// spaces (`┄∑┄`, `┄lim┄`, `┄arg┄max┄` …). The base is a flat one-line
-    /// row; blank columns inside it are drawn as ┄. With both limits empty
-    /// the node normalizes away (the base is spliced into the row), so a
-    /// bare ∑ is just an atom.
+    /// row; blank columns inside it are drawn as ┄. With both limits
+    /// empty the node normalizes away *only* for promotable bases (a
+    /// bare ∑ / lim is just an atom, ↑/↓ lifts it back); an \op* name
+    /// keeps its band (`promotable_base`).
     BigOp {
         base: Row,
         lower: Row,
@@ -225,14 +226,30 @@ pub fn row_at_mut<'a>(root: &'a mut Row, path: &[(usize, Field)]) -> &'a mut Row
 
 /// Canonical form: merge adjacent same-kind scripts (x^{a}^{b} == x^{ab} in
 /// the picture, so the parser can only ever return the merged form).
+/// A band base the editor can re-promote from its bare form with ↑/↓:
+/// a single ∑-class symbol or lim-class function. Only these lose their
+/// band when both limits are empty.
+pub fn promotable_base(base: &Row) -> bool {
+    match &base[..] {
+        [Node::Sym(c)] => crate::symbols::bigop_by_char(*c),
+        [Node::Func(f)] => crate::symbols::LIMIT_FUNCS.contains(&f.as_str()),
+        _ => false,
+    }
+}
+
 /// `parse(render(x)) == normalize(x)` is the roundtrip invariant.
 pub fn normalize(row: &Row) -> Row {
-    // A band with no limits is the same picture as its base alone —
-    // splice it before the merge pass.
+    // A band with no limits collapses to its bare base — but only when
+    // the editor can lift that base back into a band (∑-class atoms and
+    // lim-class functions, via ↑/↓). An \op* name (Text piece or a
+    // multi-piece base) has no such way back, so its band survives
+    // empty limits: ┄ess┄sup┄ stays a band.
     let mut pre: Row = Vec::with_capacity(row.len());
     for node in row {
         match normalize_node(node) {
-            Node::BigOp { base, lower, upper } if lower.is_empty() && upper.is_empty() => {
+            Node::BigOp { base, lower, upper }
+                if lower.is_empty() && upper.is_empty() && promotable_base(&base) =>
+            {
                 pre.extend(base)
             }
             n => pre.push(n),

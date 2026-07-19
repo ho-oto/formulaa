@@ -109,6 +109,30 @@ impl Editor {
             return Effect::None;
         }
 
+        // \op name box: printable keys build the name; any key that is
+        // not part of it commits first, then acts normally.
+        if self.op_entry.is_some() {
+            match key {
+                Key::Esc => {
+                    self.op_entry = None;
+                    return Effect::None;
+                }
+                Key::Backspace => {
+                    self.op_backspace();
+                    return Effect::None;
+                }
+                Key::Char(c) if !ctrl && (c.is_ascii_alphanumeric() || c == ' ') => {
+                    self.op_type(c);
+                    return Effect::None;
+                }
+                Key::Enter | Key::Tab => {
+                    self.op_commit();
+                    return Effect::None;
+                }
+                _ => self.op_commit(),
+            }
+        }
+
         // Ghost slots survive only until the next real input; ^G itself
         // re-labels the identical picture.
         if !(ctrl && key == Key::Char('g')) {

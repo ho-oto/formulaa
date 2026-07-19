@@ -167,6 +167,43 @@ fn operatorname_star_band() {
         row_to_latex(&normalize(&row)),
         "\\operatorname*{esssup}_{x}f\\left(x\\right)"
     );
+    // Multi-word \op* name: each word is its own band piece, dictionary
+    // words as the Funcs they are (┄ess┄sup┄).
+    let row = cat(&[n(Node::BigOp {
+        base: vec![
+            Node::Text {
+                t: "ess".into(),
+                math: true,
+            },
+            Node::Func("sup".into()),
+        ],
+        lower: s("x"),
+        upper: vec![],
+    })]);
+    roundtrip("operatorname-star-words", &row);
+    assert_eq!(
+        row_to_latex(&normalize(&row)),
+        "\\operatorname*{ess sup}_{x}"
+    );
+    // Empty limits: an \op* name keeps its band (a bare ∑ / lim would
+    // collapse to the atom instead — promotable_base).
+    let row = cat(&[
+        n(Node::BigOp {
+            base: vec![
+                Node::Text {
+                    t: "ess".into(),
+                    math: true,
+                },
+                Node::Func("sup".into()),
+            ],
+            lower: vec![],
+            upper: vec![],
+        }),
+        s("f"),
+    ]);
+    roundtrip("operatorname-star-bandless-limits", &row);
+    assert_eq!(row_to_latex(&normalize(&row)), "\\operatorname*{ess sup}f");
+    assert!(matches!(&normalize(&row)[0], Node::BigOp { .. }));
 }
 
 /// Multi-line formula: Breaks stack the lines with a lone-┄ continuation
@@ -913,11 +950,20 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
                 0 => vec![Node::Func("lim".into())],
                 1 => vec![Node::Func("max".into())],
                 2 => vec![Node::Func("arg".into()), Node::Func("max".into())],
-                // \op*<name>: arbitrary upright operator (Text base).
-                3 => vec![Node::Text {
-                    t: "esssup".into(),
-                    math: true,
-                }],
+                // \op* names: arbitrary upright operator words.
+                3 => match rng.below(2) {
+                    0 => vec![Node::Text {
+                        t: "esssup".into(),
+                        math: true,
+                    }],
+                    _ => vec![
+                        Node::Text {
+                            t: "ess".into(),
+                            math: true,
+                        },
+                        Node::Func("sup".into()),
+                    ],
+                },
                 _ => vec![Node::Sym(['∑', '∏', '∫', '⋃'][rng.below(4)])],
             };
             Node::BigOp {

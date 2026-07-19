@@ -16,6 +16,9 @@ pub struct Editor {
     pub col: usize,
     /// Some(text) while the `\command` minibuffer is open.
     pub minibuffer: Option<String>,
+    /// Some((star, name)) while the `\op` in-place operator-name box is
+    /// open (star = `\op*`, a big operator taking under-limits).
+    pub op_entry: Option<(bool, String)>,
     pub message: String,
     pub italic: bool,
     /// EasyMotion-style jump: Some(targets) while waiting for a label
@@ -142,12 +145,6 @@ impl Default for Editor {
     }
 }
 
-/// Functions that take under-limits: the minibuffer command inserts a
-/// ┄band┄ and puts the cursor in the lower limit.
-const LIMIT_FUNCS: &[&str] = &[
-    "lim", "liminf", "limsup", "max", "min", "sup", "inf", "det", "gcd", "Pr",
-];
-
 /// `\lr…` / `\delim…` (Typst-style) delimiter spec, read in *visual
 /// order*: first token = left, interior tokens = middles ('|' only),
 /// last token = right. A token is one spec char — `( ) [ ] { } | .`
@@ -240,6 +237,7 @@ impl Editor {
             path: Vec::new(),
             col: 0,
             minibuffer: None,
+            op_entry: None,
             message: String::new(),
             italic: true,
             jump: None,
@@ -673,7 +671,7 @@ impl Editor {
             let col = self.col - 1;
             let promotable = match &self.cur_row()[col] {
                 Node::Sym(c) => bigop_by_char(*c),
-                Node::Func(name) => LIMIT_FUNCS.contains(&name.as_str()),
+                Node::Func(name) => crate::symbols::LIMIT_FUNCS.contains(&name.as_str()),
                 _ => false,
             };
             if promotable {
@@ -1595,6 +1593,21 @@ impl Editor {
         let adjusted = ghost_adjust(&self.ghost, &path, col);
         path = adjusted.0;
         col = adjusted.1;
+        if let Some((_, buf)) = &self.op_entry {
+            // The in-progress name shows as an upright run (a display-
+            // only Func atom: never quoted, spaces drawn as ␣) framed by
+            // the selection markers, cursor right after the text.
+            let row = row_at_mut(&mut root, &path);
+            let node = if buf.is_empty() {
+                Node::Sym('⬚')
+            } else {
+                Node::Func(buf.replace(' ', "␣"))
+            };
+            row.insert(col, Node::Sym(SEL_CLOSE));
+            row.insert(col, node);
+            row.insert(col, Node::Sym(SEL_OPEN));
+            return (root, Some((path, col + 2)));
+        }
         if let Some((lo, hi)) = self.selection() {
             let row = row_at_mut(&mut root, &path);
             row.insert(hi, Node::Sym(SEL_CLOSE));
@@ -1608,6 +1621,71 @@ impl Editor {
             };
         }
         (root, Some((path, col)))
+    }
+
+    /// Open the `\op` operator-name box at the cursor.
+    pub fn op_start(&mut self, star: bool) {
+        self.select_anchor = None;
+        self.op_entry = Some((star, String::new()));
+    }
+
+    pub fn op_type(&mut self, c: char) {
+        if let Some((_, buf)) = &mut self.op_entry {
+            buf.push(c);
+        }
+    }
+
+    /// Backspace in the box; an empty box cancels it.
+    pub fn op_backspace(&mut self) {
+        if let Some((_, buf)) = &mut self.op_entry
+            && buf.pop().is_none()
+        {
+            self.op_entry = None;
+        }
+    }
+
+    /// Commit the box: each space-separated word becomes a Func
+    /// (dictionary words) or a bare upright run (Text). `\op*` builds a
+    /// ┄band┄ with the words as its pieces (┄arg┄max┄) and enters the
+    /// lower limit; plain `\op` inserts the words joined by ␣.
+    pub fn op_commit(&mut self) {
+        let Some((star, text)) = self.op_entry.take() else {
+            return;
+        };
+        let words: Vec<&str> = text.split_whitespace().collect();
+        if words.is_empty() {
+            return;
+        }
+        let piece = |w: &str| {
+            if crate::symbols::is_func_name(w) {
+                Node::Func(w.to_string())
+            } else {
+                Node::Text {
+                    t: w.to_string(),
+                    math: true,
+                }
+            }
+        };
+        if star {
+            let base: Vec<Node> = words.iter().map(|w| piece(w)).collect();
+            self.insert_and_enter(Node::BigOp {
+                base,
+                lower: vec![],
+                upper: vec![],
+            });
+        } else {
+            let mut nodes: Vec<Node> = Vec::new();
+            for (i, w) in words.iter().enumerate() {
+                if i > 0 {
+                    nodes.push(Node::Sym('␣'));
+                }
+                nodes.push(piece(w));
+            }
+            let col = self.col;
+            let n = nodes.len();
+            self.cur_row_mut().splice(col..col, nodes);
+            self.col += n;
+        }
     }
 
     /// Execute a `\command` from the minibuffer.
@@ -1751,7 +1829,7 @@ impl Editor {
                         lower: vec![],
                         upper: vec![],
                     });
-                } else if LIMIT_FUNCS.contains(&cmd) {
+                } else if crate::symbols::LIMIT_FUNCS.contains(&cmd) {
                     // Limit-taking operators enter the lower limit (┄lim┄).
                     self.insert_and_enter(Node::BigOp {
                         base: vec![Node::Func(cmd.to_string())],
@@ -1774,32 +1852,14 @@ impl Editor {
                     } else {
                         self.insert_sym(c);
                     }
-                } else if let Some(t) = cmd
-                    .strip_prefix("operatorname*")
-                    .or_else(|| cmd.strip_prefix("op*"))
-                    .filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric()))
-                {
-                    // \op*<name> (\operatorname*): upright operator that
-                    // takes under-limits — a ┄band┄ with a Text base
-                    // (dictionary words fall back to the Func they are).
-                    let base = if is_func_name(t) {
-                        Node::Func(t.to_string())
-                    } else {
-                        Node::Text {
-                            t: t.to_string(),
-                            math: true,
-                        }
-                    };
-                    self.insert_and_enter(Node::BigOp {
-                        base: vec![base],
-                        lower: vec![],
-                        upper: vec![],
-                    });
+                } else if matches!(cmd, "op" | "op*" | "operatorname" | "operatorname*") {
+                    // \op / \op* open the in-place name box (see
+                    // op_commit for what the words become). The old
+                    // \op<name> attached-argument style is gone.
+                    self.op_start(cmd.ends_with('*'));
                 } else if let Some((t, math)) = cmd
                     .strip_prefix("rm")
                     .map(|t| (t, true))
-                    .or_else(|| cmd.strip_prefix("operatorname").map(|t| (t, true)))
-                    .or_else(|| cmd.strip_prefix("op").map(|t| (t, true)))
                     .or_else(|| cmd.strip_prefix("text").map(|t| (t, false)))
                     .filter(|(t, math)| {
                         // \mathrm content must survive the quoted form
@@ -1817,7 +1877,7 @@ impl Editor {
                 {
                     // \rm<chars> = \mathrm, \text<chars> = \text. An
                     // upright dictionary word IS the function (the letter
-                    // -run rule reads it back as Func anyway), so \opsin
+                    // -run rule reads it back as Func anyway), so \rmsin
                     // falls back to \sin instead of a quoted 'sin'.
                     let node = if math && is_func_name(t) {
                         Node::Func(t.to_string())
@@ -1931,34 +1991,73 @@ mod tests {
     }
 
     #[test]
-    fn op_and_op_star() {
-        // \op<name> = arbitrary \mathrm (same AST as \rm).
+    fn op_box() {
+        let type_name = |ed: &mut Editor, s: &str| {
+            for c in s.chars() {
+                ed.op_type(c);
+            }
+            ed.op_commit();
+        };
+        // \op opens the name box; the committed word is a bare upright
+        // run (no quotes).
         let mut ed = Editor::new();
-        ed.execute("opvol");
+        ed.execute("op");
+        assert!(ed.op_entry.is_some());
+        type_name(&mut ed, "vol");
         assert_eq!(row_to_latex(&ed.root), "\\mathrm{vol}");
         // A dictionary word falls back to the Func it names.
         let mut ed = Editor::new();
-        ed.execute("opsin");
+        ed.execute("op");
+        type_name(&mut ed, "sin");
         assert_eq!(ed.root, vec![Node::Func("sin".into())]);
+        // Plain \op with spaces: words joined by ␣.
         let mut ed = Editor::new();
-        ed.execute("op*max");
-        assert!(matches!(&ed.root[0],
-            Node::BigOp { base, .. } if base == &vec![Node::Func("max".into())]));
-        // \op*<name> = operator band taking under-limits.
+        ed.execute("op");
+        type_name(&mut ed, "arg blah");
+        assert_eq!(
+            ed.root,
+            vec![
+                Node::Func("arg".into()),
+                Node::Sym('␣'),
+                Node::Text {
+                    t: "blah".into(),
+                    math: true
+                }
+            ]
+        );
+        // \op*: an operator band; space-separated words become the band
+        // pieces (┄ess┄sup┄), dictionary words as Funcs.
         let mut ed = Editor::new();
-        ed.execute("op*esssup");
+        ed.execute("op*");
+        type_name(&mut ed, "ess sup");
         assert_eq!(ed.path.last().unwrap().1, Field::OpLower);
         ed.insert_sym('x');
         ed.exit_inset();
-        assert_eq!(row_to_latex(&ed.root), "\\operatorname*{esssup}_{x}");
+        assert!(matches!(&ed.root[0],
+            Node::BigOp { base, .. } if base.len() == 2
+                && matches!(&base[0], Node::Text { t, .. } if t == "ess")
+                && base[1] == Node::Func("sup".into())));
+        assert_eq!(row_to_latex(&ed.root), "\\operatorname*{ess sup}_{x}");
+        // Empty box commits to nothing; Esc-like cancel via backspace.
+        let mut ed = Editor::new();
+        ed.execute("op");
+        ed.op_commit();
+        assert!(ed.root.is_empty() && ed.op_entry.is_none());
+        let mut ed = Editor::new();
+        ed.execute("op");
+        ed.op_type('a');
+        ed.op_backspace();
+        ed.op_backspace();
+        assert!(ed.op_entry.is_none() && ed.root.is_empty());
     }
 
     #[test]
     fn rm_and_op_arguments_are_alphanumeric_only() {
-        // `\op*` alone: the `*` must not become the \op argument —
-        // Text{math} with non-alphanumeric content cannot roundtrip
-        // (the '…' quoted form only reads ASCII alphanumerics).
-        for cmd in ["op*", "op*)", "rm*", "opα"] {
+        // Attached-argument \op styles are gone (the box took over);
+        // \rm keeps its arg but rejects non-alphanumerics — Text{math}
+        // with such content cannot roundtrip (the '…' quoted form only
+        // reads ASCII alphanumerics).
+        for cmd in ["op*)", "rm*", "opα", "opvol"] {
             let mut ed = Editor::new();
             ed.execute(cmd);
             assert!(

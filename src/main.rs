@@ -25,6 +25,9 @@ const HELP: &str = "\\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click mov
 /// commands when the cursor is inside a grid cell or a delimiter.
 fn help_line(ed: &Editor) -> &'static str {
     use mascii::ast::Field;
+    if ed.op_entry.is_some() {
+        return "op name: letters/digits + Space (word pieces)  Enter/Tab commit  Esc cancel";
+    }
     match ed.path.last() {
         Some((_, Field::Cell(_))) => {
             "grid: Enter add row  \\addrow \\addcol \\delrow \\delcol  ] exit  (then ^/_ etc. as usual)"
