@@ -72,6 +72,7 @@ TUI は毎編集後に AA→AST の逆変換を自動検査し、ラウンドト
   (直前の1文字に付く。続けて実行すると縦に重ね掛け)
 - 伸縮矢印: `\xto` `\xfrom`(→ ←)、`\xTo` `\xFrom`(⇒ ⇐)— 上下にラベル
 - テキスト: `\rmdx` → `"dx"`(\mathrm)、`\text...`(空白入りは AA 上 ␣)
+- ブレース: `\overbrace` `\underbrace`(選択があれば選択を引数にしてラベルへ)
 - 記号: 厳選テーブル + [ho-oto/mathematical-symbols](https://github.com/ho-oto/mathematical-symbols)
   由来の 4000+ エントリ(`\bbR`→ℝ, `\->`→→, `\oo`→∞ など)
 

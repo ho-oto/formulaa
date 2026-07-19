@@ -198,6 +198,14 @@ impl Editor {
                 (Field::OpUpper, false) => Some(Field::OpLower),
                 (Field::ArrowUnder, true) => Some(Field::ArrowOver),
                 (Field::ArrowOver, false) => Some(Field::ArrowUnder),
+                (Field::BraceArg, dir) => match node {
+                    Node::Brace { over, .. } if *over == dir => Some(Field::BraceLabel),
+                    _ => None,
+                },
+                (Field::BraceLabel, dir) => match node {
+                    Node::Brace { over, .. } if *over != dir => Some(Field::BraceArg),
+                    _ => None,
+                },
                 (Field::Cell(c), up) => match node {
                     Node::Array { cols, cells, .. } => {
                         if up && c >= *cols {
@@ -678,6 +686,19 @@ impl Editor {
             "braket" => self.insert_delim('⟨', '⟩', vec!['|']),
             "set" => self.insert_delim('{', '}', vec!['|']),
             "mid" => self.insert_mid(),
+            "overbrace" | "underbrace" => {
+                let over = cmd == "overbrace";
+                if let Some(content) = self.take_selection() {
+                    // Selection becomes the argument; cursor to the label.
+                    let col = self.col;
+                    self.cur_row_mut()
+                        .insert(col, Node::Brace { over, arg: content, label: vec![] });
+                    self.path.push((col, Field::BraceLabel));
+                    self.col = 0;
+                } else {
+                    self.insert_and_enter(Node::Brace { over, arg: vec![], label: vec![] });
+                }
+            }
             "xrightarrow" | "xto" => {
                 self.insert_and_enter(Node::Arrow { op: '→', over: vec![], under: vec![] })
             }

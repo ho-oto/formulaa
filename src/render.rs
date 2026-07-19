@@ -16,9 +16,10 @@ pub const FRAC_BAR: char = '─';
 /// Big-operator band: marks the horizontal extent of over/under limits.
 pub const OP_BAND: char = '┄';
 /// Stretchy single-arrow bodies reuse the ─ bar: a bar run directly
-/// followed by a head (→) *is* the arrow; a fraction next to an arrow
-/// atom is separated by a ⬚ anchor instead (space presence, not count,
-/// is what changes the reading). Double arrows (⇒ ⇐) use ═.
+/// capped by a head (`──>`) *is* the arrow; a fraction next to a `>` atom
+/// is written with a separating space (space presence, not count, is what
+/// changes the reading). Double arrows (⇒ ⇐) use a ═ body. Heads render
+/// as ASCII < > ; the Unicode arrows are accepted as lenient input heads.
 pub const DOUBLE_BODY: char = '═';
 
 /// Body glyph for an arrow head.
@@ -360,10 +361,10 @@ pub fn render_row(
                         a == OP_BAND
                             || b == OP_BAND
                             || (a == b && (a == FRAC_BAR || a == DOUBLE_BODY))
-                            || (a == FRAC_BAR && b == '→')
-                            || (a == DOUBLE_BODY && b == '⇒')
-                            || (a == '←' && b == FRAC_BAR)
-                            || (a == '⇐' && b == DOUBLE_BODY)
+                            || (a == FRAC_BAR && (b == '>' || b == '→'))
+                            || (a == DOUBLE_BODY && (b == '>' || b == '⇒'))
+                            || ((a == '<' || a == '←') && b == FRAC_BAR)
+                            || ((a == '<' || a == '⇐') && b == DOUBLE_BODY)
                     }
                     _ => false,
                 };
@@ -382,6 +383,10 @@ pub fn render_row(
         prev = Some(info);
     }
     hcat(&spaced)
+}
+
+fn l_placeholder(cursor: Option<(Field, CursorRef)>) -> bool {
+    cursor.is_some()
 }
 
 fn render_node(
@@ -531,6 +536,39 @@ fn render_node(
             Block { lines, baseline, cancel }
         }
 
+        Node::Brace { over, arg, label } => {
+            // ╭──╮ hugging the argument block (╰──╯ underneath for
+            // \underbrace), label centered beyond the brace. Width =
+            // max(arg, label) + 2, like a fraction bar.
+            let a = render_row(arg, cur(Field::BraceArg), true, ctx);
+            let l = render_row(label, cur(Field::BraceLabel), l_placeholder(cursor), ctx);
+            let w = a.width().max(l.width()).max(1) + 2;
+            let mut brace = vec![FRAC_BAR; w];
+            brace[0] = if *over { '╭' } else { '╰' };
+            brace[w - 1] = if *over { '╮' } else { '╯' };
+            let mut lines: Vec<Vec<char>> = Vec::new();
+            let mut cancel: Vec<(usize, usize)> = Vec::new();
+            if *over {
+                lines.extend(center_pad(&l, w));
+                lines.push(brace);
+                let a_off = lines.len();
+                let baseline = a_off + a.baseline;
+                cancel.extend(centered_cancel(&l, w, 0));
+                cancel.extend(centered_cancel(&a, w, a_off));
+                lines.extend(center_pad(&a, w));
+                Block { lines, baseline, cancel }
+            } else {
+                let baseline = a.baseline;
+                cancel.extend(centered_cancel(&a, w, 0));
+                lines.extend(center_pad(&a, w));
+                let brace_off = lines.len();
+                lines.push(brace);
+                cancel.extend(centered_cancel(&l, w, brace_off + 1));
+                lines.extend(center_pad(&l, w));
+                Block { lines, baseline, cancel }
+            }
+        }
+
         Node::Arrow { op, over, under } => {
             // Same shape as the big-op band: labels centered over the
             // extent; empty labels vanish except while editing.
@@ -538,11 +576,13 @@ fn render_node(
             let o = render_row(over, cur(Field::ArrowOver), editing, ctx);
             let u = render_row(under, cur(Field::ArrowUnder), editing, ctx);
             let w = o.width().max(u.width()).max(1) + 3;
+            // Heads are ASCII < > (box-drawing bodies and Unicode arrow
+            // glyphs rarely align in height across fonts).
             let mut body = vec![arrow_body(*op); w];
             if *op == '←' || *op == '⇐' {
-                body[0] = *op;
+                body[0] = '<';
             } else {
-                body[w - 1] = *op;
+                body[w - 1] = '>';
             }
             let mut lines = center_pad(&o, w);
             let baseline = lines.len();

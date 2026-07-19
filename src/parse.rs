@@ -437,6 +437,12 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
             .or_else(|_| err("angle column without ⟨", first, c)),
         // Lattice left-edge column: the grid centers on its extent.
         '┌' | '├' | '└' => Ok((first + last) / 2),
+        // Over/under brace corner: the argument owns the baseline on the
+        // other side of the brace row.
+        '╭' => find_baseline(g, Rect { t: first + 1, b: rect.b, l: c, r: rect.r }),
+        '╰' if first > rect.t => {
+            find_baseline(g, Rect { t: rect.t, b: first - 1, l: c, r: rect.r })
+        }
         // Sqrt: stem covers exactly the content rows; recurse into content.
         '│' => find_baseline(g, Rect { t: first, b: last, l: c + 1, r: rect.r }),
         ch if radical_index(ch).is_some() => {
@@ -559,14 +565,29 @@ fn parse_region(
                         .collect();
                     rows.len() >= 2 && (rows[0] + rows[rows.len() - 1]) / 2 == bl
                 });
-                let run_end = match lattice_start {
-                    Some(ls) => {
-                        if ls > col {
+                // A ╭ above (or ╰ below) the baseline in the run marks an
+                // over/under brace whose argument owns this baseline.
+                let brace_start = (col..=run_end)
+                    .find_map(|c| brace_at(g, rect, bl, c).map(|(r, over, right)| (c, r, over, right)));
+                let special = match (lattice_start, brace_start) {
+                    (Some(l), Some((b, ..))) if l <= b => Some((l, None)),
+                    (Some(l), None) => Some((l, None)),
+                    (_, Some((b, r, over, right))) => Some((b, Some((r, over, right)))),
+                    (None, None) => None,
+                };
+                let run_end = match special {
+                    Some((start, kind)) => {
+                        if start > col {
                             parse_script_run(
-                                g, rect, bl, col, ls - 1, depth, trace, in_cancel, &mut out,
+                                g, rect, bl, col, start - 1, depth, trace, in_cancel, &mut out,
                             )?;
                         }
-                        let (node, right) = parse_lattice(g, rect, ls, depth, trace, in_cancel)?;
+                        let (node, right) = match kind {
+                            None => parse_lattice(g, rect, start, depth, trace, in_cancel)?,
+                            Some((r, over, right)) => parse_brace(
+                                g, rect, bl, start, r, over, right, depth, trace, in_cancel,
+                            )?,
+                        };
                         out.push(node);
                         col = right + 1;
                         continue;
@@ -586,7 +607,7 @@ fn parse_region(
                 // a fraction next to an arrow *atom* renders with a space
                 // between (presence of the space is the disambiguator).
                 let run_end = scan_while(g, bl, col, rect.r, |c| c == FRAC_BAR);
-                if run_end < rect.r && g.at(bl, run_end + 1) == '→' {
+                if run_end < rect.r && matches!(g.at(bl, run_end + 1), '>' | '→') {
                     let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end + 1 };
                     let over = region_above(span, bl)
                         .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
@@ -628,8 +649,8 @@ fn parse_region(
             _ if ch == DOUBLE_BODY => {
                 // Double-arrow body: ═ run capped by ⇒ (═ has no other use).
                 let run_end = scan_while(g, bl, col, rect.r, |c| c == DOUBLE_BODY);
-                if run_end == rect.r || g.at(bl, run_end + 1) != '⇒' {
-                    return err("═ run without a ⇒ head", bl, col);
+                if run_end == rect.r || !matches!(g.at(bl, run_end + 1), '>' | '⇒') {
+                    return err("═ run without a > head", bl, col);
                 }
                 let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end + 1 };
                 let over = region_above(span, bl)
@@ -639,20 +660,21 @@ fn parse_region(
                 out.push(Node::Arrow { op: '⇒', over, under });
                 col = run_end + 2;
             }
-            '←' | '⇐'
+            '<' | '←' | '⇐'
                 if col < rect.r
-                    && g.at(bl, col + 1)
-                        == (if ch == '←' { FRAC_BAR } else { DOUBLE_BODY }) =>
+                    && ((matches!(ch, '<' | '←') && g.at(bl, col + 1) == FRAC_BAR)
+                        || (matches!(ch, '<' | '⇐') && g.at(bl, col + 1) == DOUBLE_BODY)) =>
             {
                 // Left-pointing labeled arrow: head, then the body run.
-                let body = if ch == '←' { FRAC_BAR } else { DOUBLE_BODY };
+                let body = g.at(bl, col + 1);
                 let run_end = scan_while(g, bl, col + 1, rect.r, |c| c == body);
                 let span = Rect { t: rect.t, b: rect.b, l: col, r: run_end };
                 let over = region_above(span, bl)
                     .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
                 let under = region_below(span, bl)
                     .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
-                out.push(Node::Arrow { op: ch, over, under });
+                let op = if body == DOUBLE_BODY { '⇐' } else { '←' };
+                out.push(Node::Arrow { op, over, under });
                 col = run_end + 1;
             }
             '"' => {
@@ -940,6 +962,68 @@ fn scan_band(
         end = scan_while(g, bl, pend + 1, rect.r, |c| c == band);
     }
     Ok((pieces, end))
+}
+
+/// Locate a brace anchored at column `c` for the caller's baseline:
+/// (brace row, over?, right col). Requires a well-formed ╭──╮ / ╰──╯ row
+/// AND baseline coverage (some nonblank cell of the brace's columns on
+/// the baseline) — a brace living entirely inside a script region has no
+/// baseline content and is left for the script parser.
+fn brace_at(g: &Grid, rect: Rect, bl: usize, c: usize) -> Option<(usize, bool, usize)> {
+    let cand = (rect.t..bl)
+        .find(|&r| g.at(r, c) == '╭')
+        .map(|r| (r, true))
+        .or_else(|| (bl + 1..=rect.b).find(|&r| g.at(r, c) == '╰').map(|r| (r, false)));
+    let (brow, over) = cand?;
+    let run_end = scan_while(g, brow, c, rect.r, |c2| c2 == FRAC_BAR);
+    let closer = if over { '╮' } else { '╯' };
+    if run_end == rect.r || g.at(brow, run_end + 1) != closer {
+        return None;
+    }
+    let right = run_end + 1;
+    (c..=right).any(|c2| g.at(bl, c2) != ' ').then_some((brow, over, right))
+}
+
+/// An over/under brace: a ╭──╮ (or ╰──╯) row at `brow`, argument block
+/// owning the caller's baseline on the other side, label beyond.
+#[allow(clippy::too_many_arguments)]
+fn parse_brace(
+    g: &Grid,
+    rect: Rect,
+    bl: usize,
+    col: usize,
+    brow: usize,
+    over: bool,
+    right: usize,
+    depth: usize,
+    trace: &mut Vec<RegionSpan>,
+    in_cancel: bool,
+) -> Result<(Node, usize)> {
+    let cols = (col, right);
+    // A fully struck brace is \cancel content (the cancel-extent scan
+    // cannot always anchor on it); wrap and let normalize merge.
+    let struck = !in_cancel
+        && rect
+            .rows()
+            .all(|r| (col..=right).all(|c2| g.at(r, c2) == ' ' || g.cancelled(r, c2)));
+    let in_cancel = in_cancel || struck;
+    let (arg_rect, label_rect) = if over {
+        (
+            Rect { t: brow + 1, b: rect.b, l: cols.0, r: cols.1 },
+            (rect.t < brow).then(|| Rect { t: rect.t, b: brow - 1, l: cols.0, r: cols.1 }),
+        )
+    } else {
+        (
+            Rect { t: rect.t, b: brow - 1, l: cols.0, r: cols.1 },
+            (brow < rect.b).then(|| Rect { t: brow + 1, b: rect.b, l: cols.0, r: cols.1 }),
+        )
+    };
+    let arg = parse_region(g, arg_rect, Some(bl), depth + 1, trace, in_cancel)?;
+    let label = label_rect
+        .map_or(Ok(vec![]), |r| parse_region(g, r, None, depth + 1, trace, in_cancel))?;
+    let node = Node::Brace { over, arg, label };
+    let node = if struck { Node::Cancel { arg: vec![node] } } else { node };
+    Ok((node, right))
 }
 
 /// Accent-mark stacks in the cells directly above/below (bl, col),

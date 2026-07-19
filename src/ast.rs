@@ -39,6 +39,10 @@ pub enum Node {
     /// the node normalizes away (the base is spliced into the row), so a
     /// bare ∑ is just an atom.
     BigOp { base: Row, lower: Row, upper: Row },
+    /// Horizontal brace over/under its argument (\overbrace/\underbrace):
+    /// a ╭──╮ / ╰──╯ row hugging the argument block, with an optional
+    /// label beyond it. Same range-row idea as Frac, anchored off-baseline.
+    Brace { over: bool, arg: Row, label: Row },
     /// Stretchy labeled arrow (\xrightarrow / \xleftarrow): a ╌ body with
     /// the head char (→ or ←) at the pointing end, labels over/under
     /// spanning its extent (same range-band idea as ┄).
@@ -74,6 +78,8 @@ pub enum Field {
     OpUpper,
     ArrowOver,
     ArrowUnder,
+    BraceArg,
+    BraceLabel,
     /// Segment index of a Delim.
     Seg(usize),
     CancelArg,
@@ -92,6 +98,7 @@ impl Node {
             Node::Sub { .. } => vec![Field::SubArg],
             Node::BigOp { .. } => vec![Field::OpLower, Field::OpUpper],
             Node::Arrow { .. } => vec![Field::ArrowOver, Field::ArrowUnder],
+            Node::Brace { .. } => vec![Field::BraceArg, Field::BraceLabel],
             Node::Delim { segs, .. } => (0..segs.len()).map(Field::Seg).collect(),
             Node::Cancel { .. } => vec![Field::CancelArg],
             Node::Array { cells, .. } => (0..cells.len()).map(Field::Cell).collect(),
@@ -109,6 +116,8 @@ impl Node {
             (Node::BigOp { upper, .. }, Field::OpUpper) => upper,
             (Node::Arrow { over, .. }, Field::ArrowOver) => over,
             (Node::Arrow { under, .. }, Field::ArrowUnder) => under,
+            (Node::Brace { arg, .. }, Field::BraceArg) => arg,
+            (Node::Brace { label, .. }, Field::BraceLabel) => label,
             (Node::Delim { segs, .. }, Field::Seg(i)) => &segs[i],
             (Node::Cancel { arg }, Field::CancelArg) => arg,
             (Node::Array { cells, .. }, Field::Cell(i)) => &cells[i],
@@ -127,6 +136,8 @@ impl Node {
             (Node::BigOp { upper, .. }, Field::OpUpper) => upper,
             (Node::Arrow { over, .. }, Field::ArrowOver) => over,
             (Node::Arrow { under, .. }, Field::ArrowUnder) => under,
+            (Node::Brace { arg, .. }, Field::BraceArg) => arg,
+            (Node::Brace { label, .. }, Field::BraceLabel) => label,
             (Node::Delim { segs, .. }, Field::Seg(i)) => &mut segs[i],
             (Node::Cancel { arg }, Field::CancelArg) => arg,
             (Node::Array { cells, .. }, Field::Cell(i)) => &mut cells[i],
@@ -275,6 +286,11 @@ fn strip_cancels(row: &Row) -> Row {
                 over: strip_cancels(over),
                 under: strip_cancels(under),
             }),
+            Node::Brace { over, arg, label } => out.push(Node::Brace {
+                over: *over,
+                arg: strip_cancels(arg),
+                label: strip_cancels(label),
+            }),
             Node::Delim { left, right, mids, segs } => out.push(Node::Delim {
                 left: *left,
                 right: *right,
@@ -321,6 +337,11 @@ pub fn strip_spacers(row: &Row) -> Row {
                 over: strip_spacers(over),
                 under: strip_spacers(under),
             }),
+            Node::Brace { over, arg, label } => out.push(Node::Brace {
+                over: *over,
+                arg: strip_spacers(arg),
+                label: strip_spacers(label),
+            }),
             Node::Delim { left, right, mids, segs } => out.push(Node::Delim {
                 left: *left,
                 right: *right,
@@ -361,6 +382,11 @@ fn normalize_node(node: &Node) -> Node {
             op: *op,
             over: normalize(over),
             under: normalize(under),
+        },
+        Node::Brace { over, arg, label } => Node::Brace {
+            over: *over,
+            arg: normalize(arg),
+            label: normalize(label),
         },
         Node::Delim { left, right, mids, segs } => {
             let segs = segs

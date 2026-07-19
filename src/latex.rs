@@ -72,6 +72,14 @@ fn node_to_latex(node: &Node) -> String {
                 format!("\\mathrm{{{}}}", t)
             }
         }
+        Node::Brace { over, arg, label } => {
+            let (cmd, att) = if *over { ("overbrace", '^') } else { ("underbrace", '_') };
+            let mut s = format!("\\{}{}", cmd, braced(arg));
+            if !label.is_empty() {
+                s.push_str(&format!("{}{}", att, braced(label)));
+            }
+            s
+        }
         Node::Arrow { op, over, under } => {
             // \xRightarrow / \xLeftarrow need mathtools.
             let cmd = match op {

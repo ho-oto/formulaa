@@ -93,6 +93,14 @@ fn node_to_typst(node: &Node) -> String {
             s
         }
         Node::Text(t) => format!("\"{}\"", t),
+        Node::Brace { over, arg, label } => {
+            let cmd = if *over { "overbrace" } else { "underbrace" };
+            if label.is_empty() {
+                format!("{}({})", cmd, row_to_typst(arg))
+            } else {
+                format!("{}({}, {})", cmd, row_to_typst(arg), row_to_typst(label))
+            }
+        }
         Node::Arrow { op, over, under } => {
             let head = match op {
                 '←' => "<-",

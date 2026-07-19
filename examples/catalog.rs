@@ -425,6 +425,16 @@ fn nested_limits() {
 }
 
 
+/// overbrace / underbrace.
+fn braces_over_under() {
+    let row = cat(&[
+        n(Node::Brace { over: true, arg: cat(&[s("a"), s("+"), s("b")]), label: s("n") }),
+        s("+"),
+        n(Node::Brace { over: false, arg: s("c"), label: s("m") }),
+    ]);
+    roundtrip("overbrace", &row);
+}
+
 /// lim / argmax via the generalized band.
 fn limit_funcs() {
     let row = cat(&[
@@ -497,4 +507,6 @@ fn main() {
     arrows_and_text();
     println!("## 極限関数\n");
     limit_funcs();
+    println!("## ブレース\n");
+    braces_over_under();
 }

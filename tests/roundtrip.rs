@@ -495,6 +495,29 @@ fn explicit_space_atoms() {
     roundtrip("space-in-matrix", &row);
 }
 
+/// \overbrace / \underbrace with labels, incl. next to < > atoms.
+#[test]
+fn braces_over_under() {
+    let brace = |over, arg: Row, label: Row| Node::Brace { over, arg, label };
+    roundtrip(
+        "overbrace",
+        &cat(&[
+            n(brace(true, cat(&[s("a"), s("+"), s("b")]), s("n"))),
+            s("+"),
+            n(brace(false, s("c"), s("m"))),
+        ]),
+    );
+    // Unlabeled, with tall content, and adjacent to comparison atoms.
+    roundtrip(
+        "brace-tall",
+        &cat(&[
+            s("x"),
+            s("<"),
+            n(brace(true, cat(&[n(frac(s("1"), s("2"))), s("+y")]), vec![])),
+        ]),
+    );
+}
+
 /// Quoted roman/text runs (\mathrm / \text).
 #[test]
 fn text_runs() {
@@ -723,7 +746,7 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
         };
     }
     let d = depth - 1;
-    match rng.below(12) {
+    match rng.below(13) {
         0 => Node::Frac { num: gen_row(rng, d, 3), den: gen_row(rng, d, 3) },
         1 => Node::Sqrt { arg: gen_row(rng, d, 3), index: [2, 2, 3, 4][rng.below(4)] },
         2 => Node::Sup { arg: gen_row(rng, d, 2) },
@@ -776,6 +799,11 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             Node::Array { rows, cols, cells }
         }
         10 => Node::Text(["dx", "if", "abc", "T", "if x"][rng.below(5)].into()),
+        11 => Node::Brace {
+            over: rng.below(2) == 0,
+            arg: gen_row(rng, d, 3),
+            label: gen_row(rng, d, 2),
+        },
         9 => Node::Arrow {
             op: ['→', '←', '⇒', '⇐'][rng.below(4)],
             over: gen_row(rng, d, 3),

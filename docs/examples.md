@@ -521,7 +521,7 @@ mat(delim: #none, a, b; c, d)
 
 ```
    𝑓
-𝐴─────→𝐵
+𝐴─────>𝐵
   𝑛→∞
 ```
 
@@ -593,5 +593,29 @@ Typst:
 
 ```typst
 limits(arg max)_(x ∈ S) f lr(( x ))
+```
+
+## ブレース
+
+### overbrace
+
+```
+  𝑛
+╭───╮
+ 𝑎+𝑏 + 𝑐
+      ╰─╯
+       𝑚
+```
+
+LaTeX:
+
+```latex
+\overbrace{a+b}^{n}+\underbrace{c}_{m}
+```
+
+Typst:
+
+```typst
+overbrace(a + b, n) + underbrace(c, m)
 ```
 
