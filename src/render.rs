@@ -1344,9 +1344,9 @@ fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
             }
             '.' => {
                 if left {
-                    '▏'
+                    '╎'
                 } else {
-                    '▕'
+                    '┆'
                 }
             }
             c => c,
@@ -1404,9 +1404,9 @@ fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
             }
             _ => {
                 if left {
-                    '▏'
+                    '╎'
                 } else {
-                    '▕'
+                    '┆'
                 }
             }
         })

@@ -132,10 +132,12 @@ fn trim(g: &Grid, mut rect: Rect) -> Option<Rect> {
 /// Lattice edges (┌├└ / ┐┤┘) are included so a lattice interior is
 /// bracket-protected against cell/script splitting like any other pair.
 const OPEN_BRACKETS: &[char] = &[
-    '(', '⎛', '⎜', '⎝', '[', '⎡', '⎢', '⎣', '{', '⎧', '⎨', '⎩', '⟨', '⎸', '▏', '┌', '├', '└', '┠',
+    '(', '⎛', '⎜', '⎝', '[', '⎡', '⎢', '⎣', '{', '⎧', '⎨', '⎩', '⟨', '⎸', '╎', '▏', '┌', '├', '└',
+    '┠',
 ];
 const CLOSE_BRACKETS: &[char] = &[
-    ')', '⎞', '⎟', '⎠', ']', '⎤', '⎥', '⎦', '}', '⎫', '⎬', '⎭', '⟩', '⎹', '▕', '┐', '┤', '┘', '┨',
+    ')', '⎞', '⎟', '⎠', ']', '⎤', '⎥', '⎦', '}', '⎫', '⎬', '⎭', '⟩', '⎹', '┆', '▕', '┐', '┤', '┘',
+    '┨',
 ];
 
 /// Delimiter spec char for a glyph that can appear on the *baseline row*
@@ -148,7 +150,7 @@ fn open_spec(c: char) -> Option<char> {
         '{' | '⎨' => '{',
         '⟨' => '⟨',
         '⎸' => '|',
-        '▏' => '.',
+        '╎' | '▏' => '.',
         // ┠ (fused-grid junction) resolves its family via the column walk
         // in open_spec_at; standalone it only marks "an open side".
         '┠' => return None,
@@ -165,7 +167,7 @@ fn left_col_spec(c: char) -> Option<char> {
         '[' | '⎡' | '⎢' | '⎣' => '[',
         '{' | '⎧' | '⎨' | '⎩' => '{',
         '⎸' => '|',
-        '▏' => '.',
+        '╎' | '▏' => '.',
         _ => return None,
     })
 }
@@ -176,7 +178,7 @@ fn right_col_spec(c: char) -> Option<char> {
         ']' | '⎤' | '⎥' | '⎦' => ']',
         '}' | '⎫' | '⎬' | '⎭' => '}',
         '⎹' => '|',
-        '▕' => '.',
+        '┆' | '▕' => '.',
         _ => return None,
     })
 }
@@ -278,7 +280,7 @@ fn close_spec(c: char) -> Option<char> {
         '}' | '⎬' => '}',
         '⟩' => '⟩',
         '⎹' => '|',
-        '▕' => '.',
+        '┆' | '▕' => '.',
         _ => return None,
     })
 }
@@ -313,7 +315,7 @@ fn left_family(spec: char) -> &'static [char] {
         '{' => &['{', '⎧', '⎪', '⎨', '⎩', '┠'],
         '⟨' => &['⟨', '╱', '╲'],
         '|' => &['⎸', '┠'],
-        _ => &['▏', '┠'],
+        _ => &['╎', '▏', '┠'],
     }
 }
 
@@ -322,7 +324,7 @@ fn left_family(spec: char) -> &'static [char] {
 /// The shared glyphs (brace extension ⎪, angle arms ╱ ╲) resolve their
 /// side by walking the contiguous column run to a side-distinct glyph —
 /// without this, depth counting desyncs on rows that cut through a
-/// mismatched pair (e.g. a { … ▕ cases block).
+/// mismatched pair (e.g. a { … ┆ cases block).
 fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
     let ch = g.at(row, col);
     if OPEN_BRACKETS.contains(&ch) {
@@ -418,7 +420,7 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
         // ┬ markers on the top row) centers on the extent; otherwise the
         // baseline is that of the inner region (a lattice inside answers
         // with its own ┌├└ center rule).
-        '⎡' | '[' | '⎛' | '⎸' | '▏' => {
+        '⎡' | '[' | '⎛' | '⎸' | '╎' | '▏' => {
             if let Ok(close) = match_delim(g, first, c, rect.r)
                 && fused_grid_markers(g, first, last, c, close).is_some()
             {

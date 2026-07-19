@@ -166,6 +166,8 @@ pub fn is_reserved_glyph(c: char) -> bool {
             | '⎹'
             | '▏'
             | '▕'
+            | '╎'
+            | '┆'
             | '┌'
             | '┬'
             | '┐'

@@ -552,7 +552,7 @@ fn delimiter_blocks() {
         "lattice-in-sup",
         &cat(&[s("e"), n(sup(n(array(1, 2, vec![s("0"), s("t")]))))]),
     );
-    // Explicit ▏ ▕ null pair still available via \delim..
+    // Explicit ╎ ┆ null pair still available via \delim..
     roundtrip(
         "null-delim-grid",
         &n(delim(
