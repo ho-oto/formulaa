@@ -118,7 +118,18 @@ impl MasciiEditor {
             put(&mut lines, r, c, ch);
         }
         if let Some((r, c)) = block.caret {
-            put(&mut lines, r, c, CURSOR_CHAR);
+            // Open minibuffer: the typed `\command` overlays the cells
+            // right of the cursor (zero layout shift), caret after it.
+            if let Some(buf) = &self.ed.minibuffer {
+                let mut x = c;
+                for ch in std::iter::once('\\').chain(buf.chars()) {
+                    put(&mut lines, r, x, ch);
+                    x += 1;
+                }
+                put(&mut lines, r, x, CURSOR_CHAR);
+            } else {
+                put(&mut lines, r, c, CURSOR_CHAR);
+            }
         }
         // Re-apply the cancel strikes cell-by-cell (skipping cells the
         // caret overlay replaced).

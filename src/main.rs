@@ -25,6 +25,9 @@ const HELP: &str = "\\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click mov
 /// commands when the cursor is inside a grid cell or a delimiter.
 fn help_line(ed: &Editor) -> &'static str {
     use mascii::ast::Field;
+    if ed.minibuffer.is_some() {
+        return "command: type at the cursor  Enter/Space execute  Esc cancel";
+    }
     if ed.op_entry.is_some() {
         return "op name: letters/digits + Space (word pieces)  Enter/Tab commit  Esc cancel";
     }
@@ -342,9 +345,8 @@ fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers, save_path: &st
 /// Draw the whole UI; returns the screen coordinates of the formula's
 /// top-left cell (for mouse hit-testing).
 fn draw(f: &mut Frame, ed: &Editor) -> (u16, u16) {
-    let [canvas_area, tex_area, status_area, help_area] = Layout::vertical([
+    let [canvas_area, tex_area, help_area] = Layout::vertical([
         Constraint::Min(3),
-        Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Length(1),
     ])
@@ -361,34 +363,20 @@ fn draw(f: &mut Frame, ed: &Editor) -> (u16, u16) {
         tex_area,
     );
 
-    let status = match &ed.minibuffer {
-        Some(buf) => Line::from(vec![
-            Span::styled(
-                format!(" \\{}", buf),
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("▌", Style::default().fg(Color::Yellow)),
-            Span::styled(
-                "  (Enter/Space: execute, Esc: cancel)",
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]),
-        None => Line::from(Span::styled(
+    // One bottom line: messages overlay the usage line when present
+    // (the minibuffer itself shows in-place at the cursor).
+    let bottom = if !ed.message.is_empty() {
+        Line::from(Span::styled(
             format!(" {}", ed.message),
             Style::default().fg(Color::Green),
-        )),
-    };
-    f.render_widget(status, status_area);
-
-    f.render_widget(
+        ))
+    } else {
         Line::from(Span::styled(
             format!(" {}", help_line(ed)),
             Style::default().fg(Color::DarkGray),
-        )),
-        help_area,
-    );
+        ))
+    };
+    f.render_widget(bottom, help_area);
     origin
 }
 
@@ -449,7 +437,9 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
         }
     }
 
-    let width = block.width() as u16;
+    overlay_minibuffer(ed, &mut lines, &mut bg, &mut cursor_cell);
+
+    let width = (block.width() as u16).max(lines.iter().map(|l| l.len() as u16).max().unwrap_or(0));
     let height = lines.len() as u16;
     let left = inner.width.saturating_sub(width) / 2;
     let top = inner.height.saturating_sub(height) / 2;
@@ -475,6 +465,8 @@ const SELECTION_BG: Color = Color::Indexed(89);
 const UNLABELED_BG: Color = Color::Indexed(238);
 /// The arrow-selected jump marker.
 const SELECTED_BG: Color = Color::Indexed(172);
+/// In-place minibuffer overlay (`\cmd` typed at the cursor).
+const MINIBUF_BG: Color = Color::Indexed(94);
 /// The ^F snap-preview cell (the free cursor uses the caret style).
 const FREE_BG: Color = Color::Indexed(24);
 
@@ -618,6 +610,35 @@ fn marker_boxes(
         (y, x)
     });
     (grid, bg, cursor_cell)
+}
+
+/// Draw the open minibuffer as an overlay at the caret cell: the typed
+/// `\command` covers the glyphs to the right of the cursor without
+/// moving them (zero layout shift — the eye stays on the formula), and
+/// the caret sits after the text. With a selection active the caret is
+/// at the selection's moving end, so the overlay shows next to it.
+fn overlay_minibuffer(
+    ed: &Editor,
+    lines: &mut [Vec<char>],
+    bg: &mut [Vec<Option<Color>>],
+    cursor_cell: &mut Option<(usize, usize)>,
+) {
+    let Some(buf) = &ed.minibuffer else { return };
+    let Some((cy, cx)) = *cursor_cell else { return };
+    if cy >= lines.len() {
+        return;
+    }
+    let text: Vec<char> = std::iter::once('\\').chain(buf.chars()).collect();
+    let end = cx + text.len();
+    if lines[cy].len() < end + 1 {
+        lines[cy].resize(end + 1, ' ');
+        bg[cy].resize(end + 1, None);
+    }
+    for (i, &ch) in text.iter().enumerate() {
+        lines[cy][cx + i] = ch;
+        bg[cy][cx + i] = Some(MINIBUF_BG);
+    }
+    *cursor_cell = Some((cy, end));
 }
 
 /// Turn a rendered cell row into spans: private-use marker chars become
@@ -791,6 +812,39 @@ mod tests {
             ed.jump.is_some().then_some(ed.jump_selected),
         );
         lines.into_iter().map(String::from_iter).collect()
+    }
+
+    #[test]
+    fn minibuffer_overlays_at_the_cursor_without_layout_shift() {
+        let mut ed = Editor::new();
+        type_script_keys(&mut ed, "a+b");
+        ed.input(Key::Left, false, false);
+        ed.input(Key::Left, false, false);
+        let before = display(&ed);
+        ed.input(Key::Char('\\'), false, false);
+        type_script_keys(&mut ed, "fr");
+        let (root, cursor) = ed.decorated();
+        let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+        let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
+        let (mut lines, mut bg, mut cursor_cell) = marker_boxes(
+            &block.lines,
+            &ed.marker_extents(),
+            &block.marks,
+            block.caret,
+            None,
+        );
+        let (cy, cx) = cursor_cell.unwrap();
+        overlay_minibuffer(&ed, &mut lines, &mut bg, &mut cursor_cell);
+        // The overlay covers the glyphs to the right of the cursor in
+        // place: same height, and the cells left of the cursor are
+        // untouched.
+        assert_eq!(lines.len(), before.len(), "no vertical shift");
+        let text: String = lines[cy][cx..cx + 3].iter().collect();
+        assert_eq!(text, "\\fr", "typed command shown at the cursor");
+        let kept: String = lines[cy][..cx].iter().collect();
+        assert_eq!(kept, before[cy].chars().take(cx).collect::<String>());
+        assert_eq!(cursor_cell, Some((cy, cx + 3)), "caret after the text");
+        assert!(bg[cy][cx].is_some(), "overlay cells are tinted");
     }
 
     #[test]
