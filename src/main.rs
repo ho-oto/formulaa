@@ -18,7 +18,7 @@ use mascii::input::{Effect, Key};
 use mascii::render::{RenderCtx, render_root};
 use mascii::{ast, latex, parse, typst};
 
-const HELP: &str = "\\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ^A start  ⇧←→/⇧↑ select  ^B select block  ^F free move  ^C/^X/^V copy/cut/paste  ^Z/^R undo/redo  ^A/^E start/end  ^O grid edit  ^G jump  ^T italic  ^Y copy AA  ^S save  Esc/^Q quit";
+const HELP: &str = "^G jump  ^F free move  ^B select block  \\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ⇧←→/⇧↑ select  ^Z/^R undo/redo  ^T italic  ^Y copy AA  ^S save  Esc/^Q quit";
 
 /// Context-sensitive last line: generic keys normally, the relevant
 /// commands when the cursor is inside a grid cell or a delimiter.
@@ -42,7 +42,7 @@ fn help_line(ed: &Editor) -> &'static str {
     }
     match ed.path.last() {
         Some((_, Field::Cell(_))) => {
-            "grid: Enter add row  \\addrow \\addcol \\delrow \\delcol  ] exit  (then ^/_ etc. as usual)"
+            "grid: ^O edit mode (move cells, add/delete rows & cols)  Enter add row  ] exit  (then ^/_ etc. as usual)"
         }
         Some((_, Field::Seg(_))) => {
             "delim: \\mid adds a │ segment  ) ] } close  \\lr<spec> visual pairs (\\lr(] \\lr{|}, . = none)"
