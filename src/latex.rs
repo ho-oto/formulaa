@@ -38,6 +38,13 @@ fn node_to_latex(node: &Node) -> String {
                 format!("\\operatorname{{{}}}", name)
             }
         }
+        Node::WideAccent { over, under, base } => {
+            let mut s = row_to_latex(base);
+            for m in over.iter().chain(under.iter()) {
+                s = format!("\\{}{{{}}}", crate::symbols::wide_accent_latex(*m), s);
+            }
+            s
+        }
         Node::Accent {
             overs,
             unders,

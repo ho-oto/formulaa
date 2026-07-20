@@ -208,9 +208,12 @@ pub const ACCENTS: &[(&str, char, bool, &str)] = &[
     ("dot", '˙', false, "dot"),
     ("ddot", '¨', false, "ddot"),
     ("check", 'ˇ', false, "check"),
-    ("breve", '˘', false, "breve"),
     ("ring", '˚', false, "mathring"),
     ("underline", '‗', true, "underline"), // U+2017
+    // Under tilde: the AST marks form a swapped pair with the drawn
+    // glyphs — over tilde ˜ draws as the low ˷, under tilde ˷ draws as
+    // the high ˜ (both hug the base).
+    ("utilde", '˷', true, "utilde"), // U+02F7
 ];
 
 pub fn accent_by_name(name: &str) -> Option<(char, bool)> {
@@ -225,6 +228,19 @@ pub fn accent_info(mark: char) -> Option<(bool, &'static str)> {
         .iter()
         .find(|&&(_, c, ..)| c == mark)
         .map(|&(_, _, under, latex)| (under, latex))
+}
+
+/// LaTeX command for a stretchy (multi-char) accent; marks without a
+/// wide variant use their plain command (\dot etc. accept groups).
+pub fn wide_accent_latex(mark: char) -> &'static str {
+    match mark {
+        '^' => "widehat",
+        '˜' => "widetilde",
+        '¯' => "overline",
+        '⇀' => "overrightarrow",
+        'ˇ' => "widecheck",
+        m => accent_info(m).map(|(_, l)| l).unwrap_or("widehat"),
+    }
 }
 
 pub fn is_over_mark(c: char) -> bool {

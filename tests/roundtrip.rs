@@ -274,6 +274,57 @@ fn dotted_roman_runs() {
     roundtrip("prime-dot-prime", &row);
 }
 
+/// Stretchy accents: a band whose limit region holds only the mark.
+#[test]
+fn wide_accents() {
+    let wa =
+        |over: Option<char>, under: Option<char>, base: Row| Node::WideAccent { over, under, base };
+    let row = n(wa(Some('^'), None, s("abc")));
+    roundtrip("widehat", &row);
+    let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
+    assert_eq!(aa, "┄┄˰┄┄\n 𝑎𝑏𝑐");
+    assert_eq!(row_to_latex(&normalize(&row)), "\\widehat{abc}");
+    // Both sides at once.
+    let row = n(wa(Some('⇀'), Some('‗'), s("AB")));
+    roundtrip("vec-underline", &row);
+    assert_eq!(
+        row_to_latex(&normalize(&row)),
+        "\\underline{\\overrightarrow{AB}}"
+    );
+    // Under tilde (\utilde): the ˜/˷ pair swaps between AST mark and
+    // drawn glyph; the wide band fills with the high ˜ below.
+    let row = n(wa(None, Some('˷'), s("AB")));
+    roundtrip("wide-utilde", &row);
+    let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
+    assert_eq!(aa, " 𝐴𝐵\n┄˜˜┄");
+    assert_eq!(row_to_latex(&normalize(&row)), "\\utilde{AB}");
+    assert_eq!(row_to_typst(&normalize(&row)), "attach(A B, b: sym.tilde)");
+    let row = n(wa(Some('˜'), Some('˷'), s("xy")));
+    roundtrip("tilde-utilde", &row);
+    // Stacked hats: the outer band's ╱ can sit directly above the inner
+    // band's ╲, which must not read as an angle-delimiter turn (the
+    // angle-turn guard checks the ╱'s right neighbor for its partner ╲).
+    let inner = wa(Some('^'), Some('‗'), s("Aβ"));
+    let row = n(wa(Some('^'), None, cat(&[n(inner), s("1")])));
+    roundtrip("stacked-hats", &row);
+    // A one-char base with one over mark is the compact Accent.
+    let row = n(wa(Some('^'), None, s("x")));
+    assert_eq!(
+        normalize(&row),
+        vec![Node::Accent {
+            overs: vec!['^'],
+            unders: vec![],
+            base: 'x'
+        }]
+    );
+    // A markless wide accent is just its base (spliced).
+    let row = n(wa(None, None, s("ab")));
+    assert_eq!(normalize(&row), s("ab"));
+    // The old base-banded picture reads leniently as a BigOp whose
+    // upper limit is the bare mark atom — distinct from the accent
+    // band, which never sits on the baseline.
+}
+
 /// Ceil / floor / double-bar norm delimiters.
 #[test]
 fn ceil_floor_norm() {
@@ -968,6 +1019,100 @@ fn stacked_accents() {
         n(frac(s("1"), s("2"))),
     ]);
     roundtrip("triple-accent", &row);
+    // Marks with a low variant hug the base: over bar draws as _ ,
+    // hat as ˰ , tilde as ˷ , check as ˯ , ring as ˳ , dot as the
+    // leader ․ , under bar as ¯. The ddot draws as ․․ overhanging one
+    // blank-baseline column to the right.
+    let row = cat(&[
+        n(Node::Accent {
+            overs: vec!['¯'],
+            unders: vec![],
+            base: 'x',
+        }),
+        n(Node::Accent {
+            overs: vec!['^'],
+            unders: vec![],
+            base: 'v',
+        }),
+        n(Node::Accent {
+            overs: vec!['˜'],
+            unders: vec![],
+            base: 'w',
+        }),
+        n(Node::Accent {
+            overs: vec!['ˇ'],
+            unders: vec![],
+            base: 'c',
+        }),
+        n(Node::Accent {
+            overs: vec!['˚'],
+            unders: vec![],
+            base: 'r',
+        }),
+        n(Node::Accent {
+            overs: vec!['˙'],
+            unders: vec![],
+            base: 'd',
+        }),
+        n(Node::Accent {
+            overs: vec!['¨'],
+            unders: vec![],
+            base: 'e',
+        }),
+        n(Node::Accent {
+            overs: vec![],
+            unders: vec!['‗'],
+            base: 'y',
+        }),
+    ]);
+    let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
+    assert_eq!(aa, "_˰˷˯˳․․․\n𝑥𝑣𝑤𝑐𝑟𝑑𝑒 𝑦\n        ¯");
+    roundtrip("hugging-marks", &row);
+    // The ddot's blank spill column breaks physical adjacency: a lone
+    // \mathrm letter after it must keep its quotes (glue check is per
+    // edge), and adjacent dotted atoms keep their own dots apart.
+    let row = cat(&[
+        n(Node::Accent {
+            overs: vec!['¨', '⇀'],
+            unders: vec![],
+            base: 'E',
+        }),
+        n(Node::Text {
+            t: "e".into(),
+            math: true,
+        }),
+    ]);
+    roundtrip("ddot-then-mathrm", &row);
+    let row = cat(&[
+        n(Node::Accent {
+            overs: vec!['¨'],
+            unders: vec![],
+            base: 'x',
+        }),
+        n(Node::Accent {
+            overs: vec!['¨'],
+            unders: vec![],
+            base: 'y',
+        }),
+        n(Node::Sup {
+            arg: vec![Node::Sym('.')],
+        }),
+    ]);
+    roundtrip("ddot-chain-sup-dot", &row);
+    // A sqrt's greedy _ overline must not merge with a neighbouring bar
+    // accent's _ on the same row (a separating space keeps them apart).
+    let row = cat(&[
+        n(Node::Sqrt {
+            arg: vec![],
+            index: 2,
+        }),
+        n(Node::Accent {
+            overs: vec!['¯'],
+            unders: vec![],
+            base: 'x',
+        }),
+    ]);
+    roundtrip("sqrt-then-bar", &row);
 }
 
 /// Formatting spacers: blank columns in the AA that vanish on reparse.
@@ -1112,12 +1257,12 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             0 => Node::Func(["sin", "cos", "log", "exp"][rng.below(4)].into()),
             1 => {
                 // 1–2 marks, mixing over and under stacks.
-                let marks = ['^', '¯', '˙', '⇀', '˜', '‗'];
+                let marks = ['^', '¯', '˙', '¨', '⇀', '˜', '‗', '˷'];
                 let base = ['x', 'v', 'a', 'E'][rng.below(4)];
                 let (mut overs, mut unders) = (vec![], vec![]);
                 for _ in 0..1 + rng.below(2) {
                     let m = marks[rng.below(marks.len())];
-                    if m == '‗' {
+                    if m == '‗' || m == '˷' {
                         unders.push(m)
                     } else {
                         overs.push(m)
@@ -1140,7 +1285,7 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
         };
     }
     let d = depth - 1;
-    match rng.below(13) {
+    match rng.below(14) {
         0 => Node::Frac {
             num: gen_row(rng, d, 3),
             den: gen_row(rng, d, 3),
@@ -1213,6 +1358,11 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
                             *left = '|';
                             *right = '|';
                         }
+                        // WideAccent bases are not cursor fields; walk
+                        // them explicitly.
+                        if let Node::WideAccent { base, .. } = n {
+                            denorm(base);
+                        }
                         for f in n.fields() {
                             denorm(n.field_mut(f));
                         }
@@ -1232,6 +1382,27 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
         7 => Node::Cancel {
             arg: gen_row(rng, d, 3),
         },
+        13 => {
+            // Stretchy accent; the band rides over any base block.
+            let overs = ['^', '˜', '¯', '⇀', '˙', '¨', 'ˇ', '˚'];
+            let base: Row = if rng.below(3) == 0 {
+                gen_row(rng, d, 3)
+            } else {
+                (0..1 + rng.below(3))
+                    .map(|_| Node::Sym(ATOMS[rng.below(ATOMS.len())]))
+                    .collect()
+            };
+            let unders = ['‗', '˷'];
+            let (over, under) = match rng.below(3) {
+                0 => (Some(overs[rng.below(overs.len())]), None),
+                1 => (None, Some(unders[rng.below(2)])),
+                _ => (
+                    Some(overs[rng.below(overs.len())]),
+                    Some(unders[rng.below(2)]),
+                ),
+            };
+            Node::WideAccent { over, under, base }
+        }
         6 => {
             // Grid inside a random known pair (bracket matrix most often).
             let pairs = [('[', ']'), ('[', ']'), ('(', ')'), ('.', '.'), ('{', '.')];

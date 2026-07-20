@@ -165,6 +165,32 @@ fn free_mode_marker_flow() {
 }
 
 #[test]
+fn accent_wraps_selection_as_wide_accent() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"abc S-Left S-Left S-Left \hat");
+    assert_eq!(latex(&ed), "\\widehat{abc}");
+    // Stacking the other side: no selection needed, the accent command
+    // right after the node fills its free slot.
+    type_script(&mut ed, r"\underline");
+    assert_eq!(latex(&ed), "\\underline{\\widehat{abc}}");
+    // A one-char selection is the ordinary compact accent.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"x S-Left \vec");
+    assert_eq!(latex(&ed), "\\vec{x}");
+    // Tall bases work too (the band rides over the whole block).
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\frac 1 Down 2 Tab S-Left \bar");
+    assert_eq!(latex(&ed), "\\overline{\\frac{1}{2}}");
+    // The under tilde wraps a selection like any under mark.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"AB S-Left S-Left \utilde");
+    assert_eq!(latex(&ed), "\\utilde{AB}");
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"x S-Left \utilde");
+    assert_eq!(latex(&ed), "\\utilde{x}");
+}
+
+#[test]
 fn cancel_wraps_the_selection() {
     // Shift-selection then \cancel.
     let mut ed = Editor::new();

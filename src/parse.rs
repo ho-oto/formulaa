@@ -390,17 +390,28 @@ fn left_family(spec: char) -> &'static [char] {
 /// pair. Left angle: ╱ directly above ╲; right angle: ╲ directly above
 /// ╱. The upper turn row is the baseline.
 fn angle_open_turn(g: &Grid, row: usize, col: usize) -> bool {
+    let width = |r: usize| g.g[r].len();
     g.at(row, col) == '╱'
         && row + 1 < g.g.len()
-        && col < g.g[row + 1].len()
+        && col < width(row + 1)
         && g.at(row + 1, col) == '╲'
+        // A hat accent band (┄╱╲┄) fakes this pair when its ╱ sits right
+        // above another band's ╲. The hat's ╱ always has its partner ╲
+        // directly to its right; a real turn's interior never starts
+        // with ╲ (a ┄ band may hug the turn, so ┄ stays allowed).
+        && (col + 1 >= width(row) || g.at(row, col + 1) != '╲')
 }
 
 fn angle_close_turn(g: &Grid, row: usize, col: usize) -> bool {
+    let width = |r: usize| g.g[r].len();
     g.at(row, col) == '╲'
         && row + 1 < g.g.len()
-        && col < g.g[row + 1].len()
+        && col < width(row + 1)
         && g.at(row + 1, col) == '╱'
+        // Mirror of the open-turn guard: a stacked hat's ╲ has its
+        // partner ╱ directly to its left; a real turn's interior never
+        // ends with ╱ (a ┄ band may hug the turn, so ┄ stays allowed).
+        && (col == 0 || g.at(row, col - 1) != '╱')
 }
 
 /// Resolve which angle an arm glyph belongs to by walking its diagonal
@@ -568,20 +579,22 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
     // Bars sit exactly on the baseline of their block, and the leftmost
     // column of a fraction/big-op block contains only the bar (contents
     // are centered with >= 1 column of slack on each side).
-    if let Some(&r) = occupied
-        .iter()
-        .find(|&&r| matches!(g.at(r, c), FRAC_BAR | OP_BAND | DOUBLE_BODY))
-    {
+    if let Some(&r) = occupied.iter().find(|&&r| {
+        matches!(g.at(r, c), FRAC_BAR | OP_BAND | DOUBLE_BODY)
+            && !(g.at(r, c) == OP_BAND
+                && (accent_band_run(g, rect, r, c, true).is_some()
+                    || accent_band_run(g, rect, r, c, false).is_some()))
+    }) {
         return Ok(r);
     }
 
     // Accent marks stack directly above/below their base; over-marks and
     // under-marks are reserved chars disjoint from atoms, so stripping them
     // leaves the base row.
-    while occupied.len() > 1 && is_over_mark(g.at(occupied[0], c)) {
+    while occupied.len() > 1 && over_mark_at(g.at(occupied[0], c)).is_some() {
         occupied.remove(0);
     }
-    while occupied.len() > 1 && is_under_mark(g.at(*occupied.last().unwrap(), c)) {
+    while occupied.len() > 1 && under_mark_at(g.at(*occupied.last().unwrap(), c)).is_some() {
         occupied.pop();
     }
 
@@ -634,6 +647,28 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
             .or_else(|_| err("angle column without a vertex or turn", first, c)),
         // Lattice left-edge column: the grid centers on its extent.
         '┌' | '├' | '└' => Ok((first + last) / 2),
+        // Accent band: the base owns the baseline on the other side
+        // (over marks ride above their base, under marks below).
+        _ if accent_band_run(g, rect, first, c, true).is_some() => find_baseline(
+            g,
+            Rect {
+                t: first + 1,
+                b: rect.b,
+                l: c,
+                r: rect.r,
+            },
+        ),
+        _ if first > rect.t && accent_band_run(g, rect, first, c, false).is_some() => {
+            find_baseline(
+                g,
+                Rect {
+                    t: rect.t,
+                    b: first - 1,
+                    l: c,
+                    r: rect.r,
+                },
+            )
+        }
         // Over/under brace corner: the argument owns the baseline on the
         // other side of the brace row.
         '╭' => find_baseline(
@@ -796,16 +831,34 @@ fn parse_region(
                     rows.len() >= 2 && (rows[0] + rows[rows.len() - 1]) / 2 == bl
                 });
                 // A ╭ above (or ╰ below) the baseline in the run marks an
-                // over/under brace whose argument owns this baseline.
+                // over/under brace whose argument owns this baseline; an
+                // accent band (┄ run holding only a mark) the same way.
                 let brace_start = (col..=run_end).find_map(|c| {
                     brace_at(g, rect, bl, c).map(|(r, over, right)| (c, r, over, right))
                 });
-                let special = match (lattice_start, brace_start) {
-                    (Some(l), Some((b, ..))) if l <= b => Some((l, None)),
-                    (Some(l), None) => Some((l, None)),
-                    (_, Some((b, r, over, right))) => Some((b, Some((r, over, right)))),
-                    (None, None) => None,
-                };
+                let accent_start = (col..=run_end).find_map(|c| {
+                    wide_accent_at(g, rect, bl, c).map(|(r, over, right)| (c, r, over, right))
+                });
+                #[derive(Clone, Copy)]
+                enum Special {
+                    Lattice,
+                    Brace(usize, bool, usize),
+                    Accent(usize, bool, usize),
+                }
+                let mut special: Option<(usize, Special)> = None;
+                if let Some(l) = lattice_start {
+                    special = Some((l, Special::Lattice));
+                }
+                if let Some((c, r, over, right)) = brace_start
+                    && special.is_none_or(|(s, _)| c < s)
+                {
+                    special = Some((c, Special::Brace(r, over, right)));
+                }
+                if let Some((c, r, over, right)) = accent_start
+                    && special.is_none_or(|(s, _)| c < s)
+                {
+                    special = Some((c, Special::Accent(r, over, right)));
+                }
                 let run_end = match special {
                     Some((start, kind)) => {
                         if start > col {
@@ -822,8 +875,13 @@ fn parse_region(
                             )?;
                         }
                         let (node, right) = match kind {
-                            None => parse_lattice(g, rect, start, depth, trace, in_cancel)?,
-                            Some((r, over, right)) => parse_brace(
+                            Special::Lattice => {
+                                parse_lattice(g, rect, start, depth, trace, in_cancel)?
+                            }
+                            Special::Brace(r, over, right) => parse_brace(
+                                g, rect, bl, start, r, over, right, depth, trace, in_cancel,
+                            )?,
+                            Special::Accent(r, over, right) => parse_wide_accent(
                                 g, rect, bl, start, r, over, right, depth, trace, in_cancel,
                             )?,
                         };
@@ -913,6 +971,11 @@ fn parse_region(
                     l: col,
                     r: end,
                 };
+                // A limit region holding nothing but one (repeated)
+                // accent mark is a stretchy accent, not a limit — marks
+                // are reserved and cannot be atoms, so this reading is
+                // free. Mixing a mark row with a content row is an
+                // error rather than a guess.
                 let upper = region_above(span, bl).map_or(Ok(vec![]), |r| {
                     parse_region(g, r, None, depth + 1, trace, in_cancel)
                 })?;
@@ -1023,9 +1086,21 @@ fn parse_region(
                         col = close + 1;
                     }
                     None => {
-                        check_flat_columns(g, rect, bl, col, col, 0, 0)?;
-                        out.push(Node::Sym('\''));
-                        col += 1;
+                        // A prime is an ordinary atom — including under
+                        // an accent stack (a wide accent collapsing onto
+                        // a one-char base can put marks on anything).
+                        let (overs, unders, extra) = accent_stacks(g, rect, bl, col);
+                        check_flat_columns(g, rect, bl, col, col, overs.len(), unders.len())?;
+                        if overs.is_empty() && unders.is_empty() {
+                            out.push(Node::Sym('\''));
+                        } else {
+                            out.push(Node::Accent {
+                                overs,
+                                unders,
+                                base: '\'',
+                            });
+                        }
+                        col += 1 + extra;
                     }
                 }
             }
@@ -1153,7 +1228,7 @@ fn parse_region(
             _ => {
                 // Marks in the cells directly above/below an atom are an
                 // accent stack; those cells are otherwise always blank.
-                let (overs, unders) = accent_stacks(g, rect, bl, col);
+                let (overs, unders, extra) = accent_stacks(g, rect, bl, col);
                 check_flat_columns(g, rect, bl, col, col, overs.len(), unders.len())?;
                 let base = unstyle_char(ch);
                 // ␠ is the explicit form of a formatting Spacer (the
@@ -1172,7 +1247,7 @@ fn parse_region(
                 } else {
                     out.push(Node::Sym(base));
                 }
-                col += 1;
+                col += 1 + extra;
             }
         }
     }
@@ -1351,6 +1426,220 @@ fn brace_at(g: &Grid, rect: Rect, bl: usize, c: usize) -> Option<(usize, bool, u
         .then_some((brow, over, right))
 }
 
+/// Is the ┄ run through (row, col) an accent band — pieces holding one
+/// repeated accent mark and nothing else? Returns (mark, right end).
+/// `over` selects which mark set applies (the band above the base wears
+/// over marks, the one below wears under marks).
+fn accent_band_run(
+    g: &Grid,
+    rect: Rect,
+    row: usize,
+    col: usize,
+    over: bool,
+) -> Option<(char, usize)> {
+    if g.at(row, col) != OP_BAND {
+        return None;
+    }
+    // Self-terminating scan: the run is cells from {┄} plus the mark
+    // material, stopping at anything else (inside a delimiter the band
+    // hugs the delimiter column with no gap). Stretched marks bring
+    // extra glyphs: an arrow body ─ with a ⇀ head, hat/check slopes
+    // ╱ ╲, or a line-like mark repeated. The run must end on ┄.
+    let is_mark = |c: char| {
+        if over {
+            crate::symbols::is_over_mark(c)
+        } else {
+            crate::symbols::is_under_mark(c)
+        }
+    };
+    // Phased scan — leading ┄s, one material group, trailing ┄s — and
+    // STOP there: material appearing after the trailing ┄s belongs to a
+    // neighbour (a sibling's raised superscript can sit flush against
+    // the band when an ancestor block crops tightly).
+    let mut piece: Vec<char> = Vec::new();
+    let mut end = col;
+    let mut trailed = false;
+    let mut c = col;
+    while c <= rect.r {
+        let ch = g.at(row, c);
+        if ch == OP_BAND {
+            end = c;
+            if !piece.is_empty() {
+                trailed = true;
+            }
+        } else if !trailed
+            && (is_mark(ch)
+                || matches!(
+                    ch,
+                    FRAC_BAR
+                        | '╱'
+                        | '╲'
+                        | '→'
+                        | '>'
+                        | '_'
+                        | '¯'
+                        | '˜'
+                        | '˷'
+                        | '˰'
+                        | '˯'
+                        | '˳'
+                        | '․'
+                ))
+        {
+            piece.push(ch);
+        } else {
+            break;
+        }
+        c += 1;
+    }
+    if !trailed || piece.is_empty() {
+        return None;
+    }
+    // Classify the material: a ─…─> arrow is \vec (canonical head is
+    // the ASCII >, lenient → also reads), ╱╲ the widehat, ╲╱ the
+    // widecheck, a _ run the overline, else a repeated mark.
+    let is_head = |c: char| c == '>' || c == '→';
+    let mark = if piece.iter().any(|&c| is_head(c))
+        && piece.iter().all(|&c| is_head(c) || c == FRAC_BAR)
+    {
+        Some('⇀')
+    } else if piece.iter().all(|&c| c == '˰') {
+        // Hat: the low arrowhead, centered.
+        Some('^')
+    } else if piece.iter().all(|&c| c == '˯') {
+        Some('ˇ')
+    } else if piece[0] == '╱'
+        && *piece.last().unwrap() == '╲'
+        && piece[1..piece.len() - 1].iter().all(|&c| c == FRAC_BAR)
+    {
+        // Legacy slope-pair hat / check bands still read.
+        Some('^')
+    } else if piece[0] == '╲'
+        && *piece.last().unwrap() == '╱'
+        && piece[1..piece.len() - 1].iter().all(|&c| c == FRAC_BAR)
+    {
+        Some('ˇ')
+    } else if piece.iter().all(|&c| c == '_') {
+        // The over line draws low to hug its base.
+        Some('¯')
+    } else if !over && piece.iter().all(|&c| c == '¯') {
+        // … and the under line draws high, same reason.
+        Some('‗')
+    } else if over && piece.iter().all(|&c| c == '˷') {
+        // The over tilde draws low (˷) to hug its base …
+        Some('˜')
+    } else if !over && piece.iter().all(|&c| c == '˜') {
+        // … and the under tilde fills with the high ˜, same logic. Each
+        // tilde fill belongs to exactly one side (like ¯ vs _): the
+        // baseline dive relies on over/under classification being
+        // positionally unambiguous.
+        Some('˷')
+    } else if piece.iter().all(|&c| c == '˳') {
+        // … as does the ring's single centered mark.
+        Some('˚')
+    } else if piece.iter().all(|&c| c == '․') {
+        // Leader dots: one is \dot, two are \ddot.
+        match piece.len() {
+            1 => Some('˙'),
+            2 => Some('¨'),
+            _ => None,
+        }
+    } else if piece.iter().all(|&c| c == piece[0])
+        && is_mark(piece[0])
+        && !matches!(piece[0], '¯' | '˜' | '˷')
+    {
+        // A repeated mark — except ¯ and the tildes, whose fills are
+        // claimed by one side above (¯ = underline, ˜ = under tilde,
+        // ˷ = over tilde).
+        Some(piece[0])
+    } else {
+        None
+    };
+    mark.filter(|&m| {
+        if over {
+            matches!(m, '^' | 'ˇ' | '⇀' | '¯') || is_mark(m)
+        } else {
+            m == '‗' || m == '˷'
+        }
+    })
+    .map(|m| (m, end))
+}
+
+/// Locate a wide accent anchored at column `c` for the caller's
+/// baseline: an accent band above (over marks) or below (under marks),
+/// with some baseline content under its span (a band fully inside a
+/// script region is the script parser's business).
+fn wide_accent_at(g: &Grid, rect: Rect, bl: usize, c: usize) -> Option<(usize, bool, usize)> {
+    let cand = (rect.t..bl)
+        .find_map(|r| accent_band_run(g, rect, r, c, true).map(|(_, end)| (r, true, end)))
+        .or_else(|| {
+            (bl + 1..=rect.b)
+                .find_map(|r| accent_band_run(g, rect, r, c, false).map(|(_, end)| (r, false, end)))
+        });
+    let (brow, over, right) = cand?;
+    (c..=right)
+        .any(|c2| g.at(bl, c2) != ' ')
+        .then_some((brow, over, right))
+}
+
+/// Parse a wide accent: the base region owns the caller's baseline,
+/// bands (over above / under below, either or both) carry the marks.
+#[allow(clippy::too_many_arguments)]
+fn parse_wide_accent(
+    g: &Grid,
+    rect: Rect,
+    bl: usize,
+    col: usize,
+    brow: usize,
+    over_first: bool,
+    right: usize,
+    depth: usize,
+    trace: &mut Vec<RegionSpan>,
+    in_cancel: bool,
+) -> Result<(Node, usize)> {
+    // A fully struck accent is \cancel content (the strike scan cannot
+    // anchor on the band) — wrap it like a struck brace.
+    let struck = !in_cancel
+        && rect
+            .rows()
+            .all(|r| (col..=right).all(|c2| g.at(r, c2) == ' ' || g.cancelled(r, c2)));
+    let in_cancel = in_cancel || struck;
+    let (over, top) = if over_first {
+        let (m, _) = accent_band_run(g, rect, brow, col, true).unwrap();
+        (Some(m), brow + 1)
+    } else {
+        (None, rect.t)
+    };
+    // A matching under band below the baseline (when we started from an
+    // over band) — or the anchoring band itself (under-only).
+    let under_row = if over_first {
+        (bl + 1..=rect.b).find(|&r| accent_band_run(g, rect, r, col, false).is_some())
+    } else {
+        Some(brow)
+    };
+    let (under, bot) = match under_row {
+        Some(r) => {
+            let (m, _) = accent_band_run(g, rect, r, col, false).unwrap();
+            (Some(m), r - 1)
+        }
+        None => (None, rect.b),
+    };
+    let base_rect = Rect {
+        t: top,
+        b: bot,
+        l: col,
+        r: right,
+    };
+    let base = parse_region(g, base_rect, Some(bl), depth + 1, trace, in_cancel)?;
+    let node = Node::WideAccent { over, under, base };
+    let node = if struck {
+        Node::Cancel { arg: vec![node] }
+    } else {
+        node
+    };
+    Ok((node, right))
+}
+
 /// An over/under brace: a ╭──╮ (or ╰──╯) row at `brow`, argument block
 /// owning the caller's baseline on the other side, label beyond.
 #[allow(clippy::too_many_arguments)]
@@ -1456,20 +1745,73 @@ fn check_flat_columns(
     Ok(())
 }
 
-fn accent_stacks(g: &Grid, rect: Rect, bl: usize, col: usize) -> (Vec<char>, Vec<char>) {
+/// Compact accents draw marks with a low variant hugging the base —
+/// the over bar as '_' (low in its cell), tilde as '˷', hat as '˰',
+/// check as '˯', ring as '˳', dot as '․' U+2024 (a reserved leader dot,
+/// distinct from the '.' atom), the under bar as '¯' (high in its cell)
+/// — so the drawn glyph maps back to the AST mark here. The old
+/// floating glyphs (¯ ˜ ^ ˇ ˚ ˙ above, ‗ below) still read leniently.
+fn over_mark_at(c: char) -> Option<char> {
+    match c {
+        '_' => Some('¯'),
+        '˷' => Some('˜'),
+        '˰' => Some('^'),
+        '˯' => Some('ˇ'),
+        '˳' => Some('˚'),
+        '․' => Some('˙'),
+        c if is_over_mark(c) => Some(c),
+        _ => None,
+    }
+}
+
+fn under_mark_at(c: char) -> Option<char> {
+    match c {
+        '¯' => Some('‗'),
+        // The drawn under tilde is the high ˜ (hugging from below); the
+        // AST mark is ˷ — the tilde pair swaps between the two roles.
+        '˜' => Some('˷'),
+        c if is_under_mark(c) => Some(c),
+        _ => None,
+    }
+}
+
+/// Returns (overs, unders, extra columns consumed). A ddot draws as
+/// `․․` overhanging one column to the right of its base; the pair is
+/// only taken when that spill column holds nothing else (otherwise the
+/// second ․ is the neighbour's own dot and this row stays a single ˙).
+fn accent_stacks(g: &Grid, rect: Rect, bl: usize, col: usize) -> (Vec<char>, Vec<char>, usize) {
     let mut overs = Vec::new();
+    let mut pair_rows: Vec<usize> = Vec::new();
     let mut r = bl;
-    while r > rect.t && is_over_mark(g.at(r - 1, col)) {
-        overs.push(g.at(r - 1, col));
+    while r > rect.t
+        && let Some(m) = over_mark_at(g.at(r - 1, col))
+    {
+        if m == '˙' && col < rect.r && g.at(r - 1, col + 1) == '․' {
+            pair_rows.push(r - 1);
+        }
+        overs.push(m);
         r -= 1;
     }
     let mut unders = Vec::new();
     let mut r = bl;
-    while r < rect.b && is_under_mark(g.at(r + 1, col)) {
-        unders.push(g.at(r + 1, col));
+    while r < rect.b
+        && let Some(m) = under_mark_at(g.at(r + 1, col))
+    {
+        unders.push(m);
         r += 1;
     }
-    (overs, unders)
+    let spill = !pair_rows.is_empty()
+        && rect
+            .rows()
+            .all(|rr| pair_rows.contains(&rr) || g.at(rr, col + 1) == ' ');
+    if spill {
+        let top = bl - overs.len();
+        for &pr in &pair_rows {
+            overs[bl - 1 - pr] = '¨';
+            debug_assert!(pr >= top);
+        }
+    }
+    (overs, unders, spill as usize)
 }
 
 /// A grid lattice whose leftmost marker column is `col`: box-drawing

@@ -1132,6 +1132,22 @@ impl Editor {
 
     /// Wrap the atom just before the cursor with an accent mark.
     fn apply_accent(&mut self, mark: char) {
+        // A selection becomes the base of a stretchy accent (\widehat
+        // over anything — the accent band rides above/below the block).
+        if self.selection().is_some() {
+            if let Some(content) = self.take_selection() {
+                let under = crate::symbols::is_under_mark(mark);
+                let node = Node::WideAccent {
+                    over: (!under).then_some(mark),
+                    under: under.then_some(mark),
+                    base: content,
+                };
+                let col = self.col;
+                self.cur_row_mut().insert(col, node);
+                self.col += 1;
+            }
+            return;
+        }
         if self.col == 0 {
             self.message = "accent needs a base character before the cursor".into();
             return;
@@ -1159,6 +1175,15 @@ impl Editor {
                     unders.push(mark)
                 } else {
                     overs.push(mark)
+                }
+            }
+            // Fill the free side of a wide accent (¯ then ‗, say).
+            Node::WideAccent { over, under: u, .. } => {
+                let slot = if under { u } else { over };
+                if slot.is_none() {
+                    *slot = Some(mark);
+                } else {
+                    self.message = "that side of the wide accent is taken".into();
                 }
             }
             _ => self.message = "accents apply to a single character".into(),

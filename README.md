@@ -93,8 +93,11 @@ TUI は毎編集後に AA→AST の逆変換を自動検査し、ラウンドト
   なる。スペース区切りは `┄ess┄sup┄` のような複数ピースに
   (`ess sup` → \operatorname*{ess sup})。Esc で取消、
   名前以外のキーはそのまま確定して通常動作
-- アクセント: `\hat` `\vec` `\bar` `\dot` `\tilde` `\underline`
-  (直前の1文字に付く。続けて実行すると縦に重ね掛け)
+- アクセント: `\hat` `\vec` `\bar` `\dot` `\tilde` `\underline` `\utilde`
+  (直前の1文字に付く。続けて実行すると縦に重ね掛け。**選択を包むと
+  伸縮アクセント** — 基底は裸のまま、`┄┄˰┄┄` `┄──>┄` `┄___┄` の
+  ようなマーク入り範囲行が上下に付く \widehat 形。分数など背の高い
+  選択も可)
 - 伸縮矢印: `\xto` `\xfrom`(→ ←)、`\xTo` `\xFrom`(⇒ ⇐)— 上下にラベル
   (`\xrightarrow` などフルネームも可)
 - テキスト: `\rmdx` → `dx`(裸の \mathrm。単独1文字は `'d'`)、
@@ -157,6 +160,6 @@ src/main.rs     ratatui TUI + CLI
 
 ## ロードマップ
 
-docs/design.md 参照。直近: 可変幅アクセント(var* 系の lim もここ)、LaTeX パーサ
+docs/design.md 参照。直近: LaTeX パーサ、MathML(var* 系 lim = マークと極限の同時装着は未対応)
 (`\overline{x+y}`)、BigOp 基底の自由編集(現状 `\argmax` 等は定型)、
 LaTeX パーサ(逆方向)、MathML 出力。

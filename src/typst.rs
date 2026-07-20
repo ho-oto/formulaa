@@ -48,10 +48,19 @@ fn accent_fn(mark: char) -> &'static str {
             "tilde" => "tilde",
             "dot" => "dot",
             "check" => "caron",
-            "breve" => "breve",
             _ => "hat",
         },
         None => "hat",
+    }
+}
+
+/// One accent application. Typst has no under-tilde accent function,
+/// so \utilde attaches the tilde symbol below instead.
+fn typst_accent(mark: char, s: String) -> String {
+    if accent_info(mark).is_some_and(|(_, l)| l == "utilde") {
+        format!("attach({}, b: sym.tilde)", s)
+    } else {
+        format!("{}({})", accent_fn(mark), s)
     }
 }
 
@@ -72,6 +81,13 @@ fn node_to_typst(node: &Node) -> String {
                 format!("op(\"{}\")", name)
             }
         }
+        Node::WideAccent { over, under, base } => {
+            let mut s = row_to_typst(base);
+            for m in over.iter().chain(under.iter()) {
+                s = typst_accent(*m, s);
+            }
+            s
+        }
         Node::Accent {
             overs,
             unders,
@@ -79,7 +95,7 @@ fn node_to_typst(node: &Node) -> String {
         } => {
             let mut s = base.to_string();
             for &m in unders.iter().chain(overs.iter()) {
-                s = format!("{}({})", accent_fn(m), s);
+                s = typst_accent(m, s);
             }
             s
         }

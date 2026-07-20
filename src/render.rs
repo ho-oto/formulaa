@@ -488,10 +488,15 @@ fn text_block(t: &str, math: bool, glue: bool) -> Block {
 /// Would this node's rendered baseline edge glue a lone upright letter
 /// into the roman reading (an alphabetic cell with no separator space)?
 /// Conservative whitelist — quoting is always safe, bare is not.
-fn glue_alpha(n: &Node) -> bool {
+/// `right_edge` selects which baseline edge faces the letter: a ddot
+/// accent's ․․ overhang leaves a blank baseline cell on its right, so
+/// its right edge never glues.
+fn glue_alpha(n: &Node, right_edge: bool) -> bool {
     match n {
         Node::Sym(c) => c.is_alphabetic(),
-        Node::Accent { base, .. } => base.is_alphabetic(),
+        Node::Accent { overs, base, .. } => {
+            base.is_alphabetic() && !(right_edge && overs.contains(&'¨'))
+        }
         _ => false,
     }
 }
@@ -538,6 +543,10 @@ pub fn render_row(
         /// adjacent letter run or period into one token, so the fuse
         /// rules keep a space after it.
         dot_run: bool,
+        /// Wide accents carry off-baseline ┄ band rows with no closing
+        /// glyph; a tall neighbour touching that row would be munched
+        /// into the band scan, so they keep a space on both sides.
+        wide_accent: bool,
         /// Zero-width display annotation: invisible to the fuse rules.
         marker: bool,
     }
@@ -552,6 +561,7 @@ pub fn render_row(
             None => None,
         };
         let info = Info {
+            wide_accent: matches!(node, Node::WideAccent { .. }),
             dot_run: matches!(node, Node::Text { t, math: true } if t.contains('.')),
             marker: is_marker_node(node),
             script: matches!(node, Node::Sup { .. } | Node::Sub { .. }),
@@ -575,11 +585,11 @@ pub fn render_row(
                     .iter()
                     .rev()
                     .find(|n| !is_marker_node(n))
-                    .is_some_and(glue_alpha)
+                    .is_some_and(|n| glue_alpha(n, true))
                     || row[i + 1..]
                         .iter()
                         .find(|n| !is_marker_node(n))
-                        .is_some_and(glue_alpha);
+                        .is_some_and(|n| glue_alpha(n, false));
                 text_block(t, *math, glue)
             }
             _ => render_node(node, child_cursor, ctx),
@@ -617,9 +627,29 @@ pub fn render_row(
     //    must not fuse the ragged edge with the neighbour)
     // A 2D script right after a cancel instead needs a non-blank baseline
     // anchor (⬚), or the strike scan would fuse raised content.
+    // Rows (relative to the baseline) where a block's edge column holds
+    // '_': the sqrt overline scans '_' greedily, and the compact bar
+    // accent draws '_' too, so two runs touching across a sibling
+    // boundary would merge into one overline.
+    let bar_edge_rows = |b: &Block, right: bool| -> Vec<isize> {
+        let w = b.width();
+        b.lines
+            .iter()
+            .enumerate()
+            .filter_map(|(i, l)| {
+                let c = if right {
+                    (l.len() == w).then(|| l.last().copied()).flatten()
+                } else {
+                    l.first().copied()
+                };
+                (c == Some('_')).then_some(i as isize - b.baseline as isize)
+            })
+            .collect()
+    };
     let mut spaced: Vec<Block> = Vec::with_capacity(blocks.len() * 2);
     let mut prev: Option<Info> = None;
     let mut last_edge: Option<char> = None;
+    let mut last_bars: Vec<isize> = Vec::new();
     for (block, info) in blocks {
         // Zero-width annotations pass through without touching the
         // neighbour bookkeeping (the fuse rules must behave exactly as
@@ -666,7 +696,11 @@ pub fn render_row(
                     && block
                         .baseline_edge(true)
                         .is_some_and(|b| b.is_ascii_alphabetic() || b == '.');
-                fuse || ragged_cancel || dotted
+                let bar_touch = !last_bars.is_empty()
+                    && bar_edge_rows(&block, false)
+                        .iter()
+                        .any(|r| last_bars.contains(r));
+                fuse || ragged_cancel || dotted || p.wide_accent || info.wide_accent || bar_touch
             }
             _ => false,
         };
@@ -677,6 +711,7 @@ pub fn render_row(
             spaced.push(Block::from_chars(vec![' ']));
         }
         let edge = block.baseline_edge(false);
+        last_bars = bar_edge_rows(&block, true);
         spaced.push(block);
         prev = Some(info);
         last_edge = edge;
@@ -824,6 +859,87 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
         // glue from the neighbours); standalone = never glued.
         Node::Text { t, math } => text_block(t, *math, false),
 
+        // Stretchy accent: the base stays bare on the baseline; an
+        // accent band — a ┄ run whose only piece is the mark — rides
+        // above (over) and/or below (under) marking the extent.
+        Node::WideAccent { over, under, base } => {
+            let b = render_row(base, None, true, ctx);
+            let bw = b.width().max(1);
+            let w = bw + 2;
+            // Stretchable marks fill the base width: arrows grow a ─
+            // body, the hat/check slope with ╱ ╲, line-like marks
+            // repeat; dot-like marks stay a single centered glyph.
+            let band_row = |m: char| {
+                let mut r = vec![OP_BAND; w];
+                match m {
+                    // Vec: ─ body with an ASCII > head, like the
+                    // stretchy \xrightarrow (─ and → do not always
+                    // connect visually across fonts).
+                    '⇀' if bw >= 2 => {
+                        for cell in r.iter_mut().take(w - 1).skip(1) {
+                            *cell = FRAC_BAR;
+                        }
+                        r[w - 2] = '>';
+                    }
+                    // Hat / check: the single low arrowhead, centered
+                    // (the ╱╲ / ╲╱ slope pairs still read leniently).
+                    '^' => r[w / 2] = '˰',
+                    'ˇ' => r[w / 2] = '˯',
+                    // Both lines hug the base: the overline draws low
+                    // (_ sits at the bottom of its cell, like the √
+                    // overline), the underline draws high (¯ sits at
+                    // the top of its cell).
+                    '¯' => {
+                        for cell in r.iter_mut().take(w - 1).skip(1) {
+                            *cell = '_';
+                        }
+                    }
+                    '‗' => {
+                        for cell in r.iter_mut().take(w - 1).skip(1) {
+                            *cell = '¯';
+                        }
+                    }
+                    // The wide tildes fill with their hugging forms —
+                    // ˷ above, ˜ below — like the _ overline.
+                    '˜' => {
+                        for cell in r.iter_mut().take(w - 1).skip(1) {
+                            *cell = '˷';
+                        }
+                    }
+                    '˷' => {
+                        for cell in r.iter_mut().take(w - 1).skip(1) {
+                            *cell = '˜';
+                        }
+                    }
+                    // Single centered marks; ring and dot hug via their
+                    // low forms like the tilde fill, ddot is the two
+                    // leader dots side by side.
+                    '˚' => r[w / 2] = '˳',
+                    '˙' => r[w / 2] = '․',
+                    '¨' if bw >= 2 => {
+                        let s = (w - 2) / 2;
+                        r[s] = '․';
+                        r[s + 1] = '․';
+                    }
+                    _ => r[w / 2] = m,
+                }
+                r
+            };
+            let mut lines: Vec<Vec<char>> = Vec::new();
+            if let Some(m) = over {
+                lines.push(band_row(*m));
+            }
+            let off = lines.len();
+            let baseline = off + b.baseline.min(b.height().saturating_sub(1));
+            lines.extend(center_pad(&b, w));
+            if let Some(m) = under {
+                lines.push(band_row(*m));
+            }
+            Annots::default()
+                .centered(&b, w, off)
+                .into_block(lines, baseline)
+        }
+
         // Marks in the cells directly above/below the base, stacking
         // outward (innermost first in each list). Those cells are never
         // used by anything else (scripts go up-right, limits live inside
@@ -834,9 +950,48 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             base,
         } => {
             let b = display_char(*base, ctx);
-            let mut lines: Vec<Vec<char>> = overs.iter().rev().map(|&m| vec![m]).collect();
-            lines.push(vec![b]);
-            lines.extend(unders.iter().map(|&m| vec![m]));
+            // Every mark hugs the base like the wide-band forms: over
+            // marks draw low in their cell (bar ¯ as _, tilde ˜ as ˷,
+            // hat ^ as ˰, check ˇ as ˯, ring ˚ as ˳, dot ˙ as the
+            // leader ․ U+2024, distinct from the '.' atom), under marks
+            // draw high (bar ‗ as ¯, tilde ˷ as ˜ — the tilde pair
+            // swaps between AST mark and drawn glyph). The ddot draws
+            // as ․․ overhanging one column right of the base; the spill
+            // column keeps a blank baseline so the pair reads back
+            // uniquely.
+            let over_glyph = |m: char| match m {
+                '¯' => '_',
+                '˜' => '˷',
+                '^' => '˰',
+                'ˇ' => '˯',
+                '˚' => '˳',
+                '˙' => '․',
+                m => m,
+            };
+            let under_glyph = |m: char| match m {
+                '‗' => '¯',
+                '˷' => '˜',
+                m => m,
+            };
+            let w = if overs.contains(&'¨') { 2 } else { 1 };
+            let cell = |c: char| {
+                let mut v = vec![c];
+                v.resize(w, ' ');
+                v
+            };
+            let mut lines: Vec<Vec<char>> = overs
+                .iter()
+                .rev()
+                .map(|&m| {
+                    if m == '¨' {
+                        vec!['․', '․']
+                    } else {
+                        cell(over_glyph(m))
+                    }
+                })
+                .collect();
+            lines.push(cell(b));
+            lines.extend(unders.iter().map(|&m| cell(under_glyph(m))));
             Block::new(lines, overs.len())
         }
 

@@ -45,6 +45,18 @@ pub enum Node {
         unders: Vec<char>,
         base: char,
     },
+    /// Stretchy accent over/under a multi-character base: a ┄band┄
+    /// whose limit region holds nothing but the mark character —
+    /// reserved marks cannot be atoms, so a marks-only limit row is
+    /// unambiguous (\widehat{abc}, \overline{xy}, \underline{...}).
+    /// The base is a flat one-line row like a BigOp base and is not
+    /// cursor-editable (wrap a selection; re-edit by deleting).
+    /// A one-char base with a single over mark normalizes to Accent.
+    WideAccent {
+        over: Option<char>,
+        under: Option<char>,
+        base: Row,
+    },
     Frac {
         num: Row,
         den: Row,
@@ -151,7 +163,8 @@ impl Node {
             | Node::Break
             | Node::Func(_)
             | Node::Text { .. }
-            | Node::Accent { .. } => {
+            | Node::Accent { .. }
+            | Node::WideAccent { .. } => {
                 vec![]
             }
             Node::Frac { .. } => vec![Field::FracNum, Field::FracDen],
@@ -240,6 +253,11 @@ pub fn mark_spacers(row: &Row) -> Row {
     row.iter()
         .map(|n| match n {
             Node::Spacer => Node::Sym('␠'),
+            Node::WideAccent { over, under, base } => Node::WideAccent {
+                over: *over,
+                under: *under,
+                base: mark_spacers(base),
+            },
             n => {
                 let mut n = n.clone();
                 for f in n.fields() {
@@ -294,6 +312,12 @@ pub fn normalize(row: &Row) -> Row {
             {
                 pre.extend(base)
             }
+            // A markless wide accent is just its base.
+            Node::WideAccent {
+                over: None,
+                under: None,
+                base,
+            } => pre.extend(base),
             n => pre.push(n),
         }
     }
@@ -405,6 +429,11 @@ fn strip_cancels(row: &Row) -> Row {
             | Node::Func(_)
             | Node::Text { .. }
             | Node::Accent { .. } => out.push(n.clone()),
+            Node::WideAccent { over, under, base } => out.push(Node::WideAccent {
+                over: *over,
+                under: *under,
+                base: strip_cancels(base),
+            }),
             Node::Frac { num, den } => out.push(Node::Frac {
                 num: strip_cancels(num),
                 den: strip_cancels(den),
@@ -468,6 +497,11 @@ pub fn strip_spacers(row: &Row) -> Row {
             | Node::Func(_)
             | Node::Text { .. }
             | Node::Accent { .. } => out.push(n.clone()),
+            Node::WideAccent { over, under, base } => out.push(Node::WideAccent {
+                over: *over,
+                under: *under,
+                base: strip_spacers(base),
+            }),
             Node::Frac { num, den } => out.push(Node::Frac {
                 num: strip_spacers(num),
                 den: strip_spacers(den),
@@ -538,6 +572,32 @@ fn normalize_node(node: &Node) -> Node {
         | Node::Func(_)
         | Node::Text { .. }
         | Node::Accent { .. } => node.clone(),
+        Node::WideAccent { over, under, base } => {
+            let base = normalize(base);
+            // Markless: splice would need row context; degrade to the
+            // bare base wrapped in nothing — callers splice via the
+            // pre-pass below? Simplest: keep as a one-char Accent when
+            // possible, else keep the node.
+            match (&base[..], over, under) {
+                // One-char base with a single over mark is the compact
+                // stacked Accent (x̂) — one picture per formula.
+                ([Node::Sym(c)], Some(m), None) => Node::Accent {
+                    overs: vec![*m],
+                    unders: vec![],
+                    base: *c,
+                },
+                ([Node::Sym(c)], None, Some(m)) => Node::Accent {
+                    overs: vec![],
+                    unders: vec![*m],
+                    base: *c,
+                },
+                _ => Node::WideAccent {
+                    over: *over,
+                    under: *under,
+                    base,
+                },
+            }
+        }
         Node::Frac { num, den } => Node::Frac {
             num: normalize(num),
             den: normalize(den),
