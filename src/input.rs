@@ -178,12 +178,21 @@ impl Editor {
     /// Space separates band pieces in \op* (`ess sup` → ┄ess┄sup┄) but
     /// simply commits a plain \op (one word is the whole name there).
     fn op_box_keys(&mut self, key: Key, ctrl: bool) -> Option<Effect> {
-        let star = self.op_entry.as_ref()?.0;
+        use crate::editor::BoxKind;
+        let kind = self.op_entry.as_ref()?.0;
+        // What may be typed into the box: operator/roman names are
+        // alphanumerics plus dots (i.i.d.); \text takes any glyph but
+        // the quotes. Space separates \op* pieces, is content in \rm
+        // and \text, and commits a plain \op (one-word name).
+        let name_char = |c: char| c.is_ascii_alphanumeric() || c == '.';
         match key {
             Key::Esc => self.op_entry = None,
             Key::Backspace => self.op_backspace(),
-            Key::Char(' ') if star => self.op_type(' '),
-            Key::Char(c) if !ctrl && c.is_ascii_alphanumeric() => self.op_type(c),
+            Key::Char(' ') if kind != BoxKind::Op => self.op_type(' '),
+            Key::Char(c) if !ctrl && kind == BoxKind::Text && c != '"' && c != '\'' => {
+                self.op_type(c)
+            }
+            Key::Char(c) if !ctrl && kind != BoxKind::Text && name_char(c) => self.op_type(c),
             Key::Enter | Key::Tab | Key::Char(' ') => self.op_commit(),
             _ => {
                 self.op_commit();

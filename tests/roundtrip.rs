@@ -241,6 +241,121 @@ fn roman_differential_quotes() {
     roundtrip("d-d", &row);
 }
 
+/// Dotted roman abbreviations (i.i.d., w.r.t.): one Text node, drawn
+/// bare; the run lexer reads dots between letters (and one trailing dot
+/// when an interior dot exists) back into the same token.
+#[test]
+fn dotted_roman_runs() {
+    let t = |s: &str| Node::Text {
+        t: s.into(),
+        math: true,
+    };
+    let aa = |row: &Row| render_root(&normalize(row), None, &RenderCtx::canonical()).to_text();
+    let row = cat(&[n(t("i.i.d.")), s("x")]);
+    roundtrip("iid", &row);
+    assert_eq!(aa(&row), "i.i.d.𝑥");
+    assert_eq!(row_to_latex(&normalize(&row)), "\\mathrm{i.i.d.}x");
+    // Adjacent letter run / period: the dotted run keeps a space so the
+    // lexer cannot absorb them.
+    let row = cat(&[n(t("i.i.d.")), n(t("ab"))]);
+    roundtrip("iid-ab", &row);
+    let row = cat(&[n(t("i.i")), n(Node::Sym('.'))]);
+    roundtrip("iid-dot", &row);
+    // `sin.` stays Func + period (a trailing dot needs an interior one).
+    let row = cat(&[n(func("sin")), n(Node::Sym('.'))]);
+    roundtrip("sin-dot", &row);
+    assert_eq!(aa(&row), "sin.");
+    // Ill-formed dot content falls back to the quoted form.
+    let row = cat(&[n(t("x..y"))]);
+    roundtrip("double-dot", &row);
+    assert_eq!(aa(&row), "'x..y'");
+    // Primes never touch dots (a '.' pair would read as a quote).
+    let row = cat(&[n(Node::Sym('\'')), n(Node::Sym('.')), n(Node::Sym('\''))]);
+    roundtrip("prime-dot-prime", &row);
+}
+
+/// Ceil / floor / double-bar norm delimiters.
+#[test]
+fn ceil_floor_norm() {
+    let row = cat(&[n(delim(
+        '⌈',
+        '⌉',
+        vec![],
+        vec![cat(&[s("x"), n(frac(s("1"), s("2")))])],
+    ))]);
+    roundtrip("ceil", &row);
+    assert_eq!(
+        row_to_latex(&normalize(&row)),
+        "\\left\\lceil x\\frac{1}{2}\\right\\rceil "
+    );
+    let row = cat(&[n(delim('⌊', '⌋', vec![], vec![s("n")]))]);
+    roundtrip("floor", &row);
+    let row = cat(&[n(delim(
+        '‖',
+        '‖',
+        vec![],
+        vec![cat(&[s("v"), n(frac(s("a"), s("b")))])],
+    ))]);
+    roundtrip("norm", &row);
+    assert_eq!(
+        row_to_latex(&normalize(&row)),
+        "\\left\\|v\\frac{a}{b}\\right\\|"
+    );
+    assert!(mascii::typst::row_to_typst(&normalize(&row)).starts_with("norm("));
+    // Two sibling norms stay siblings (parity per row).
+    let row = cat(&[
+        n(delim('‖', '‖', vec![], vec![s("v")])),
+        s("+"),
+        n(delim('‖', '‖', vec![], vec![s("w")])),
+    ]);
+    roundtrip("norm-siblings", &row);
+}
+
+/// \text keeps real spaces inside its quotes; KaTeX function names and
+/// declared operators serialize correctly.
+#[test]
+fn text_spaces_and_operator_names() {
+    let row = cat(&[n(Node::Text {
+        t: "if x holds".into(),
+        math: false,
+    })]);
+    roundtrip("text-spaces", &row);
+    assert_eq!(
+        render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text(),
+        "\"if x holds\""
+    );
+    assert_eq!(row_to_latex(&normalize(&row)), "\\text{if x holds}");
+    // KaTeX-known names emit \name; declared operators \operatorname.
+    assert_eq!(row_to_latex(&vec![func("arcctg")]), "\\arcctg ");
+    assert_eq!(row_to_latex(&vec![func("Tr")]), "\\operatorname{Tr}");
+    assert_eq!(row_to_latex(&vec![func("Re")]), "\\operatorname{Re}");
+    roundtrip("tr-run", &cat(&[n(func("Tr")), n(paren(s("A")))]));
+    // plim & friends band like lim.
+    let row = cat(&[n(Node::BigOp {
+        base: vec![func("plim")],
+        lower: s("n"),
+        upper: vec![],
+    })]);
+    roundtrip("plim", &row);
+    assert_eq!(row_to_latex(&normalize(&row)), "\\plim _{n}");
+}
+
+/// rcases: the mirror of cases (null left, brace right).
+#[test]
+fn rcases_grid() {
+    let row = n(delim(
+        '.',
+        '}',
+        vec![],
+        vec![vec![array(2, 2, vec![s("a"), s("b"), s("c"), s("d")])]],
+    ));
+    roundtrip("rcases", &row);
+    assert_eq!(
+        row_to_latex(&normalize(&row)),
+        "\\begin{rcases} a & b \\\\ c & d \\end{rcases}"
+    );
+}
+
 /// The session file writes formatting spacers as explicit ␠ so they
 /// survive the restore parse.
 #[test]
@@ -982,7 +1097,7 @@ impl Rng {
 
 const ATOMS: &[char] = &[
     'a', 'b', 'c', 'x', 'y', 'z', 'A', 'B', 'N', '0', '1', '2', '7', '+', '-', '=', '<', 'α', 'β',
-    'π', 'λ', '∞', '∂', '⋅', '±', '∈', '→', '␣', '~', '\'',
+    'π', 'λ', '∞', '∂', '⋅', '±', '∈', '→', '␣', '~', '\'', '.',
 ];
 
 fn gen_row(rng: &mut Rng, depth: usize, max_len: usize) -> Row {
@@ -1018,7 +1133,7 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             // Single-letter \mathrm (the roman differential): quoted or
             // bare depending on the rendered neighbours.
             3 => Node::Text {
-                t: ["d", "e", "D"][rng.below(3)].into(),
+                t: ["d", "e", "D", "i.i.d.", "w.r.t", "a.e"][rng.below(6)].into(),
                 math: true,
             },
             _ => Node::Sym(ATOMS[rng.below(ATOMS.len())]),
@@ -1079,10 +1194,34 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
                 ('.', '.'),
                 ('(', ']'),
                 ('{', '.'),
+                ('.', '}'),
+                ('⌈', '⌉'),
+                ('⌊', '⌋'),
+                ('‖', '‖'),
             ];
             let (l, r) = pairs[rng.below(pairs.len())];
             let nsegs = 1 + rng.below(2); // 1 or 2 segs
-            let segs = (0..nsegs).map(|_| gen_row(rng, d, 3)).collect::<Vec<_>>();
+            let mut segs = (0..nsegs).map(|_| gen_row(rng, d, 3)).collect::<Vec<_>>();
+            // Direct norm-in-norm is unsupported (the picture is
+            // ambiguous — same ‖ on both sides); rewrite inner norms.
+            if l == '‖' {
+                fn denorm(row: &mut Row) {
+                    for n in row.iter_mut() {
+                        if let Node::Delim { left, right, .. } = n
+                            && *left == '‖'
+                        {
+                            *left = '|';
+                            *right = '|';
+                        }
+                        for f in n.fields() {
+                            denorm(n.field_mut(f));
+                        }
+                    }
+                }
+                for seg in &mut segs {
+                    denorm(seg);
+                }
+            }
             Node::Delim {
                 left: l,
                 right: r,

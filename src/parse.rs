@@ -133,11 +133,11 @@ fn trim(g: &Grid, mut rect: Rect) -> Option<Rect> {
 /// bracket-protected against cell/script splitting like any other pair.
 const OPEN_BRACKETS: &[char] = &[
     '(', '⎛', '⎜', '⎝', '[', '⎡', '⎢', '⎣', '{', '⎧', '⎨', '⎩', '⟨', '⎸', '╎', '▏', '┌', '├', '└',
-    '┠',
+    '┠', '⌈', '⌊',
 ];
 const CLOSE_BRACKETS: &[char] = &[
     ')', '⎞', '⎟', '⎠', ']', '⎤', '⎥', '⎦', '}', '⎫', '⎬', '⎭', '⟩', '⎹', '┆', '▕', '┐', '┤', '┘',
-    '┨',
+    '┨', '⌉', '⌋',
 ];
 
 /// Delimiter spec char for a glyph that can appear on the *baseline row*
@@ -147,6 +147,9 @@ fn open_spec(c: char) -> Option<char> {
     Some(match c {
         '(' | '⎛' | '⎜' | '⎝' => '(',
         '[' | '⎡' | '⎢' | '⎣' => '[',
+        '⌈' => '⌈',
+        '⌊' => '⌊',
+        '‖' | '║' => '‖',
         '{' | '⎨' => '{',
         '⟨' => '⟨',
         '⎸' => '|',
@@ -154,31 +157,6 @@ fn open_spec(c: char) -> Option<char> {
         // ┠ (fused-grid junction) resolves its family via the column walk
         // in open_spec_at; standalone it only marks "an open side".
         '┠' => return None,
-        _ => return None,
-    })
-}
-
-/// Family of *any* glyph a left delimiter column can contain (used by the
-/// junction-resolution walk; ⎪ is shared with right braces, so it only
-/// appears via the walk's own continue set).
-fn left_col_spec(c: char) -> Option<char> {
-    Some(match c {
-        '(' | '⎛' | '⎜' | '⎝' => '(',
-        '[' | '⎡' | '⎢' | '⎣' => '[',
-        '{' | '⎧' | '⎨' | '⎩' => '{',
-        '⎸' => '|',
-        '╎' | '▏' => '.',
-        _ => return None,
-    })
-}
-
-fn right_col_spec(c: char) -> Option<char> {
-    Some(match c {
-        ')' | '⎞' | '⎟' | '⎠' => ')',
-        ']' | '⎤' | '⎥' | '⎦' => ']',
-        '}' | '⎫' | '⎬' | '⎭' => '}',
-        '⎹' => '|',
-        '┆' | '▕' => '.',
         _ => return None,
     })
 }
@@ -252,34 +230,74 @@ fn fused_grid_markers(
     Some((marker_cols, marker_rows, t, b))
 }
 
-/// Like `open_spec`, resolving a fused-grid junction (┠) by walking its
-/// column to a family-distinct glyph (through ⎪ and further junctions).
+/// Resolve the delimiter family of a glyph on the baseline row.
+/// Bracket pieces are shared with ceil/floor (⎡+⎢ = ceil, ⎢+⎣ = floor,
+/// both corners = bracket) and ┠ junctions belong to any family, so the
+/// contiguous column run's glyph set decides.
 fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
     let ch = g.at(row, col);
     if angle_open_turn(g, row, col) {
         return Some('⟨');
     }
-    if ch != '┠' {
+    if !matches!(ch, '⎡' | '⎢' | '⎣' | '┠') {
         return open_spec(ch);
     }
     let h = g.g.len();
-    let walk = |range: &mut dyn Iterator<Item = usize>| -> Option<char> {
-        for r in range {
-            match left_col_spec(g.at(r, col)) {
-                Some(s) => return Some(s),
-                None if matches!(g.at(r, col), '┠' | '⎪') => continue,
-                None => return None,
-            }
-        }
-        None
+    let in_run = |c: char| {
+        matches!(
+            c,
+            '⎡' | '⎢'
+                | '⎣'
+                | '┠'
+                | '⎪'
+                | '⎛'
+                | '⎜'
+                | '⎝'
+                | '⎧'
+                | '⎨'
+                | '⎩'
+                | '⎸'
+                | '╎'
+                | '▏'
+        )
     };
-    walk(&mut (0..row).rev()).or_else(|| walk(&mut (row + 1..h)))
+    let mut top = row;
+    while top > 0 && in_run(g.at(top - 1, col)) {
+        top -= 1;
+    }
+    let mut bot = row;
+    while bot + 1 < h && in_run(g.at(bot + 1, col)) {
+        bot += 1;
+    }
+    let has = |c: char| (top..=bot).any(|r| g.at(r, col) == c);
+    if has('⎛') || has('⎜') || has('⎝') {
+        return Some('(');
+    }
+    if has('⎧') || has('⎨') || has('⎩') {
+        return Some('{');
+    }
+    if has('⎸') {
+        return Some('|');
+    }
+    if has('╎') || has('▏') {
+        return Some('.');
+    }
+    Some(match (has('⎡'), has('⎣')) {
+        (true, true) => '[',
+        (true, false) => '⌈',
+        (false, true) => '⌊',
+        // Only ⎢ / ┠: read as a bracket (lenient).
+        (false, false) => '[',
+    })
 }
 
 fn close_spec(c: char) -> Option<char> {
     Some(match c {
         ')' | '⎞' | '⎟' | '⎠' => ')',
         ']' | '⎤' | '⎥' | '⎦' => ']',
+        '⌉' => '⌉',
+        '⌋' => '⌋',
+        '‖' | '║' => '‖',
         '}' | '⎬' => '}',
         '⟩' => '⟩',
         '⎹' => '|',
@@ -295,21 +313,55 @@ fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
     if angle_close_turn(g, row, col) {
         return Some('⟩');
     }
-    if ch != '┨' {
+    let h = g.g.len();
+    if !matches!(ch, '⎤' | '⎥' | '⎦' | '┨') {
         return close_spec(ch);
     }
-    let h = g.g.len();
-    let walk = |range: &mut dyn Iterator<Item = usize>| -> Option<char> {
-        for r in range {
-            match right_col_spec(g.at(r, col)) {
-                Some(s) => return Some(s),
-                None if matches!(g.at(r, col), '┨' | '⎪') => continue,
-                None => return None,
-            }
-        }
-        None
+    let in_run = |c: char| {
+        matches!(
+            c,
+            '⎤' | '⎥'
+                | '⎦'
+                | '┨'
+                | '⎪'
+                | '⎞'
+                | '⎟'
+                | '⎠'
+                | '⎫'
+                | '⎬'
+                | '⎭'
+                | '⎹'
+                | '┆'
+                | '▕'
+        )
     };
-    walk(&mut (0..row).rev()).or_else(|| walk(&mut (row + 1..h)))
+    let mut top = row;
+    while top > 0 && in_run(g.at(top - 1, col)) {
+        top -= 1;
+    }
+    let mut bot = row;
+    while bot + 1 < h && in_run(g.at(bot + 1, col)) {
+        bot += 1;
+    }
+    let has = |c: char| (top..=bot).any(|r| g.at(r, col) == c);
+    if has('⎞') || has('⎟') || has('⎠') {
+        return Some(')');
+    }
+    if has('⎫') || has('⎬') || has('⎭') {
+        return Some('}');
+    }
+    if has('⎹') {
+        return Some('|');
+    }
+    if has('┆') || has('▕') {
+        return Some('.');
+    }
+    Some(match (has('⎤'), has('⎦')) {
+        (true, true) => ']',
+        (true, false) => '⌉',
+        (false, true) => '⌋',
+        (false, false) => ']',
+    })
 }
 
 /// Every glyph a left delimiter column of `spec` can contain (for the
@@ -318,6 +370,9 @@ fn left_family(spec: char) -> &'static [char] {
     match spec {
         '(' => &['(', '⎛', '⎜', '⎝', '┠'],
         '[' => &['[', '⎡', '⎢', '⎣', '┠'],
+        '⌈' => &['⌈', '⎡', '⎢', '┠'],
+        '⌊' => &['⌊', '⎢', '⎣', '┠'],
+        '‖' => &['‖', '║'],
         '{' => &['{', '⎧', '⎪', '⎨', '⎩', '┠'],
         '⟨' => &['⟨', '╱', '╲'],
         '|' => &['⎸', '┠'],
@@ -431,6 +486,15 @@ fn angle_arm_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
 
 fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
     let ch = g.at(row, col);
+    // Norm columns use the same ‖ on both sides: parity along the row
+    // decides (full-height columns keep the parity consistent per row).
+    // Direct norm-in-norm is therefore unsupported.
+    if matches!(ch, '‖' | '║') {
+        let before = (0..col)
+            .filter(|&c2| matches!(g.at(row, c2), '‖' | '║'))
+            .count();
+        return Some(before % 2 == 0);
+    }
     if OPEN_BRACKETS.contains(&ch) {
         return Some(true);
     }
@@ -528,7 +592,7 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
         // ┬ markers on the top row) centers on the extent; otherwise the
         // baseline is that of the inner region (a lattice inside answers
         // with its own ┌├└ center rule).
-        '⎡' | '[' | '⎛' | '⎸' | '╎' | '▏' => {
+        '⎡' | '[' | '⎛' | '⎸' | '╎' | '▏' | '⎢' | '║' => {
             if let Ok(close) = match_delim(g, first, c, rect.r)
                 && fused_grid_markers(g, first, last, c, close).is_some()
             {
@@ -943,7 +1007,7 @@ fn parse_region(
                         close > col + 1
                             && (col + 1..close).all(|c2| {
                                 let ch2 = g.at(bl, c2);
-                                ch2.is_ascii_alphanumeric() || ch2 == '␣'
+                                ch2.is_ascii_alphanumeric() || ch2 == '␣' || ch2 == '.'
                             })
                     });
                 match quoted {
@@ -1037,7 +1101,32 @@ fn parse_region(
                 // function, anything longer is a \mathrm text run, and a
                 // *lone* single letter is an italic variable — unless it
                 // is glued to another letter (d𝑦 = roman differential).
-                let run_end = scan_while_same_flag(g, bl, col, rect.r, |c| c.is_ascii_alphabetic());
+                // Dots join the run for abbreviations (i.i.d., w.r.t.):
+                // an interior dot must be followed by a letter, and one
+                // trailing dot joins iff the run already has a dot — so
+                // `sin.` stays Func + period while `i.i.d.` is one run.
+                let mut run_end =
+                    scan_while_same_flag(g, bl, col, rect.r, |c| c.is_ascii_alphabetic());
+                let flag = g.cancelled(bl, col);
+                loop {
+                    let dot = run_end + 1;
+                    if dot > rect.r || g.at(bl, dot) != '.' || g.cancelled(bl, dot) != flag {
+                        break;
+                    }
+                    let next = dot + 1;
+                    if next <= rect.r
+                        && g.at(bl, next).is_ascii_alphabetic()
+                        && g.cancelled(bl, next) == flag
+                    {
+                        run_end =
+                            scan_while_same_flag(g, bl, next, rect.r, |c| c.is_ascii_alphabetic());
+                    } else if (col..=run_end).any(|c2| g.at(bl, c2) == '.') {
+                        run_end = dot;
+                        break;
+                    } else {
+                        break;
+                    }
+                }
                 check_flat_columns(g, rect, bl, col, run_end, 0, 0)?;
                 let word: String = (col..=run_end).map(|c| g.at(bl, c)).collect();
                 if word.chars().count() == 1 {
@@ -1051,7 +1140,7 @@ fn parse_region(
                     } else {
                         out.push(Node::Sym(ch));
                     }
-                } else if crate::symbols::is_func_name(&word) {
+                } else if !word.contains('.') && crate::symbols::is_func_name(&word) {
                     out.push(Node::Func(word));
                 } else {
                     out.push(Node::Text {

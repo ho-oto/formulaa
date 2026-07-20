@@ -115,8 +115,11 @@ pub enum Node {
     },
 }
 
-/// Valid delimiter spec chars for `Node::Delim` (`.` = null delimiter).
-pub const DELIM_SPECS: &[char] = &['(', ')', '[', ']', '{', '}', '⟨', '⟩', '|', '.'];
+/// Valid delimiter spec chars for `Node::Delim` (`.` = null delimiter,
+/// `‖` = the double-bar norm — same spec char on both sides).
+pub const DELIM_SPECS: &[char] = &[
+    '(', ')', '[', ']', '{', '}', '⟨', '⟩', '|', '.', '⌈', '⌉', '⌊', '⌋', '‖',
+];
 
 /// Identifies one editable slot inside a structure node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

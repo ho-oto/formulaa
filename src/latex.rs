@@ -5,7 +5,7 @@
 //! unicode-math toolchain (lualatex/xelatex or Typst-side conversion).
 
 use crate::ast::{Node, Row};
-use crate::symbols::{accent_info, is_func_name, latex_name};
+use crate::symbols::{accent_info, latex_name};
 
 pub fn row_to_latex(row: &Row) -> String {
     row.iter().map(node_to_latex).collect()
@@ -32,7 +32,7 @@ fn node_to_latex(node: &Node) -> String {
         Node::Break => " \\\\ ".into(),
         Node::Sym(c) => sym_to_latex(*c),
         Node::Func(name) => {
-            if is_func_name(name) {
+            if crate::symbols::LATEX_FUNCS.contains(&name.as_str()) {
                 format!("\\{} ", name)
             } else {
                 format!("\\operatorname{{{}}}", name)
@@ -132,10 +132,13 @@ fn node_to_latex(node: &Node) -> String {
                     ('[', ']') => Some("bmatrix"),
                     ('{', '}') => Some("Bmatrix"),
                     ('|', '|') => Some("vmatrix"),
+                    ('‖', '‖') => Some("Vmatrix"),
                     ('.', '.') => Some("matrix"),
                     // cases is a two-column environment; wider grids fall
                     // through to \left\{ \begin{matrix} … \right.
                     ('{', '.') if *cols <= 2 => Some("cases"),
+                    // mathtools' mirror image (\usepackage{mathtools}).
+                    ('.', '}') if *cols <= 2 => Some("rcases"),
                     _ => None,
                 };
                 if let Some(env) = env {
@@ -180,6 +183,11 @@ fn delim_latex(spec: char) -> String {
         '}' => "\\}".into(),
         '⟨' => "\\langle ".into(),
         '⟩' => "\\rangle ".into(),
+        '⌈' => "\\lceil ".into(),
+        '⌉' => "\\rceil ".into(),
+        '⌊' => "\\lfloor ".into(),
+        '⌋' => "\\rfloor ".into(),
+        '‖' => "\\|".into(),
         '|' => "|".into(),
         '.' => ".".into(),
         c => c.to_string(),

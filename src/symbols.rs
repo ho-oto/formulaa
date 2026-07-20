@@ -169,6 +169,12 @@ pub fn is_reserved_glyph(c: char) -> bool {
             | '╎'
             | '┆'
             | '␠'
+            | '⌈'
+            | '⌉'
+            | '⌊'
+            | '⌋'
+            | '‖'
+            | '║'
             | '┌'
             | '┬'
             | '┐'
@@ -248,9 +254,31 @@ pub const BIG_OPS: &[(&str, char)] = &[
 /// Function/operator names rendered upright (Node::Func). Sorted so that
 /// longer names are matched first by the parser (greedy longest match).
 pub const FUNCS: &[&str] = &[
-    "arccos", "arcsin", "arctan", "arg", "cos", "cosh", "cot", "coth", "csc", "deg", "det", "dim",
-    "exp", "gcd", "hom", "inf", "ker", "lg", "lim", "liminf", "limsup", "ln", "log", "max", "min",
-    "mod", "sec", "sin", "sinh", "sup", "tan", "tanh", "Pr",
+    // KaTeX's operator set …
+    "arccos", "arcsin", "arctan", "arctg", "arcctg", "arg", "ch", "cos", "cosec", "cosh", "cot",
+    "cotg", "coth", "csc", "ctg", "cth", "deg", "det", "dim", "exp", "gcd", "hom", "inf", "ker",
+    "lg", "lim", "liminf", "limsup", "ln", "log", "max", "min", "mod", "sec", "sh", "sin", "sinh",
+    "sup", "tan", "tanh", "tg", "th", "Pr", "plim", "injlim", "projlim",
+    // … plus commonly-declared operators (LaTeX gets \operatorname).
+    "asin", "acos", "atan", "acsc", "asec", "acot", "Tr", "tr", "rank", "erf", "Res", "res", "PV",
+    "pv", "Re", "Im", "grad", "curl",
+];
+
+/// Names LaTeX/KaTeX define as \name operator macros; everything else
+/// in FUNCS is emitted as \operatorname{name} (\div is ÷ in LaTeX,
+/// \Re is ℜ — the upright-operator reading needs \operatorname).
+pub const LATEX_FUNCS: &[&str] = &[
+    "arccos", "arcsin", "arctan", "arctg", "arcctg", "arg", "ch", "cos", "cosec", "cosh", "cot",
+    "cotg", "coth", "csc", "ctg", "cth", "deg", "det", "dim", "exp", "gcd", "hom", "inf", "ker",
+    "lg", "lim", "liminf", "limsup", "ln", "log", "max", "min", "mod", "sec", "sh", "sin", "sinh",
+    "sup", "tan", "tanh", "tg", "th", "Pr", "plim", "injlim", "projlim",
+];
+
+/// Names Typst's math mode predefines; everything else becomes op("…").
+pub const TYPST_FUNCS: &[&str] = &[
+    "arccos", "arcsin", "arctan", "arg", "cos", "cosh", "cot", "coth", "csc", "ctg", "deg", "det",
+    "dim", "exp", "gcd", "hom", "inf", "ker", "lg", "lim", "liminf", "limsup", "ln", "log", "max",
+    "min", "mod", "sec", "sin", "sinh", "sup", "tan", "tanh", "tg", "tr", "Pr",
 ];
 
 pub fn is_func_name(name: &str) -> bool {
@@ -289,7 +317,8 @@ pub fn bigop_by_name(name: &str) -> Option<char> {
 /// Functions that take under-limits (the minibuffer command inserts a
 /// ┄band┄; ↑/↓ can lift a bare one back into its band).
 pub const LIMIT_FUNCS: &[&str] = &[
-    "lim", "liminf", "limsup", "max", "min", "sup", "inf", "det", "gcd", "Pr",
+    "lim", "liminf", "limsup", "max", "min", "sup", "inf", "det", "gcd", "Pr", "plim", "injlim",
+    "projlim",
 ];
 
 pub fn bigop_by_char(c: char) -> bool {

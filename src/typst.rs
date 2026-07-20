@@ -65,7 +65,13 @@ fn node_to_typst(node: &Node) -> String {
             '␣' => "space".into(),
             c => c.to_string(),
         },
-        Node::Func(name) => name.clone(),
+        Node::Func(name) => {
+            if crate::symbols::TYPST_FUNCS.contains(&name.as_str()) {
+                name.clone()
+            } else {
+                format!("op(\"{}\")", name)
+            }
+        }
         Node::Accent {
             overs,
             unders,
@@ -91,6 +97,9 @@ fn node_to_typst(node: &Node) -> String {
                     format!("op(\"{}\", limits: #true)", ws.join(" "))
                 }
                 _ => match &base[..] {
+                    [Node::Func(f)] if !crate::symbols::TYPST_FUNCS.contains(&f.as_str()) => {
+                        format!("op(\"{}\", limits: #true)", f)
+                    }
                     [_] => row_to_typst(base),
                     _ => format!("limits({})", row_to_typst(base)),
                 },
@@ -153,20 +162,22 @@ fn node_to_typst(node: &Node) -> String {
                 && let [Node::Array { cols, cells, .. }] = &seg[..]
             {
                 let body = mat_body(*cols, cells);
+                let case_rows = || {
+                    cells
+                        .chunks(*cols)
+                        .map(|row| row.iter().map(row_to_typst).collect::<Vec<_>>().join(" & "))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
                 return match (left, right) {
-                    ('{', '.') => {
-                        // cases(): one argument per grid row.
-                        let rows = cells
-                            .chunks(*cols)
-                            .map(|row| row.iter().map(row_to_typst).collect::<Vec<_>>().join(" & "))
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        format!("cases({})", rows)
-                    }
+                    // cases(): one argument per grid row.
+                    ('{', '.') => format!("cases({})", case_rows()),
+                    ('.', '}') => format!("cases(reverse: #true, {})", case_rows()),
                     ('(', ')') => format!("mat(delim: \"(\", {})", body),
                     ('[', ']') => format!("mat(delim: \"[\", {})", body),
                     ('{', '}') => format!("mat(delim: \"{{\", {})", body),
                     ('|', '|') => format!("mat(delim: \"|\", {})", body),
+                    ('‖', '‖') => format!("mat(delim: \"||\", {})", body),
                     ('.', '.') => format!("mat(delim: #none, {})", body),
                     _ => format!(
                         "lr({} mat(delim: #none, {}) {})",
@@ -175,6 +186,10 @@ fn node_to_typst(node: &Node) -> String {
                         delim_typst(*right)
                     ),
                 };
+            }
+            // Typst's norm(): a mid-less single-segment ‖ pair.
+            if *left == '‖' && *right == '‖' && mids.is_empty() && segs.len() == 1 {
+                return format!("norm({})", row_to_typst(&segs[0]));
             }
             let mut s = String::from("lr(");
             s.push_str(&delim_typst(*left));
@@ -211,6 +226,11 @@ fn delim_typst(spec: char) -> String {
         '}' => "}".into(),
         '⟨' => "angle.l".into(),
         '⟩' => "angle.r".into(),
+        '⌈' => "⌈".into(),
+        '⌉' => "⌉".into(),
+        '⌊' => "⌊".into(),
+        '⌋' => "⌋".into(),
+        '‖' => "‖".into(),
         '|' => "|".into(),
         '.' => "".into(),
         c => c.to_string(),

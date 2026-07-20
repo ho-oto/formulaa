@@ -126,7 +126,7 @@ Ctrl 系(`Ctrl+Z` undo など)はモード中もそのまま使えます。
 | `\sqrt` `\cbrt` `\qdrt` | √ ∛ ∜ |
 | `\cancel` | 打ち消し(選択を包める) |
 | `\matrix` | 2×2 行列。`\matrix34` で 3行×4列 |
-| `\pmatrix` `\Bmatrix` `\vmatrix` `\cases` `\array` | 括弧違いの行列(同様に `\cases32` などサイズ指定可)。`\array` は裸の格子 |
+| `\pmatrix` `\Bmatrix` `\vmatrix` `\cases` `\rcases` `\array` | 括弧違いの行列(同様に `\cases32` などサイズ指定可)。`\array` は裸の格子 |
 | `\overbrace` `\underbrace` | ╭──╮ / ╰──╯(ラベル付き) |
 | `\xto` `\xfrom`(`\xrightarrow` `\xleftarrow`)/ `\xTo` `\xFrom` | ラベル付き伸縮矢印 → ← / ⇒ ⇐ |
 
@@ -135,6 +135,7 @@ Ctrl 系(`Ctrl+Z` undo など)はモード中もそのまま使えます。
 | コマンド | 動作 |
 |---|---|
 | `\lr(]` `\lr{|}` `\lr\langle||\rangle` など | **見た目の順**のデリミタ指定(左・middle…・右)。`.` はヌル(片側なし、`╎`/`┆` で表示) |
+| `\ceil` `\floor` `\norm` | ⌈ ⌉ / ⌊ ⌋ / ‖ ‖(ノルム直下のノルム入れ子は非対応) |
 | `\mid` | 現在のデリミタ内に │ 区切りを追加(braket・集合の内包表記) |
 
 ### 演算子・関数
@@ -142,7 +143,7 @@ Ctrl 系(`Ctrl+Z` undo など)はモード中もそのまま使えます。
 | コマンド | 動作 |
 |---|---|
 | `\sum` `\int` `\prod` … | 大型演算子の原子(↑/↓ でバンドに昇格して極限へ) |
-| `\lim` `\max` `\min` `\sup` `\inf` `\gcd` … | ┄バンド┄ を作り下極限へ |
+| `\lim` `\liminf` `\limsup` `\max` `\min` `\sup` `\inf` `\det` `\gcd` `\Pr` `\plim` `\injlim` `\projlim` | ┄バンド┄ を作り下極限へ |
 | `\argmax` `\argmin` | `┄arg┄max┄` 形の複数 piece バンド |
 | `\op` | **名前ボックス**を開く: 英数で名前を入力し `Enter`/`Tab`/`Space` で確定 → 立体ラン(=\mathrm、辞書語は \sin 等の関数に) |
 | `\op*`(別名 `\limits`) | 同上、確定で ┄バンド┄ になり下極限へ。**スペースは piece 区切り**(`ess sup` → `┄ess┄sup┄`)。`Esc` 取消、名前以外のキーは確定してから通常動作 |
@@ -151,8 +152,8 @@ Ctrl 系(`Ctrl+Z` undo など)はモード中もそのまま使えます。
 
 | コマンド | 動作 |
 |---|---|
-| `\rm<chars>` | 立体(\mathrm)。1文字なら `'d'` の引用形 |
-| `\text<chars>` | テキスト(\text、`"…"` 表示) |
+| `\rm` | **名前ボックス**: 英数と `.` で入力し確定 → 立体ラン(`i.i.d.` 可、辞書語は関数に)。`\rm<chars>` の直結形も可 |
+| `\text` | **ボックス**: 自由なテキストを入力し確定 → `"…"`(\text)。`\text<chars>` の直結形も可 |
 | `\space` | 意味のある空白 ␣(LaTeX `\ `) |
 | `\hat` `\vec` `\bar` `\dot` `\ddot` `\tilde` `\check` `\breve` `\ring` `\underline` | 直前の1文字にアクセント(続けて実行で重ね掛け) |
 

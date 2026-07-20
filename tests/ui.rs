@@ -232,6 +232,26 @@ fn grid_edit_mode() {
 }
 
 #[test]
+fn rm_and_text_boxes() {
+    // \rm opens the box; dots are part of the name (i.i.d.).
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\rm i.i.d. Enter x");
+    assert_eq!(latex(&ed), "\\mathrm{i.i.d.}x");
+    // A dictionary word still falls back to its Func.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\rm sin Enter");
+    assert_eq!(latex(&ed), "\\sin ");
+    // \text takes free content incl. spaces, committed as "…".
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\text if Space x Enter");
+    assert_eq!(latex(&ed), "\\text{if x}");
+    // Esc cancels either box.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\rm foo Esc \text bar Esc");
+    assert!(ed.root.is_empty());
+}
+
+#[test]
 fn undo_redo() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"a+b \frac 1 Down 2 Tab");

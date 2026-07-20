@@ -78,7 +78,7 @@ TUI は毎編集後に AA→AST の逆変換を自動検査し、ラウンドト
 
 - 構造: `\frac` `\sqrt` `\cbrt`(∛)`\qdrt`(∜) `\matrix`(2×2。`\matrix34` で 3行×4列、
   各 *matrix/cases/array 共通。Enter/\addcol などで後から増減も可)
-- デリミタ: `\pmatrix` `\Bmatrix` `\vmatrix` `\array`(裸グリッド)`\cases`
+- デリミタ: `\pmatrix` `\Bmatrix` `\vmatrix` `\array`(裸グリッド)`\cases` `\rcases`、`\ceil` `\floor` `\norm`
   `\abs` `\langle` `\braket`(⟨·|·⟩)`\set`({·|·})`\mid`(セグメント分割)
   `\lr<spec>`(=`\delim`、Typst 風・**視覚順**: 例 `\lr(]`、`\lr{|}` = {·|·}、
   `\lr\langle||\rangle` = ⟨·|·|·⟩。1文字スペック `()[]{}<>|.` と
@@ -157,6 +157,6 @@ src/main.rs     ratatui TUI + CLI
 
 ## ロードマップ
 
-docs/design.md 参照。直近: undo/redo、可変幅アクセント
+docs/design.md 参照。直近: 可変幅アクセント(var* 系の lim もここ)、LaTeX パーサ
 (`\overline{x+y}`)、BigOp 基底の自由編集(現状 `\argmax` 等は定型)、
 LaTeX パーサ(逆方向)、MathML 出力。

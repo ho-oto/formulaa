@@ -453,16 +453,33 @@ type CursorRef<'a> = (&'a [(usize, Field)], usize);
 /// 'single-quoted'; \text always "double-quotes". Interior spaces are ␣
 /// so quotes never contain structurally meaningful blank columns.
 fn text_block(t: &str, math: bool, glue: bool) -> Block {
+    // A dotted run (i.i.d.) is bare exactly when the run lexer reads it
+    // back as one token: starts with a letter, every interior dot is
+    // followed by a letter, and a trailing dot only with an interior
+    // dot before it.
+    let chars: Vec<char> = t.chars().collect();
+    let dotted_ok = chars.first().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.iter().all(|&c| c.is_ascii_alphabetic() || c == '.')
+        && chars.iter().enumerate().all(|(i, &c)| {
+            c != '.'
+                || match chars.get(i + 1) {
+                    Some(n) => n.is_ascii_alphabetic(),
+                    None => chars[..i].contains(&'.'),
+                }
+        });
     let bare = math
-        && t.chars().all(|c| c.is_ascii_alphabetic())
-        && !crate::symbols::is_func_name(t)
-        && (t.chars().count() >= 2 || (t.chars().count() == 1 && glue));
+        && dotted_ok
+        && (t.contains('.') || !crate::symbols::is_func_name(t))
+        && (chars.len() >= 2 || (chars.len() == 1 && glue));
     if bare {
         Block::from_chars(t.chars().collect())
     } else {
+        // "…" quotes delimit their content themselves, so \text keeps
+        // real spaces; '…' scans stop at a space, so \mathrm interior
+        // spaces stay visible ␣.
         let q = if math { '\'' } else { '"' };
         let mut chars = vec![q];
-        chars.extend(t.chars().map(|c| if c == ' ' { '␣' } else { c }));
+        chars.extend(t.chars().map(|c| if math && c == ' ' { '␣' } else { c }));
         chars.push(q);
         Block::from_chars(chars)
     }
@@ -517,6 +534,10 @@ pub fn render_row(
         script: bool,
         script_2d: bool,
         cancel: bool,
+        /// A bare dotted roman run (i.i.d.): its dots would absorb an
+        /// adjacent letter run or period into one token, so the fuse
+        /// rules keep a space after it.
+        dot_run: bool,
         /// Zero-width display annotation: invisible to the fuse rules.
         marker: bool,
     }
@@ -531,6 +552,7 @@ pub fn render_row(
             None => None,
         };
         let info = Info {
+            dot_run: matches!(node, Node::Text { t, math: true } if t.contains('.')),
             marker: is_marker_node(node),
             script: matches!(node, Node::Sup { .. } | Node::Sub { .. }),
             script_2d: match node {
@@ -618,11 +640,17 @@ pub fn render_row(
                             // Adjacent upright letter runs (Func / bare
                             // Text) would fuse into one token.
                             || (a.is_ascii_alphabetic() && b.is_ascii_alphabetic())
+                            // A period directly before a letter would be
+                            // absorbed into the run (exp.i.i.d.); digits
+                            // keep decimals tight (3.14).
+                            || (a == '.' && b.is_ascii_alphabetic())
                             // A prime next to quotable content (letters,
-                            // digits, ␣, another prime) could read as a
-                            // 'mathrm quote'.
-                            || (a == '\'' && (b == '\'' || b.is_ascii_alphanumeric() || b == '␣'))
-                            || (b == '\'' && (a == '\'' || a.is_ascii_alphanumeric() || a == '␣'))
+                            // digits, ␣, dots, another prime) could read
+                            // as a 'mathrm quote'.
+                            || (a == '\''
+                                && (b == '\'' || b.is_ascii_alphanumeric() || b == '␣' || b == '.'))
+                            || (b == '\''
+                                && (a == '\'' || a.is_ascii_alphanumeric() || a == '␣' || a == '.'))
                             || (a == b && (a == FRAC_BAR || a == DOUBLE_BODY))
                             || (a == FRAC_BAR && (b == '>' || b == '→'))
                             || (a == DOUBLE_BODY && (b == '>' || b == '⇒'))
@@ -632,7 +660,13 @@ pub fn render_row(
                     _ => false,
                 };
                 let ragged_cancel = p.cancel && last_edge == Some(' ');
-                fuse || ragged_cancel
+                // A dotted run would lexically absorb a following letter
+                // or period (i.i.d. + ab → i.i.d.ab).
+                let dotted = p.dot_run
+                    && block
+                        .baseline_edge(true)
+                        .is_some_and(|b| b.is_ascii_alphabetic() || b == '.');
+                fuse || ragged_cancel || dotted
             }
             _ => false,
         };
@@ -1006,6 +1040,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             if mids.is_empty()
                 && *left != '⟨'
                 && *right != '⟩'
+                && *left != '‖'
                 && let [seg] = &segs[..]
                 // Display markers are transparent: a labeled sole-Array
                 // segment still fuses (the label overlays a cell).
@@ -1471,6 +1506,41 @@ fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
                     '⎸'
                 } else {
                     '⎹'
+                }
+            }
+            // Norm: ║ box-drawing columns on both sides (the strokes
+            // connect across rows; sides resolve by per-row parity, so
+            // direct norm-in-norm is unsupported). One line uses ‖.
+            '‖' => '║',
+            // Ceil/floor: the bracket pieces with one corner missing —
+            // ⎡+⎢ without the foot, ⎢+⎣ without the head. The corner
+            // set present in a column decides the family.
+            '⌈' => {
+                if r == 0 {
+                    '⎡'
+                } else {
+                    '⎢'
+                }
+            }
+            '⌉' => {
+                if r == 0 {
+                    '⎤'
+                } else {
+                    '⎥'
+                }
+            }
+            '⌊' => {
+                if r == h - 1 {
+                    '⎣'
+                } else {
+                    '⎢'
+                }
+            }
+            '⌋' => {
+                if r == h - 1 {
+                    '⎦'
+                } else {
+                    '⎥'
                 }
             }
             _ => {

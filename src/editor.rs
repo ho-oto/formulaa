@@ -19,9 +19,9 @@ pub struct Editor {
     pub col: usize,
     /// Some(text) while the `\command` minibuffer is open.
     pub minibuffer: Option<String>,
-    /// Some((star, name)) while the `\op` in-place operator-name box is
-    /// open (star = `\op*`, a big operator taking under-limits).
-    pub op_entry: Option<(bool, String)>,
+    /// Some((kind, content)) while an in-place name box (\op \op* \rm
+    /// \text) is open.
+    pub op_entry: Option<(BoxKind, String)>,
     /// Grid edit mode (^O inside a matrix): arrows move cells, r/R c/C
     /// add rows/columns, d/D delete them.
     pub grid_mode: bool,
@@ -101,6 +101,19 @@ const JUMP_MAX_RANKS: usize = 0x400;
 /// Free-cursor mode (^F): a display-cell cursor moved with the arrow
 /// keys; Enter snaps to the nearest editable position. Both the free
 /// cell and the snap preview are shown.
+/// What the in-place name box (`\op` family) commits to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoxKind {
+    /// \op: upright words (Func / bare \mathrm), joined by ␣.
+    Op,
+    /// \op* / \limits: an operator band, words as its pieces.
+    OpStar,
+    /// \rm: one \mathrm run (dictionary word falls back to its Func).
+    Rm,
+    /// \text: one "double-quoted" text run.
+    Text,
+}
+
 #[derive(Clone, Debug)]
 pub struct FreeCursor {
     /// Current display cell (row, col).
@@ -220,6 +233,7 @@ fn grid_command(cmd: &str) -> Option<(GridDelims, usize, usize)> {
         ("Bmatrix", Some(('{', '}'))),
         ("vmatrix", Some(('|', '|'))),
         ("cases", Some(('{', '.'))),
+        ("rcases", Some(('.', '}'))),
         ("array", None),
     ];
     for &(name, delims) in GRIDS {
@@ -1837,9 +1851,9 @@ impl Editor {
     }
 
     /// Open the `\op` operator-name box at the cursor.
-    pub fn op_start(&mut self, star: bool) {
+    pub fn op_start(&mut self, kind: BoxKind) {
         self.select_anchor = None;
-        self.op_entry = Some((star, String::new()));
+        self.op_entry = Some((kind, String::new()));
     }
 
     pub fn op_type(&mut self, c: char) {
@@ -1862,15 +1876,11 @@ impl Editor {
     /// ┄band┄ with the words as its pieces (┄arg┄max┄) and enters the
     /// lower limit; plain `\op` inserts the words joined by ␣.
     pub fn op_commit(&mut self) {
-        let Some((star, text)) = self.op_entry.take() else {
+        let Some((kind, text)) = self.op_entry.take() else {
             return;
         };
-        let words: Vec<&str> = text.split_whitespace().collect();
-        if words.is_empty() {
-            return;
-        }
         let piece = |w: &str| {
-            if crate::symbols::is_func_name(w) {
+            if !w.contains('.') && crate::symbols::is_func_name(w) {
                 Node::Func(w.to_string())
             } else {
                 Node::Text {
@@ -1879,25 +1889,53 @@ impl Editor {
                 }
             }
         };
-        if star {
-            let base: Vec<Node> = words.iter().map(|w| piece(w)).collect();
-            self.insert_and_enter(Node::BigOp {
-                base,
-                lower: vec![],
-                upper: vec![],
-            });
-        } else {
-            let mut nodes: Vec<Node> = Vec::new();
-            for (i, w) in words.iter().enumerate() {
-                if i > 0 {
-                    nodes.push(Node::Sym('␣'));
+        match kind {
+            BoxKind::Rm => {
+                let t = text.trim();
+                if !t.is_empty() {
+                    let node = piece(t);
+                    let col = self.col;
+                    self.cur_row_mut().insert(col, node);
+                    self.col += 1;
                 }
-                nodes.push(piece(w));
             }
-            let col = self.col;
-            let n = nodes.len();
-            self.cur_row_mut().splice(col..col, nodes);
-            self.col += n;
+            BoxKind::Text => {
+                if !text.is_empty() {
+                    let node = Node::Text {
+                        t: text,
+                        math: false,
+                    };
+                    let col = self.col;
+                    self.cur_row_mut().insert(col, node);
+                    self.col += 1;
+                }
+            }
+            BoxKind::Op | BoxKind::OpStar => {
+                let words: Vec<&str> = text.split_whitespace().collect();
+                if words.is_empty() {
+                    return;
+                }
+                if kind == BoxKind::OpStar {
+                    let base: Vec<Node> = words.iter().map(|w| piece(w)).collect();
+                    self.insert_and_enter(Node::BigOp {
+                        base,
+                        lower: vec![],
+                        upper: vec![],
+                    });
+                } else {
+                    let mut nodes: Vec<Node> = Vec::new();
+                    for (i, w) in words.iter().enumerate() {
+                        if i > 0 {
+                            nodes.push(Node::Sym('␣'));
+                        }
+                        nodes.push(piece(w));
+                    }
+                    let col = self.col;
+                    let n = nodes.len();
+                    self.cur_row_mut().splice(col..col, nodes);
+                    self.col += n;
+                }
+            }
         }
     }
 
@@ -1949,6 +1987,9 @@ impl Editor {
                 index: 4,
             }),
             "cancel" => self.insert_and_enter(Node::Cancel { arg: vec![] }),
+            "ceil" => self.insert_delim('⌈', '⌉', vec![]),
+            "floor" => self.insert_delim('⌊', '⌋', vec![]),
+            "norm" | "Vert" => self.insert_delim('‖', '‖', vec![]),
             // Grid commands take an optional RxC digit suffix:
             // \matrix (2×2), \matrix34 (3 rows × 4 cols), \cases41 …
             _ if grid_command(cmd).is_some() => {
@@ -2067,12 +2108,17 @@ impl Editor {
                     }
                 } else if matches!(
                     cmd,
-                    "op" | "op*" | "operatorname" | "operatorname*" | "limits"
+                    "op" | "op*" | "operatorname" | "operatorname*" | "limits" | "rm" | "text"
                 ) {
-                    // \op / \op* (alias \limits) open the in-place name
-                    // box (see op_commit for what the words become). The
-                    // old \op<name> attached-argument style is gone.
-                    self.op_start(cmd != "op" && cmd != "operatorname");
+                    // Bare \op / \op* (alias \limits) / \rm / \text open
+                    // the in-place box (see op_commit). The old attached
+                    // \op<name> style is gone; \rm<x> / \text<x> remain.
+                    self.op_start(match cmd {
+                        "op" | "operatorname" => BoxKind::Op,
+                        "rm" => BoxKind::Rm,
+                        "text" => BoxKind::Text,
+                        _ => BoxKind::OpStar,
+                    });
                 } else if let Some((t, math)) = cmd
                     .strip_prefix("rm")
                     .map(|t| (t, true))
@@ -2085,7 +2131,7 @@ impl Editor {
                         // ("…") reads any glyph except the quotes.
                         !t.is_empty()
                             && if *math {
-                                t.chars().all(|c| c.is_ascii_alphanumeric())
+                                t.chars().all(|c| c.is_ascii_alphanumeric() || c == '.')
                             } else {
                                 !t.contains('"') && !t.contains('\'')
                             }
