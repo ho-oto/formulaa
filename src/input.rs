@@ -5,7 +5,7 @@
 //! drift apart.
 
 use crate::ast::Node;
-use crate::editor::Editor;
+use crate::editor::{Editor, JUMP_LABELS};
 
 /// One keystroke, host-neutral. `Char` carries printable input
 /// (including ' ', '\\', '^' …); everything else is a named key.
@@ -68,13 +68,13 @@ impl Editor {
     /// the key (Some) or lets it fall through (None). Adding a mode =
     /// adding one handler here.
     fn dispatch(&mut self, key: Key, shift: bool, ctrl: bool) -> Effect {
+        if let Some(e) = self.free_keys(key, shift, ctrl) {
+            return e;
+        }
         if let Some(e) = self.jump_keys(key, ctrl) {
             return e;
         }
         if let Some(e) = self.block_keys(key, ctrl) {
-            return e;
-        }
-        if let Some(e) = self.free_keys(key) {
             return e;
         }
         if let Some(e) = self.minibuffer_keys(key) {
@@ -123,18 +123,28 @@ impl Editor {
     }
 
     /// Free-cursor mode: arrows move the cell cursor, Enter snaps.
-    fn free_keys(&mut self, key: Key) -> Option<Effect> {
-        self.free.is_some().then(|| {
-            match key {
-                Key::Left => self.free_move(-1, 0),
-                Key::Right => self.free_move(1, 0),
-                Key::Up => self.free_move(0, -1),
-                Key::Down => self.free_move(0, 1),
-                Key::Enter => self.free_confirm(),
-                _ => self.free_cancel(),
-            }
-            Effect::None
-        })
+    /// ^G toggles jump markers; while they are up, a label letter or
+    /// the arrows+Enter jump there and free motion continues.
+    fn free_keys(&mut self, key: Key, _shift: bool, ctrl: bool) -> Option<Effect> {
+        self.free.as_ref()?;
+        let markers = self.jump.is_some();
+        match key {
+            Key::Char('g') if ctrl => self.free_toggle_markers(),
+            Key::Char(c) if markers && !ctrl && JUMP_LABELS.contains(c) => self.free_jump(c),
+            Key::Left if markers => self.jump_select(-1, 0),
+            Key::Right if markers => self.jump_select(1, 0),
+            Key::Up if markers => self.jump_select(0, -1),
+            Key::Down if markers => self.jump_select(0, 1),
+            Key::Enter if markers => self.free_goto_selected(),
+            Key::Esc if markers => self.free_markers_off(),
+            Key::Left => self.free_move(-1, 0),
+            Key::Right => self.free_move(1, 0),
+            Key::Up => self.free_move(0, -1),
+            Key::Down => self.free_move(0, 1),
+            Key::Enter => self.free_confirm(),
+            _ => self.free_cancel(),
+        }
+        Some(Effect::None)
     }
 
     /// Minibuffer (`\command`) mode captures most keys.
@@ -200,11 +210,13 @@ impl Editor {
                 Key::Char('g') => self.start_jump(),
                 Key::Char('b') => self.start_block_select(),
                 Key::Char('t') => self.italic = !self.italic,
-                Key::Char('o') => self.structure = !self.structure,
                 Key::Char('c') => self.copy_selection(),
                 Key::Char('x') => self.cut_selection(),
                 Key::Char('v') => self.paste(),
-                Key::Char('e') => self.grid_mode_toggle(),
+                // Emacs pairing: ^A start, ^E end of the formula.
+                Key::Char('e') => self.document_end(),
+                // ^O: grid edit mode (inside a matrix).
+                Key::Char('o') => self.grid_mode_toggle(),
                 _ => {}
             }
             return Effect::None;
@@ -274,14 +286,12 @@ impl Editor {
                 self.select_anchor = None;
                 self.vertical(false);
             }
-            // Esc peels state: selection, then the structure view, and
-            // with nothing left to cancel it quits (terminals often
-            // swallow ^Q, so Esc is the reliable way out).
+            // Esc peels the selection first; with nothing left to
+            // cancel it quits (terminals often swallow ^Q, so Esc is
+            // the reliable way out).
             Key::Esc => {
                 if self.select_anchor.is_some() {
                     self.select_anchor = None;
-                } else if self.structure {
-                    self.structure = false;
                 } else {
                     return Effect::Quit;
                 }

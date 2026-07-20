@@ -15,11 +15,10 @@ use mascii::editor::{
     BLK_CLOSE, Editor, JUMP_CHAR_BASE, JUMP_LABELS, JUMP_RANK_BASE, SEL_CLOSE, SEL_OPEN,
 };
 use mascii::input::{Effect, Key};
-use mascii::parse::RegionSpan;
 use mascii::render::{RenderCtx, render_root};
 use mascii::{ast, latex, parse, typst};
 
-const HELP: &str = "\\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ^A start  ⇧←→/⇧↑ select  ^B select block  ^F free move  ^C/^X/^V copy/cut/paste  ^Z/^R undo/redo  ^G jump  ^O structure  ^T italic  ^Y copy AA  ^S save  Esc/^Q quit";
+const HELP: &str = "\\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ^A start  ⇧←→/⇧↑ select  ^B select block  ^F free move  ^C/^X/^V copy/cut/paste  ^Z/^R undo/redo  ^A/^E start/end  ^O grid edit  ^G jump  ^T italic  ^Y copy AA  ^S save  Esc/^Q quit";
 
 /// Context-sensitive last line: generic keys normally, the relevant
 /// commands when the cursor is inside a grid cell or a delimiter.
@@ -31,8 +30,15 @@ fn help_line(ed: &Editor) -> &'static str {
     if ed.op_entry.is_some() {
         return "op name: letters/digits + Space (word pieces)  Enter/Tab commit  Esc cancel";
     }
+    if ed.free.is_some() {
+        return if ed.jump.is_some() {
+            "free markers: label letter or ←→↑↓ + Enter jumps (then keep flying)  Esc/^G markers off"
+        } else {
+            "free move: ←→↑↓ cells  ^G markers  Enter snap  Esc cancel"
+        };
+    }
     if ed.grid_mode {
-        return "grid mode: ←→↑↓ move cells  r/R add row below/above  c/C add col right/left  d/D delete row/col  Esc/^E exit";
+        return "grid mode: ←→↑↓ move cells  r/R add row below/above  c/C add col right/left  d/D delete row/col  Esc/^O exit";
     }
     match ed.path.last() {
         Some((_, Field::Cell(_))) => {
@@ -127,7 +133,7 @@ fn main() -> std::io::Result<()> {
                 }
             }
             Ok(Event::Mouse(m)) if m.kind == MouseEventKind::Down(MouseButton::Left) => {
-                if !ed.structure && m.column >= origin.0 && m.row >= origin.1 {
+                if m.column >= origin.0 && m.row >= origin.1 {
                     ed.click((m.column - origin.0) as usize, (m.row - origin.1) as usize);
                 }
             }
@@ -296,10 +302,6 @@ fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers, save_path: &st
             ed.italic = !ed.italic;
             return false;
         }
-        KeyCode::F(5) => {
-            ed.structure = !ed.structure;
-            return false;
-        }
         KeyCode::Char(c) => Key::Char(c),
         KeyCode::Left => Key::Left,
         KeyCode::Right => Key::Right,
@@ -390,19 +392,6 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
     f.render_widget(border, area);
 
     let ctx = RenderCtx { italic: ed.italic };
-    // Structure view: cursor-free canonical render, re-parsed to recover
-    // every block's rectangle, painted by nesting depth.
-    if ed.structure {
-        let block = render_root(&ed.root, None, &RenderCtx::canonical());
-        let struck: std::collections::HashSet<(usize, usize)> =
-            block.cancel.iter().copied().collect();
-        let regions = mascii::parse::parse_with_regions(&block.to_text())
-            .map(|(_, r)| r)
-            .unwrap_or_default();
-        draw_structure(f, inner, &block.lines, &struck, &regions);
-        return (inner.x, inner.y);
-    }
-
     let (root, cursor) = ed.decorated();
     let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
     let block = render_root(&root, cursor_ref, &ctx);
@@ -452,7 +441,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
     for (y, (l, bgrow)) in lines.iter().zip(&bg).enumerate() {
         let ccol = cursor_cell.and_then(|(cy, cx)| (cy == y).then_some(cx));
         let mut spans = vec![Span::raw(pad.clone())];
-        spans.extend(decorate_line(l, y, &struck, bgrow, ccol));
+        spans.extend(decorate_line(l, y, &struck, bgrow, ccol, ed.free.is_some()));
         text.push(Line::from(spans));
     }
     f.render_widget(Paragraph::new(text), inner);
@@ -467,6 +456,8 @@ const UNLABELED_BG: Color = Color::Indexed(238);
 const SELECTED_BG: Color = Color::Indexed(172);
 /// In-place minibuffer overlay (`\cmd` typed at the cursor).
 const MINIBUF_BG: Color = Color::Indexed(94);
+/// The free cursor cell itself (^F): tinted so the mode is obvious.
+const FREE_CURSOR_BG: Color = Color::Indexed(127);
 /// The ^F snap-preview cell (the free cursor uses the caret style).
 const FREE_BG: Color = Color::Indexed(24);
 
@@ -474,7 +465,7 @@ const FREE_BG: Color = Color::Indexed(24);
 /// colored boxes, overlaid labels and the caret cell. Marks carry
 /// (row, col, char): jump/block labels overlay the glyph at their
 /// position; selection/block mark pairs paint a background box (the
-/// selection in SELECTION_BG, ^B blocks in the structure-view palette
+/// selection in SELECTION_BG, ^B blocks in the depth palette
 /// by nesting depth). Nothing is inserted or removed, so the geometry
 /// always equals the undecorated render.
 #[allow(clippy::type_complexity)]
@@ -652,9 +643,20 @@ fn decorate_line(
     struck: &std::collections::HashSet<(usize, usize)>,
     bg: &[Option<Color>],
     cursor: Option<usize>,
+    free_caret: bool,
 ) -> Vec<Span<'static>> {
-    let cursor_style =
-        Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD | Modifier::SLOW_BLINK);
+    // The ordinary caret is terminal-style reverse video; the free
+    // cursor is a solid colored block instead (reverse video would swap
+    // the tint onto the glyph, which reads as "the character changed
+    // color", not "the cursor changed color").
+    let cursor_style = if free_caret {
+        Style::default()
+            .fg(Color::White)
+            .bg(FREE_CURSOR_BG)
+            .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK)
+    } else {
+        Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD | Modifier::SLOW_BLINK)
+    };
     let label_style = Style::default()
         .fg(Color::Black)
         .bg(Color::Yellow)
@@ -685,8 +687,8 @@ fn decorate_line(
             // the insertion point.
             flush(&mut buf, buf_bg, &mut spans);
             let style = match cell_bg {
-                Some(color) => cursor_style.bg(color),
-                None => cursor_style,
+                Some(color) if !free_caret => cursor_style.bg(color),
+                _ => cursor_style,
             };
             spans.push(Span::styled(cell, style));
         } else if c == '␣' {
@@ -722,7 +724,7 @@ fn decorate_line(
     spans
 }
 
-/// Background palette for the structure view, cycling with depth.
+/// Background palette for ^B block boxes, cycling with depth.
 const DEPTH_BG: [Color; 5] = [
     Color::Indexed(17), // dark blue
     Color::Indexed(22), // dark green
@@ -730,68 +732,6 @@ const DEPTH_BG: [Color; 5] = [
     Color::Indexed(23), // teal
     Color::Indexed(58), // olive
 ];
-
-fn draw_structure(
-    f: &mut Frame,
-    inner: Rect,
-    lines: &[Vec<char>],
-    struck: &std::collections::HashSet<(usize, usize)>,
-    regions: &[RegionSpan],
-) {
-    let height = lines.len();
-    let width = lines.iter().map(|l| l.len()).max().unwrap_or(0);
-    // Deepest region wins per cell.
-    let mut depth = vec![vec![0usize; width]; height];
-    let mut sorted: Vec<&RegionSpan> = regions.iter().collect();
-    sorted.sort_by_key(|(_, d)| *d);
-    for ((t, b, l, r), d) in sorted.into_iter().copied() {
-        for row in depth.iter_mut().take(b.min(height - 1) + 1).skip(t) {
-            for cell in row.iter_mut().take(r.min(width - 1) + 1).skip(l) {
-                *cell = d;
-            }
-        }
-    }
-
-    let left = inner.width.saturating_sub(width as u16) / 2;
-    let top = inner.height.saturating_sub(height as u16) / 2;
-    let pad = " ".repeat(left as usize);
-    let mut text: Vec<Line> = Vec::with_capacity(top as usize + height);
-    for _ in 0..top {
-        text.push(Line::raw(""));
-    }
-    for (y, l) in lines.iter().enumerate() {
-        let mut spans = vec![Span::raw(pad.clone())];
-        let mut buf = String::new();
-        let mut cur = 0usize;
-        for (x, &c) in l.iter().enumerate() {
-            let d = depth[y][x];
-            if d != cur && !buf.is_empty() {
-                spans.push(styled_depth(std::mem::take(&mut buf), cur));
-            }
-            cur = d;
-            buf.push(c);
-            if struck.contains(&(y, x)) {
-                buf.push('\u{338}');
-            }
-        }
-        if !buf.is_empty() {
-            spans.push(styled_depth(buf, cur));
-        }
-        text.push(Line::from(spans));
-    }
-    f.render_widget(Paragraph::new(text), inner);
-}
-
-fn styled_depth(s: String, depth: usize) -> Span<'static> {
-    if depth == 0 {
-        Span::raw(s)
-    } else {
-        Span::styled(
-            s,
-            Style::default().bg(DEPTH_BG[(depth - 1) % DEPTH_BG.len()]),
-        )
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -877,7 +817,7 @@ mod tests {
                 None,
             );
             let (y, x) = cursor_cell.expect("caret visible");
-            let spans = decorate_line(&lines[y], y, &struck, &bg[y], Some(x));
+            let spans = decorate_line(&lines[y], y, &struck, &bg[y], Some(x), false);
             let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
             // Every struck glyph is still there, followed by its strike.
             for &(r, c) in &block.cancel {

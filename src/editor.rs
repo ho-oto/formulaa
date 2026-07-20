@@ -22,7 +22,7 @@ pub struct Editor {
     /// Some((star, name)) while the `\op` in-place operator-name box is
     /// open (star = `\op*`, a big operator taking under-limits).
     pub op_entry: Option<(bool, String)>,
-    /// Grid edit mode (^E inside a matrix): arrows move cells, r/R c/C
+    /// Grid edit mode (^O inside a matrix): arrows move cells, r/R c/C
     /// add rows/columns, d/D delete them.
     pub grid_mode: bool,
     /// Undo/redo stacks of snapshots. Pushed by `input` whenever a key
@@ -50,7 +50,6 @@ pub struct Editor {
     /// twice does not shift the layout).
     pub ghost: Vec<Vec<(usize, Field)>>,
     /// Structure view: paint every block's background by nesting depth (Ctrl+O).
-    pub structure: bool,
     /// Selection anchor column in the current row (Shift+←/→). The selected
     /// node range is between the anchor and the cursor column.
     pub select_anchor: Option<usize>,
@@ -259,7 +258,6 @@ impl Editor {
             free: None,
             block: None,
             ghost: Vec::new(),
-            structure: false,
             select_anchor: None,
             select_path: Vec::new(),
             clip: Vec::new(),
@@ -418,7 +416,7 @@ impl Editor {
             snap: start.0,
             snap_at: start.1,
         });
-        self.message = "free move: arrows, Enter snaps (Esc cancels)".into();
+        self.message.clear();
     }
 
     /// The cursor's own display cell (in the display frame).
@@ -513,7 +511,11 @@ impl Editor {
         at.0 = at.0.min(h - 1);
         at.1 = at.1.min(w);
         if let Some((snap, snap_at)) = self.nearest_position(at.1, at.0) {
-            self.free = Some(FreeCursor { at, snap, snap_at });
+            if let Some(f) = &mut self.free {
+                f.at = at;
+                f.snap = snap;
+                f.snap_at = snap_at;
+            }
         } else if let Some(f) = &mut self.free {
             f.at = at;
         }
@@ -521,6 +523,9 @@ impl Editor {
 
     /// Enter: land on the snap target.
     pub fn free_confirm(&mut self) {
+        if let Some(t) = self.jump.take() {
+            self.keep_ghosts(&t);
+        }
         if let Some(f) = self.free.take() {
             self.path = f.snap.0;
             self.col = f.snap.1;
@@ -530,8 +535,80 @@ impl Editor {
 
     pub fn free_cancel(&mut self) {
         self.free = None;
+        self.jump = None;
+        self.select_anchor = None;
         self.ghost.clear();
         self.message.clear();
+    }
+
+    /// ^G in free mode: toggle the jump markers.
+    pub fn free_toggle_markers(&mut self) {
+        if self.jump.is_some() {
+            self.free_markers_off();
+        } else {
+            self.start_jump();
+        }
+    }
+
+    /// Drop the markers (Esc / toggle), keeping ghosts and the free
+    /// cursor anchored to the stable layout.
+    pub fn free_markers_off(&mut self) {
+        if let Some(t) = self.jump.take() {
+            self.keep_ghosts(&t);
+        }
+        self.free_reanchor();
+        self.message.clear();
+    }
+
+    /// A jump label pressed while markers are up: move there and drop
+    /// back to plain free motion.
+    pub fn free_jump(&mut self, label: char) {
+        let Some(idx) = JUMP_LABELS.chars().position(|c| c == label) else {
+            return;
+        };
+        self.free_goto_rank(idx);
+    }
+
+    /// Enter while markers are up: land on the arrow-selected marker,
+    /// back to free motion from there.
+    pub fn free_goto_selected(&mut self) {
+        self.free_goto_rank(self.jump_selected);
+    }
+
+    fn free_goto_rank(&mut self, rank: usize) {
+        let Some(targets) = &self.jump else { return };
+        let Some((_, (p, c))) = targets.iter().find(|(r, _)| *r == rank) else {
+            return;
+        };
+        let (p, c) = (p.clone(), *c);
+        if let Some(t) = self.jump.take() {
+            self.keep_ghosts(&t);
+        }
+        self.path = p;
+        self.col = c;
+        self.free_reanchor();
+        self.message.clear();
+    }
+
+    /// Re-anchor the free cursor onto the cursor's current display cell.
+    fn free_reanchor(&mut self) {
+        if self.free.is_none() {
+            return;
+        }
+        if let Some((pos, xy)) = self.nearest_position_of_cursor()
+            && let Some(f) = &mut self.free
+        {
+            f.at = xy;
+            f.snap = pos;
+            f.snap_at = xy;
+        }
+    }
+
+    /// Ctrl+E: jump to the very end of the formula.
+    pub fn document_end(&mut self) {
+        self.select_anchor = None;
+        self.path.clear();
+        self.col = self.root.len();
     }
 
     /// Ctrl+A: jump to the very start of the whole formula.
@@ -1609,11 +1686,30 @@ impl Editor {
         if let Some(targets) = &self.jump {
             let mut path = self.path.clone();
             let mut col = self.col;
+            // A live selection is tracked through the marker insertions
+            // like the cursor, then painted with the same SEL markers
+            // as the normal branch.
+            let mut sel = self
+                .selection()
+                .map(|(lo, hi)| ((self.path.clone(), lo), (self.path.clone(), hi)));
             // Reverse document order keeps not-yet-inserted positions valid.
             for (rank, (p, c)) in targets.iter().rev() {
                 let mark = char::from_u32(JUMP_RANK_BASE + *rank as u32).unwrap();
                 row_at_mut(&mut root, p).insert(*c, Node::Sym(mark));
                 bump(&mut path, &mut col, p, *c);
+                if let Some(((lp, lc), (hp, hc))) = &mut sel {
+                    bump(lp, lc, p, *c);
+                    bump(hp, hc, p, *c);
+                }
+            }
+            if let Some(((lp, lo), (_, hi))) = sel {
+                let row = row_at_mut(&mut root, &lp);
+                row.insert(hi, Node::Sym(SEL_CLOSE));
+                row.insert(lo, Node::Sym(SEL_OPEN));
+                // The cursor may sit inside this row (or deeper): thread
+                // it through both insertions like any other marker.
+                bump(&mut path, &mut col, &lp, hi);
+                bump(&mut path, &mut col, &lp, lo);
             }
             return (root, Some((path, col)));
         }
@@ -1685,7 +1781,7 @@ impl Editor {
             self.grid_mode = true;
             self.select_anchor = None;
         } else {
-            self.message = "^E works inside a matrix/array".into();
+            self.message = "^O works inside a matrix/array".into();
         }
     }
 

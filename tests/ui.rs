@@ -121,6 +121,50 @@ fn esc_cancels_modes_before_quitting() {
 }
 
 #[test]
+fn ctrl_e_jumps_to_the_end_outside_grids() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a+b C-a");
+    assert_eq!((ed.path.len(), ed.col), (0, 0));
+    type_script(&mut ed, "C-e");
+    assert_eq!((ed.path.len(), ed.col), (0, 3), "formula end");
+    // ^E is the end jump even inside a grid cell (grid mode is ^O).
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\matrix x C-o");
+    assert!(ed.grid_mode);
+}
+
+#[test]
+fn free_mode_marker_flow() {
+    // ^F starts plain free motion (no markers). ^G inside brings up the
+    // jump markers; a label letter or arrows+Enter jumps there and
+    // returns to plain free motion.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a+ \frac b Down c Tab +z C-f");
+    assert!(
+        ed.free.is_some() && ed.jump.is_none(),
+        "plain free at first"
+    );
+    type_script(&mut ed, "C-g");
+    assert!(ed.jump.is_some(), "markers on demand");
+    type_script(&mut ed, "a"); // best-ranked label
+    assert!(
+        ed.free.is_some() && ed.jump.is_none(),
+        "label jump lands back in plain free motion"
+    );
+    // Arrow-select path: markers on, arrows pick, Enter jumps.
+    type_script(&mut ed, "C-g Left Right Enter");
+    assert!(ed.free.is_some() && ed.jump.is_none());
+    // Esc drops the markers without leaving free mode; a second ^G
+    // toggles them off too.
+    type_script(&mut ed, "C-g Esc");
+    assert!(ed.free.is_some() && ed.jump.is_none());
+    type_script(&mut ed, "Enter");
+    assert!(ed.free.is_none(), "Enter snaps out");
+    // The formula was never modified by any of this.
+    assert_eq!(latex(&ed), "a+\\frac{b}{c}+z");
+}
+
+#[test]
 fn cancel_wraps_the_selection() {
     // Shift-selection then \cancel.
     let mut ed = Editor::new();
@@ -152,14 +196,14 @@ fn grid_edit_mode() {
     let mut ed = Editor::new();
     type_script(
         &mut ed,
-        r"\matrix a C-e Right Esc b C-e Down Left Esc c C-e Right Esc d",
+        r"\matrix a C-o Right Esc b C-o Down Left Esc c C-o Right Esc d",
     );
     assert_eq!(
         latex(&ed),
         "\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}"
     );
     // Delete the bottom row (was: awkward \delrow minibuffer command).
-    type_script(&mut ed, "C-e d");
+    type_script(&mut ed, "C-o d");
     assert_eq!(latex(&ed), "\\begin{bmatrix} a & b \\end{bmatrix}");
     // Delete the second column; a 1x1 grid inside brackets normalizes
     // to plain content.
@@ -168,14 +212,14 @@ fn grid_edit_mode() {
     // Add row above / col left (\matrix starts 2x2 -> 3x3); typing goes
     // back to normal keys after Esc, into the new top-left cell.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\matrix x C-e R C Esc y");
+    type_script(&mut ed, r"\matrix x C-o R C Esc y");
     assert_eq!(
         latex(&ed),
         "\\begin{bmatrix} y &  &  \\\\  & x &  \\\\  &  &  \\end{bmatrix}"
     );
     // Undo works inside grid mode (row deletion is one step).
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\matrix a Down b C-e d C-z");
+    type_script(&mut ed, r"\matrix a Down b C-o d C-z");
     assert!(
         latex(&ed).contains("\\\\"),
         "undo restored the row: {}",
@@ -183,7 +227,7 @@ fn grid_edit_mode() {
     );
     // ^E outside a grid only reports.
     let mut ed = Editor::new();
-    type_script(&mut ed, "x C-e d");
+    type_script(&mut ed, "x C-o d");
     assert_eq!(latex(&ed), "xd");
 }
 
@@ -540,7 +584,7 @@ fn property_random_key_sequences_roundtrip() {
                 // Ctrl toggles/jump (host effects are inert here).
                 (
                     Key::Char(*rng.pick(&[
-                        'g', 't', 'b', 'o', 'y', 's', 'z', 'r', 'c', 'x', 'v', 'f', 'a',
+                        'g', 't', 'b', 'e', 'y', 's', 'z', 'r', 'c', 'x', 'v', 'f', 'a',
                     ])),
                     false,
                     true,
