@@ -1021,8 +1021,8 @@ fn stacked_accents() {
     roundtrip("triple-accent", &row);
     // Marks with a low variant hug the base: over bar draws as _ ,
     // hat as ˰ , tilde as ˷ , check as ˯ , ring as ˳ , dot as the
-    // leader ․ , under bar as ¯. The ddot draws as ․․ overhanging one
-    // blank-baseline column to the right.
+    // leader ․ , vec as the halfwidth ￫ , under bar as ¯. The ddot
+    // draws as ․․ overhanging one blank-baseline column to the right.
     let row = cat(&[
         n(Node::Accent {
             overs: vec!['¯'],
@@ -1060,13 +1060,18 @@ fn stacked_accents() {
             base: 'e',
         }),
         n(Node::Accent {
+            overs: vec!['⇀'],
+            unders: vec![],
+            base: 'u',
+        }),
+        n(Node::Accent {
             overs: vec![],
             unders: vec!['‗'],
             base: 'y',
         }),
     ]);
     let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
-    assert_eq!(aa, "_˰˷˯˳․․․\n𝑥𝑣𝑤𝑐𝑟𝑑𝑒 𝑦\n        ¯");
+    assert_eq!(aa, "_˰˷˯˳․․․￫\n𝑥𝑣𝑤𝑐𝑟𝑑𝑒 𝑢𝑦\n         ¯");
     roundtrip("hugging-marks", &row);
     // The ddot's blank spill column breaks physical adjacency: a lone
     // \mathrm letter after it must keep its quotes (glue check is per

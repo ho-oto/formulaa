@@ -966,6 +966,9 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 'ˇ' => '˯',
                 '˚' => '˳',
                 '˙' => '․',
+                // The vec draws as a plain arrow (halfwidth ￫ U+FFEB,
+                // distinct from the → atom) to match the wide ┄──>┄.
+                '⇀' => '￫',
                 m => m,
             };
             let under_glyph = |m: char| match m {

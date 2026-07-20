@@ -1759,6 +1759,7 @@ fn over_mark_at(c: char) -> Option<char> {
         '˯' => Some('ˇ'),
         '˳' => Some('˚'),
         '․' => Some('˙'),
+        '￫' => Some('⇀'),
         c if is_over_mark(c) => Some(c),
         _ => None,
     }
