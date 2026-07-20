@@ -1969,11 +1969,14 @@ impl Editor {
                     } else {
                         self.insert_sym(c);
                     }
-                } else if matches!(cmd, "op" | "op*" | "operatorname" | "operatorname*") {
-                    // \op / \op* open the in-place name box (see
-                    // op_commit for what the words become). The old
-                    // \op<name> attached-argument style is gone.
-                    self.op_start(cmd.ends_with('*'));
+                } else if matches!(
+                    cmd,
+                    "op" | "op*" | "operatorname" | "operatorname*" | "limits"
+                ) {
+                    // \op / \op* (alias \limits) open the in-place name
+                    // box (see op_commit for what the words become). The
+                    // old \op<name> attached-argument style is gone.
+                    self.op_start(cmd != "op" && cmd != "operatorname");
                 } else if let Some((t, math)) = cmd
                     .strip_prefix("rm")
                     .map(|t| (t, true))

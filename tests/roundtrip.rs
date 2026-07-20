@@ -206,6 +206,63 @@ fn operatorname_star_band() {
     assert!(matches!(&normalize(&row)[0], Node::BigOp { .. }));
 }
 
+/// Roman differential: a lone upright letter drops its quotes exactly
+/// when a neighbour glues it into the \mathrm reading, and keeps them
+/// otherwise (the picture stays unambiguous either way).
+#[test]
+fn roman_differential_quotes() {
+    let d = || Node::Text {
+        t: "d".into(),
+        math: true,
+    };
+    // Glued to a variable: bare d𝑥.
+    let row = cat(&[n(d()), s("x")]);
+    roundtrip("dx", &row);
+    let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
+    assert_eq!(aa, "d𝑥");
+    assert_eq!(row_to_latex(&normalize(&row)), "\\mathrm{d}x");
+    // Standalone (or against a non-letter): quoted.
+    let row = cat(&[n(d())]);
+    roundtrip("d-alone", &row);
+    assert_eq!(
+        render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text(),
+        "'d'"
+    );
+    let row = cat(&[n(d()), s("+"), s("x")]);
+    roundtrip("d-plus", &row);
+    assert!(
+        render_root(&normalize(&row), None, &RenderCtx::canonical())
+            .to_text()
+            .starts_with("'d'")
+    );
+    // Two roman letters never glue to each other (they would merge into
+    // one run); the separation space keeps them quoted.
+    let row = cat(&[n(d()), n(d())]);
+    roundtrip("d-d", &row);
+}
+
+/// The session file writes formatting spacers as explicit ␠ so they
+/// survive the restore parse.
+#[test]
+fn session_spacers_roundtrip() {
+    let row = cat(&[
+        s("a"),
+        vec![Node::Spacer],
+        s("b+"),
+        vec![Node::Spacer, Node::Spacer],
+        s("c"),
+    ]);
+    let row = normalize(&row);
+    let marked = render_root(
+        &mascii::ast::mark_spacers(&row),
+        None,
+        &RenderCtx::canonical(),
+    )
+    .to_text();
+    assert!(marked.contains('␠'), "spacers visible: {}", marked);
+    assert_eq!(parse(&marked).unwrap(), row, "restore keeps spacers");
+}
+
 /// Tall middles: a braket whose content is taller than one row keeps the
 /// full-height │ separators (multi-row \middle| example).
 #[test]
@@ -950,6 +1007,12 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
                 }
             }
             2 => Node::Spacer,
+            // Single-letter \mathrm (the roman differential): quoted or
+            // bare depending on the rendered neighbours.
+            3 => Node::Text {
+                t: ["d", "e", "D"][rng.below(3)].into(),
+                math: true,
+            },
             _ => Node::Sym(ATOMS[rng.below(ATOMS.len())]),
         };
     }

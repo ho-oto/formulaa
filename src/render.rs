@@ -446,6 +446,39 @@ type CursorRef<'a> = (&'a [(usize, Field)], usize);
 
 /// `placeholder`: render an empty row as ⬚ (used for mandatory slots like
 /// fraction numerators; big-operator limits pass false so empty limits vanish).
+/// Upright run. \mathrm draws bare when the picture reads back as the
+/// same Text: >= 2 ASCII letters and not a dictionary word — or a
+/// *single* letter glued to an alphabetic neighbour (`glue`), which the
+/// parser reads as the roman-differential form (d𝑦). Everything else is
+/// 'single-quoted'; \text always "double-quotes". Interior spaces are ␣
+/// so quotes never contain structurally meaningful blank columns.
+fn text_block(t: &str, math: bool, glue: bool) -> Block {
+    let bare = math
+        && t.chars().all(|c| c.is_ascii_alphabetic())
+        && !crate::symbols::is_func_name(t)
+        && (t.chars().count() >= 2 || (t.chars().count() == 1 && glue));
+    if bare {
+        Block::from_chars(t.chars().collect())
+    } else {
+        let q = if math { '\'' } else { '"' };
+        let mut chars = vec![q];
+        chars.extend(t.chars().map(|c| if c == ' ' { '␣' } else { c }));
+        chars.push(q);
+        Block::from_chars(chars)
+    }
+}
+
+/// Would this node's rendered baseline edge glue a lone upright letter
+/// into the roman reading (an alphabetic cell with no separator space)?
+/// Conservative whitelist — quoting is always safe, bare is not.
+fn glue_alpha(n: &Node) -> bool {
+    match n {
+        Node::Sym(c) => c.is_alphabetic(),
+        Node::Accent { base, .. } => base.is_alphabetic(),
+        _ => false,
+    }
+}
+
 pub fn render_row(
     row: &Row,
     cursor: Option<CursorRef>,
@@ -511,7 +544,24 @@ pub fn render_row(
             },
             cancel: matches!(node, Node::Cancel { .. }),
         };
-        let mut block = render_node(node, child_cursor, ctx);
+        let mut block = match node {
+            // Single upright letters drop their quotes when a neighbour
+            // makes the bare reading unambiguous (d𝑦); the quotes come
+            // back automatically when the context changes.
+            Node::Text { t, math } => {
+                let glue = row[..i]
+                    .iter()
+                    .rev()
+                    .find(|n| !is_marker_node(n))
+                    .is_some_and(glue_alpha)
+                    || row[i + 1..]
+                        .iter()
+                        .find(|n| !is_marker_node(n))
+                        .is_some_and(glue_alpha);
+                text_block(t, *math, glue)
+            }
+            _ => render_node(node, child_cursor, ctx),
+        };
         // A script at the start of a row gets an explicit ⬚ base, so the
         // picture differs from the row without the script wrapper
         // (markers are invisible to "start of a row").
@@ -736,21 +786,9 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
         // ASCII letters, not a dictionary word), else 'single-quoted';
         // \text always "double-quotes". Interior spaces are ␣ so quotes
         // never contain structurally meaningful blank columns.
-        Node::Text { t, math } => {
-            let bare = *math
-                && t.chars().count() >= 2
-                && t.chars().all(|c| c.is_ascii_alphabetic())
-                && !crate::symbols::is_func_name(t);
-            if bare {
-                Block::from_chars(t.chars().collect())
-            } else {
-                let q = if *math { '\'' } else { '"' };
-                let mut chars = vec![q];
-                chars.extend(t.chars().map(|c| if c == ' ' { '␣' } else { c }));
-                chars.push(q);
-                Block::from_chars(chars)
-            }
-        }
+        // Reached only for rows not built by render_row (which decides
+        // glue from the neighbours); standalone = never glued.
+        Node::Text { t, math } => text_block(t, *math, false),
 
         // Marks in the cells directly above/below the base, stacking
         // outward (innermost first in each list). Those cells are never

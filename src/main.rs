@@ -70,7 +70,9 @@ fn save_session(ed: &Editor) {
     if row.is_empty() {
         let _ = fs::remove_file(SESSION_FILE);
     } else {
-        let aa = render_root(&row, None, &RenderCtx::canonical()).to_text();
+        // Formatting spacers are written as explicit ␠ so they survive
+        // the parse on restore (a blank column would be eaten).
+        let aa = render_root(&ast::mark_spacers(&row), None, &RenderCtx::canonical()).to_text();
         let _ = fs::write(SESSION_FILE, format!("{}\n", aa));
     }
 }

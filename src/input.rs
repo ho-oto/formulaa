@@ -165,13 +165,16 @@ impl Editor {
 
     /// \op name box: printable keys build the name; any key that is not
     /// part of it commits first, then falls through to the base layer.
+    /// Space separates band pieces in \op* (`ess sup` → ┄ess┄sup┄) but
+    /// simply commits a plain \op (one word is the whole name there).
     fn op_box_keys(&mut self, key: Key, ctrl: bool) -> Option<Effect> {
-        self.op_entry.as_ref()?;
+        let star = self.op_entry.as_ref()?.0;
         match key {
             Key::Esc => self.op_entry = None,
             Key::Backspace => self.op_backspace(),
-            Key::Char(c) if !ctrl && (c.is_ascii_alphanumeric() || c == ' ') => self.op_type(c),
-            Key::Enter | Key::Tab => self.op_commit(),
+            Key::Char(' ') if star => self.op_type(' '),
+            Key::Char(c) if !ctrl && c.is_ascii_alphanumeric() => self.op_type(c),
+            Key::Enter | Key::Tab | Key::Char(' ') => self.op_commit(),
             _ => {
                 self.op_commit();
                 return None;

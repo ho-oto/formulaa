@@ -956,6 +956,13 @@ fn parse_region(
                 let (overs, unders) = accent_stacks(g, rect, bl, col);
                 check_flat_columns(g, rect, bl, col, col, overs.len(), unders.len())?;
                 let base = unstyle_char(ch);
+                // ␠ is the explicit form of a formatting Spacer (the
+                // session file uses it; fmt turns it back into a blank).
+                if base == '␠' && overs.is_empty() && unders.is_empty() {
+                    out.push(Node::Spacer);
+                    col += 1;
+                    continue;
+                }
                 if !overs.is_empty() || !unders.is_empty() {
                     out.push(Node::Accent {
                         overs,

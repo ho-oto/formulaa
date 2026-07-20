@@ -121,6 +121,22 @@ fn esc_cancels_modes_before_quitting() {
 }
 
 #[test]
+fn cancel_wraps_the_selection() {
+    // Shift-selection then \cancel.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"x+y S-Left S-Left \cancel");
+    assert_eq!(latex(&ed), "x\\cancel{+y}");
+    // Block selection (^B + label) then \cancel.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a+(b+c) C-b a \cancel");
+    assert_eq!(latex(&ed), "a+\\cancel{\\left(b+c\\right)}");
+    // Parent selection (Shift+Up) then \cancel.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\frac u Down v Tab S-Up \cancel");
+    assert_eq!(latex(&ed), "\\cancel{\\frac{u}{v}}");
+}
+
+#[test]
 fn enter_on_empty_formula_does_not_crash() {
     // All-empty segments: the ┄ separator still needs a column (fuzz
     // found a zero-width vstack panic here).
@@ -215,6 +231,10 @@ fn op_box_via_keys() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"\op foo Esc");
     assert!(ed.root.is_empty());
+    // \limits is an alias for \op*.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\limits vol Enter n Tab");
+    assert_eq!(latex(&ed), "\\operatorname*{vol}_{n}");
 }
 
 #[test]

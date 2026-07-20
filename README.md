@@ -88,7 +88,7 @@ TUI は毎編集後に AA→AST の逆変換を自動検査し、ラウンドト
   下極限に入る(`┄lim┄`)。`\argmax` `\argmin` は複数ピースの
   `┄arg┄max┄`
 - 関数名: `\sin` `\cos` `\log` `\lim` …(立体で表示)。任意名は
-  `\op` / `\op*` — その場に名前入力ボックスが開き、確定でそのまま
+  `\op` / `\op*`(別名 `\limits`)— その場に名前入力ボックスが開き、確定でそのまま
   立体ラン(=\mathrm)/ 演算子バンド(=\operatorname*、下極限へ)に
   なる。スペース区切りは `┄ess┄sup┄` のような複数ピースに
   (`ess sup` → \operatorname*{ess sup})。Esc で取消、
