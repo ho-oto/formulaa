@@ -66,6 +66,7 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
 - `docs/parse-model.md` — パースモデル仕様(基線復元→走査→再帰の視点。契約と fuse 表)
 - `docs/design.md` — 設計判断の経緯とロードマップ。**着手前に必読**
 - `docs/jump-spec.md` — ^G ジャンプ v2 の仕様草案(候補選抜アルゴリズム)
+- `docs/keys.md` — ユーザー向けキーマニュアル。**キー操作を変えたら必ず更新**
 
 ## ハマりどころ
 

@@ -38,10 +38,57 @@ pub enum Effect {
 }
 
 impl Editor {
-    /// Dispatch one keystroke of the shared LyX-style keymap.
+    /// One keystroke of the shared LyX-style keymap. Wraps the dispatch
+    /// with undo bookkeeping: any key that changes the formula pushes
+    /// the pre-state (undo/redo themselves are handled here so they
+    /// never re-enter the history).
     pub fn input(&mut self, key: Key, shift: bool, ctrl: bool) -> Effect {
-        // Jump mode: the next key picks a label (anything else cancels).
-        if self.jump.is_some() {
+        if ctrl && !self.mode_active() {
+            match key {
+                Key::Char('z') => {
+                    self.undo();
+                    return Effect::None;
+                }
+                Key::Char('r') => {
+                    self.redo();
+                    return Effect::None;
+                }
+                _ => {}
+            }
+        }
+        let before = (self.root.clone(), self.path.clone(), self.col);
+        let effect = self.dispatch(key, shift, ctrl);
+        if self.root != before.0 {
+            self.push_undo(before);
+        }
+        effect
+    }
+
+    /// Key layers, outermost first: each modal layer either consumes
+    /// the key (Some) or lets it fall through (None). Adding a mode =
+    /// adding one handler here.
+    fn dispatch(&mut self, key: Key, shift: bool, ctrl: bool) -> Effect {
+        if let Some(e) = self.jump_keys(key, ctrl) {
+            return e;
+        }
+        if let Some(e) = self.block_keys(key, ctrl) {
+            return e;
+        }
+        if let Some(e) = self.free_keys(key) {
+            return e;
+        }
+        if let Some(e) = self.minibuffer_keys(key) {
+            return e;
+        }
+        if let Some(e) = self.op_box_keys(key, ctrl) {
+            return e;
+        }
+        self.base_keys(key, shift, ctrl)
+    }
+
+    /// Jump mode: the next key picks a label (anything else cancels).
+    fn jump_keys(&mut self, key: Key, ctrl: bool) -> Option<Effect> {
+        self.jump.is_some().then(|| {
             match key {
                 Key::Char(c) if !ctrl => self.jump_to(c),
                 // Arrow keys move the marker selection; Enter confirms.
@@ -57,11 +104,13 @@ impl Editor {
                     self.message.clear();
                 }
             }
-            return Effect::None;
-        }
+            Effect::None
+        })
+    }
 
-        // Block-select mode: the next key picks a block label.
-        if self.block.is_some() {
+    /// Block-select mode: the next key picks a block label.
+    fn block_keys(&mut self, key: Key, ctrl: bool) -> Option<Effect> {
+        self.block.is_some().then(|| {
             match key {
                 Key::Char(c) if !ctrl => self.block_to(c),
                 _ => {
@@ -69,11 +118,13 @@ impl Editor {
                     self.message.clear();
                 }
             }
-            return Effect::None;
-        }
+            Effect::None
+        })
+    }
 
-        // Free-cursor mode: arrows move the cell cursor, Enter snaps.
-        if self.free.is_some() {
+    /// Free-cursor mode: arrows move the cell cursor, Enter snaps.
+    fn free_keys(&mut self, key: Key) -> Option<Effect> {
+        self.free.is_some().then(|| {
             match key {
                 Key::Left => self.free_move(-1, 0),
                 Key::Right => self.free_move(1, 0),
@@ -82,11 +133,13 @@ impl Editor {
                 Key::Enter => self.free_confirm(),
                 _ => self.free_cancel(),
             }
-            return Effect::None;
-        }
+            Effect::None
+        })
+    }
 
-        // Minibuffer (`\command`) mode captures most keys.
-        if self.minibuffer.is_some() {
+    /// Minibuffer (`\command`) mode captures most keys.
+    fn minibuffer_keys(&mut self, key: Key) -> Option<Effect> {
+        self.minibuffer.is_some().then(|| {
             match key {
                 Key::Esc => self.minibuffer = None,
                 Key::Backspace => {
@@ -106,33 +159,29 @@ impl Editor {
                 }
                 _ => {}
             }
-            return Effect::None;
-        }
+            Effect::None
+        })
+    }
 
-        // \op name box: printable keys build the name; any key that is
-        // not part of it commits first, then acts normally.
-        if self.op_entry.is_some() {
-            match key {
-                Key::Esc => {
-                    self.op_entry = None;
-                    return Effect::None;
-                }
-                Key::Backspace => {
-                    self.op_backspace();
-                    return Effect::None;
-                }
-                Key::Char(c) if !ctrl && (c.is_ascii_alphanumeric() || c == ' ') => {
-                    self.op_type(c);
-                    return Effect::None;
-                }
-                Key::Enter | Key::Tab => {
-                    self.op_commit();
-                    return Effect::None;
-                }
-                _ => self.op_commit(),
+    /// \op name box: printable keys build the name; any key that is not
+    /// part of it commits first, then falls through to the base layer.
+    fn op_box_keys(&mut self, key: Key, ctrl: bool) -> Option<Effect> {
+        self.op_entry.as_ref()?;
+        match key {
+            Key::Esc => self.op_entry = None,
+            Key::Backspace => self.op_backspace(),
+            Key::Char(c) if !ctrl && (c.is_ascii_alphanumeric() || c == ' ') => self.op_type(c),
+            Key::Enter | Key::Tab => self.op_commit(),
+            _ => {
+                self.op_commit();
+                return None;
             }
         }
+        Some(Effect::None)
+    }
 
+    /// Base layer: ctrl chords, the grid-edit layer, then ordinary keys.
+    fn base_keys(&mut self, key: Key, shift: bool, ctrl: bool) -> Effect {
         // Ghost slots survive only until the next real input; ^G itself
         // re-labels the identical picture.
         if !(ctrl && key == Key::Char('g')) {
@@ -152,9 +201,40 @@ impl Editor {
                 Key::Char('c') => self.copy_selection(),
                 Key::Char('x') => self.cut_selection(),
                 Key::Char('v') => self.paste(),
+                Key::Char('e') => self.grid_mode_toggle(),
                 _ => {}
             }
             return Effect::None;
+        }
+
+        // Grid edit mode (^E): a key layer for matrix surgery. Ctrl
+        // chords above still work; the mode ends when the cursor leaves
+        // the grid (jump, click, …).
+        if self.grid_mode {
+            if self.enclosing_array().is_none() {
+                self.grid_mode = false;
+            } else {
+                self.message.clear();
+                match key {
+                    Key::Left => self.grid_move(0, -1),
+                    Key::Right => self.grid_move(0, 1),
+                    Key::Up => self.grid_move(-1, 0),
+                    Key::Down => self.grid_move(1, 0),
+                    Key::Enter | Key::Char('r') => self.add_row(),
+                    Key::Char('R') => self.add_row_above(),
+                    Key::Char('c') => self.add_col(),
+                    Key::Char('C') => self.add_col_left(),
+                    Key::Char('d') => self.del_row(),
+                    Key::Char('D') => self.del_col(),
+                    Key::Esc | Key::Tab => self.grid_mode = false,
+                    _ => {
+                        self.message =
+                            "grid mode: ←→↑↓ move cells  r/R add row  c/C add col  d/D delete row/col  Esc exit"
+                                .into();
+                    }
+                }
+                return Effect::None;
+            }
         }
 
         self.message.clear();

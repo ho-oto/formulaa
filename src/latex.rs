@@ -64,18 +64,14 @@ fn node_to_latex(node: &Node) -> String {
             // Word pieces with a Text among them are an \op* name
             // (┄ess┄sup┄): \operatorname* keeps the limits underneath
             // (plain \mathrm would set them aside).
-            let words: Option<Vec<&str>> = base
-                .iter()
-                .map(|n| match n {
-                    Node::Text { t, math: true } => Some(t.as_str()),
-                    Node::Func(f) => Some(f.as_str()),
-                    _ => None,
-                })
-                .collect();
-            let mut s = match words {
-                Some(ws) if base.iter().any(|n| matches!(n, Node::Text { .. })) => {
+            let mut s = match crate::ast::op_words(base) {
+                Some((ws, true)) => {
                     format!("\\operatorname*{{{}}}", ws.join(" "))
                 }
+                // A multi-piece base (┄arg┄min┄) is *one* operator: group
+                // it so the limits center under the whole thing —
+                // \arg \min_{θ} would hang θ under \min alone.
+                _ if base.len() > 1 => format!("\\mathop{{{}}}", row_to_latex(base).trim_end()),
                 _ => row_to_latex(base),
             };
             if !lower.is_empty() {
@@ -137,7 +133,9 @@ fn node_to_latex(node: &Node) -> String {
                     ('{', '}') => Some("Bmatrix"),
                     ('|', '|') => Some("vmatrix"),
                     ('.', '.') => Some("matrix"),
-                    ('{', '.') => Some("cases"),
+                    // cases is a two-column environment; wider grids fall
+                    // through to \left\{ \begin{matrix} … \right.
+                    ('{', '.') if *cols <= 2 => Some("cases"),
                     _ => None,
                 };
                 if let Some(env) = env {

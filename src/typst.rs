@@ -86,16 +86,8 @@ fn node_to_typst(node: &Node) -> String {
         Node::Sub { arg } => format!("_{}", grouped(arg)),
         Node::BigOp { base, lower, upper } => {
             // \op* word pieces (Text among them) become one op("…").
-            let words: Option<Vec<&str>> = base
-                .iter()
-                .map(|n| match n {
-                    Node::Text { t, math: true } => Some(t.as_str()),
-                    Node::Func(f) => Some(f.as_str()),
-                    _ => None,
-                })
-                .collect();
-            let mut s = match words {
-                Some(ws) if base.iter().any(|n| matches!(n, Node::Text { .. })) => {
+            let mut s = match crate::ast::op_words(base) {
+                Some((ws, true)) => {
                     format!("op(\"{}\", limits: #true)", ws.join(" "))
                 }
                 _ => match &base[..] {

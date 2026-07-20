@@ -19,7 +19,7 @@ use mascii::parse::RegionSpan;
 use mascii::render::{RenderCtx, render_root};
 use mascii::{ast, latex, parse, typst};
 
-const HELP: &str = "\\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ^A start  ⇧←→/⇧↑ select  ^B select block  ^F free move  ^C/^X/^V copy/cut/paste  ^G jump  ^O structure  ^T italic  ^Y copy AA  ^S save  Esc/^Q quit";
+const HELP: &str = "\\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ^A start  ⇧←→/⇧↑ select  ^B select block  ^F free move  ^C/^X/^V copy/cut/paste  ^Z/^R undo/redo  ^G jump  ^O structure  ^T italic  ^Y copy AA  ^S save  Esc/^Q quit";
 
 /// Context-sensitive last line: generic keys normally, the relevant
 /// commands when the cursor is inside a grid cell or a delimiter.
@@ -27,6 +27,9 @@ fn help_line(ed: &Editor) -> &'static str {
     use mascii::ast::Field;
     if ed.op_entry.is_some() {
         return "op name: letters/digits + Space (word pieces)  Enter/Tab commit  Esc cancel";
+    }
+    if ed.grid_mode {
+        return "grid mode: ←→↑↓ move cells  r/R add row below/above  c/C add col right/left  d/D delete row/col  Esc/^E exit";
     }
     match ed.path.last() {
         Some((_, Field::Cell(_))) => {

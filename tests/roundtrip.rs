@@ -206,6 +206,30 @@ fn operatorname_star_band() {
     assert!(matches!(&normalize(&row)[0], Node::BigOp { .. }));
 }
 
+/// Tall middles: a braket whose content is taller than one row keeps the
+/// full-height │ separators (multi-row \middle| example).
+#[test]
+fn tall_middle_braket() {
+    let row = cat(&[n(delim(
+        '⟨',
+        '⟩',
+        vec!['|', '|'],
+        vec![
+            s("ψ"),
+            vec![Node::Frac {
+                num: s("H"),
+                den: s("2"),
+            }],
+            s("ψ"),
+        ],
+    ))]);
+    roundtrip("tall-middle", &row);
+    assert_eq!(
+        row_to_latex(&normalize(&row)),
+        "\\left\\langle \\psi \\middle|\\frac{H}{2}\\middle|\\psi \\right\\rangle "
+    );
+}
+
 /// Multi-line formula: Breaks stack the lines with a lone-┄ continuation
 /// marker on each following baseline.
 #[test]

@@ -223,32 +223,44 @@ fn hcat(blocks: &[Block]) -> Block {
     }
 }
 
-/// Cancel coords of a child centered into `width` at vertical offset.
-fn centered_cancel(
-    b: &Block,
-    width: usize,
-    row_off: usize,
-) -> impl Iterator<Item = (usize, usize)> + '_ {
-    let left = (width - b.width()) / 2;
-    b.cancel.iter().map(move |&(r, c)| (r + row_off, c + left))
+/// The zero-width annotation channels of a Block (cancel strikes,
+/// caret, display marks), accumulated as children are centered into a
+/// parent. One `centered` call per child replaces the three per-channel
+/// translations every composite node used to spell out.
+#[derive(Default)]
+struct Annots {
+    cancel: Vec<(usize, usize)>,
+    caret: Option<(usize, usize)>,
+    marks: Vec<(usize, usize, char)>,
 }
 
-/// Marks of a child centered into `width` at vertical offset.
-fn centered_marks(
-    b: &Block,
-    width: usize,
-    row_off: usize,
-) -> impl Iterator<Item = (usize, usize, char)> + '_ {
-    let left = (width - b.width()) / 2;
-    b.marks
-        .iter()
-        .map(move |&(r, c, ch)| (r + row_off, c + left, ch))
-}
+impl Annots {
+    /// Fold in a child's annotations, centered into `width` at `row_off`
+    /// (first caret wins — a cursor lives in at most one child).
+    fn centered(mut self, b: &Block, width: usize, row_off: usize) -> Self {
+        let left = (width - b.width()) / 2;
+        self.cancel
+            .extend(b.cancel.iter().map(|&(r, c)| (r + row_off, c + left)));
+        self.caret = self
+            .caret
+            .or_else(|| b.caret.map(|(r, c)| (r + row_off, c + left)));
+        self.marks.extend(
+            b.marks
+                .iter()
+                .map(|&(r, c, ch)| (r + row_off, c + left, ch)),
+        );
+        self
+    }
 
-/// Caret of a child centered into `width` at vertical offset.
-fn centered_caret(b: &Block, width: usize, row_off: usize) -> Option<(usize, usize)> {
-    let left = (width - b.width()) / 2;
-    b.caret.map(|(r, c)| (r + row_off, c + left))
+    fn into_block(self, lines: Vec<Vec<char>>, baseline: usize) -> Block {
+        Block {
+            lines,
+            baseline,
+            cancel: self.cancel,
+            caret: self.caret,
+            marks: self.marks,
+        }
+    }
 }
 
 /// Pad every line of `b` to `width`, centered.
@@ -644,7 +656,9 @@ pub fn render_root(row: &Row, cursor: Option<CursorRef>, ctx: &RenderCtx) -> Blo
 /// between lines; the result's baseline is the first block's. All
 /// annotations translate.
 fn vstack(blocks: &[Block]) -> Block {
-    let width = blocks.iter().map(|b| b.width()).max().unwrap_or(0);
+    // At least one column: the ┄ separator row needs a cell even when
+    // every segment is empty (Enter on an empty formula).
+    let width = blocks.iter().map(|b| b.width()).max().unwrap_or(0).max(1);
     let mut lines: Vec<Vec<char>> = Vec::new();
     let mut cancel = Vec::new();
     let mut caret = None;
@@ -762,18 +776,10 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             let baseline = lines.len();
             lines.push(vec![FRAC_BAR; w]);
             lines.extend(center_pad(&d, w));
-            let cancel = centered_cancel(&n, w, 0)
-                .chain(centered_cancel(&d, w, baseline + 1))
-                .collect();
-            Block {
-                lines,
-                baseline,
-                cancel,
-                caret: centered_caret(&n, w, 0).or(centered_caret(&d, w, baseline + 1)),
-                marks: centered_marks(&n, w, 0)
-                    .chain(centered_marks(&d, w, baseline + 1))
-                    .collect(),
-            }
+            Annots::default()
+                .centered(&n, w, 0)
+                .centered(&d, w, baseline + 1)
+                .into_block(lines, baseline)
         }
 
         Node::Sqrt { arg, index } => {
@@ -883,18 +889,10 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             let baseline = lines.len();
             lines.push(band);
             lines.extend(center_pad(&l, w));
-            let cancel = centered_cancel(&u, w, 0)
-                .chain(centered_cancel(&l, w, baseline + 1))
-                .collect();
-            Block {
-                lines,
-                baseline,
-                cancel,
-                caret: centered_caret(&u, w, 0).or(centered_caret(&l, w, baseline + 1)),
-                marks: centered_marks(&u, w, 0)
-                    .chain(centered_marks(&l, w, baseline + 1))
-                    .collect(),
-            }
+            Annots::default()
+                .centered(&u, w, 0)
+                .centered(&l, w, baseline + 1)
+                .into_block(lines, baseline)
         }
 
         Node::Brace { over, arg, label } => {
@@ -908,41 +906,26 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             brace[0] = if *over { '╭' } else { '╰' };
             brace[w - 1] = if *over { '╮' } else { '╯' };
             let mut lines: Vec<Vec<char>> = Vec::new();
-            let mut cancel: Vec<(usize, usize)> = Vec::new();
             if *over {
                 lines.extend(center_pad(&l, w));
                 lines.push(brace);
                 let a_off = lines.len();
                 let baseline = a_off + a.baseline;
-                cancel.extend(centered_cancel(&l, w, 0));
-                cancel.extend(centered_cancel(&a, w, a_off));
                 lines.extend(center_pad(&a, w));
-                Block {
-                    lines,
-                    baseline,
-                    cancel,
-                    caret: centered_caret(&l, w, 0).or(centered_caret(&a, w, a_off)),
-                    marks: centered_marks(&l, w, 0)
-                        .chain(centered_marks(&a, w, a_off))
-                        .collect(),
-                }
+                Annots::default()
+                    .centered(&l, w, 0)
+                    .centered(&a, w, a_off)
+                    .into_block(lines, baseline)
             } else {
                 let baseline = a.baseline;
-                cancel.extend(centered_cancel(&a, w, 0));
                 lines.extend(center_pad(&a, w));
                 let brace_off = lines.len();
                 lines.push(brace);
-                cancel.extend(centered_cancel(&l, w, brace_off + 1));
                 lines.extend(center_pad(&l, w));
-                Block {
-                    lines,
-                    baseline,
-                    cancel,
-                    caret: centered_caret(&a, w, 0).or(centered_caret(&l, w, brace_off + 1)),
-                    marks: centered_marks(&a, w, 0)
-                        .chain(centered_marks(&l, w, brace_off + 1))
-                        .collect(),
-                }
+                Annots::default()
+                    .centered(&a, w, 0)
+                    .centered(&l, w, brace_off + 1)
+                    .into_block(lines, baseline)
             }
         }
 
@@ -965,18 +948,10 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             let baseline = lines.len();
             lines.push(body);
             lines.extend(center_pad(&u, w));
-            let cancel = centered_cancel(&o, w, 0)
-                .chain(centered_cancel(&u, w, baseline + 1))
-                .collect();
-            Block {
-                lines,
-                baseline,
-                cancel,
-                caret: centered_caret(&o, w, 0).or(centered_caret(&u, w, baseline + 1)),
-                marks: centered_marks(&o, w, 0)
-                    .chain(centered_marks(&u, w, baseline + 1))
-                    .collect(),
-            }
+            Annots::default()
+                .centered(&o, w, 0)
+                .centered(&u, w, baseline + 1)
+                .into_block(lines, baseline)
         }
 
         Node::Delim {
@@ -1172,13 +1147,11 @@ fn render_fused_grid(
             }
             parts.push(Block::new(vec![vec![' ']], 0));
             let b = &blocks[i * cols + j];
-            parts.push(Block {
-                lines: center_pad(b, col_w[j]),
-                baseline: b.baseline,
-                cancel: centered_cancel(b, col_w[j], 0).collect(),
-                caret: centered_caret(b, col_w[j], 0),
-                marks: centered_marks(b, col_w[j], 0).collect(),
-            });
+            parts.push(
+                Annots::default()
+                    .centered(b, col_w[j], 0)
+                    .into_block(center_pad(b, col_w[j]), b.baseline),
+            );
             parts.push(Block::new(vec![vec![' ']], 0));
         }
         let row_block = hcat(&parts);
@@ -1292,13 +1265,11 @@ fn render_lattice(
             // marker column + 1 pad, then the centered cell, then 1 pad.
             parts.push(Block::new(vec![vec![' '; 2]], 0));
             let b = &blocks[i * cols + j];
-            parts.push(Block {
-                lines: center_pad(b, col_w[j]),
-                baseline: b.baseline,
-                cancel: centered_cancel(b, col_w[j], 0).collect(),
-                caret: centered_caret(b, col_w[j], 0),
-                marks: centered_marks(b, col_w[j], 0).collect(),
-            });
+            parts.push(
+                Annots::default()
+                    .centered(b, col_w[j], 0)
+                    .into_block(center_pad(b, col_w[j]), b.baseline),
+            );
             parts.push(Block::new(vec![vec![' ']], 0));
         }
         let row_block = hcat(&parts);

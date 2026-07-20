@@ -121,6 +121,86 @@ fn esc_cancels_modes_before_quitting() {
 }
 
 #[test]
+fn enter_on_empty_formula_does_not_crash() {
+    // All-empty segments: the ┄ separator still needs a column (fuzz
+    // found a zero-width vstack panic here).
+    let mut ed = Editor::new();
+    type_script(&mut ed, "Enter Enter Up Down a");
+    assert_eq!(latex(&ed), "a");
+}
+
+#[test]
+fn grid_edit_mode() {
+    // ^E inside a matrix: arrows move cells, d/D delete row/col,
+    // r/R c/C add, Esc leaves the mode.
+    let mut ed = Editor::new();
+    type_script(
+        &mut ed,
+        r"\matrix a C-e Right Esc b C-e Down Left Esc c C-e Right Esc d",
+    );
+    assert_eq!(
+        latex(&ed),
+        "\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}"
+    );
+    // Delete the bottom row (was: awkward \delrow minibuffer command).
+    type_script(&mut ed, "C-e d");
+    assert_eq!(latex(&ed), "\\begin{bmatrix} a & b \\end{bmatrix}");
+    // Delete the second column; a 1x1 grid inside brackets normalizes
+    // to plain content.
+    type_script(&mut ed, "D");
+    assert_eq!(latex(&ed), "\\left[a\\right]");
+    // Add row above / col left (\matrix starts 2x2 -> 3x3); typing goes
+    // back to normal keys after Esc, into the new top-left cell.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\matrix x C-e R C Esc y");
+    assert_eq!(
+        latex(&ed),
+        "\\begin{bmatrix} y &  &  \\\\  & x &  \\\\  &  &  \\end{bmatrix}"
+    );
+    // Undo works inside grid mode (row deletion is one step).
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\matrix a Down b C-e d C-z");
+    assert!(
+        latex(&ed).contains("\\\\"),
+        "undo restored the row: {}",
+        latex(&ed)
+    );
+    // ^E outside a grid only reports.
+    let mut ed = Editor::new();
+    type_script(&mut ed, "x C-e d");
+    assert_eq!(latex(&ed), "xd");
+}
+
+#[test]
+fn undo_redo() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a+b \frac 1 Down 2 Tab");
+    let full = latex(&ed);
+    type_script(&mut ed, "C-z");
+    assert_eq!(latex(&ed), "a+b\\frac{1}{}");
+    type_script(&mut ed, "C-z C-z C-z");
+    assert_eq!(latex(&ed), "a+");
+    // Redo walks forward again, restoring the cursor with each state.
+    type_script(&mut ed, "C-r C-r C-r C-r");
+    assert_eq!(latex(&ed), full);
+    // A fresh edit clears the redo branch — and lands where the undone
+    // edit happened (the cursor is restored with the state, here the
+    // empty numerator).
+    type_script(&mut ed, "C-z C-z x");
+    assert_eq!(latex(&ed), "a+b\\frac{x}{}");
+    type_script(&mut ed, "C-r");
+    assert_eq!(latex(&ed), "a+b\\frac{x}{}");
+    // Cursor-only motion is not an undo step.
+    let mut ed = Editor::new();
+    type_script(&mut ed, "a b Left Left Right C-z");
+    assert_eq!(latex(&ed), "a");
+    // Undo restores the cursor of the undone state: typing lands where
+    // the removed edit happened.
+    type_script(&mut ed, "z");
+    assert_eq!(latex(&ed), "az");
+}
+
+#[test]
 fn op_box_via_keys() {
     // \op* opens the in-place name box; Space separates band pieces,
     // Enter commits into the lower limit.
@@ -439,7 +519,9 @@ fn property_random_key_sequences_roundtrip() {
             } else if r < 95 {
                 // Ctrl toggles/jump (host effects are inert here).
                 (
-                    Key::Char(*rng.pick(&['g', 't', 'b', 'o', 'y', 's'])),
+                    Key::Char(*rng.pick(&[
+                        'g', 't', 'b', 'o', 'y', 's', 'z', 'r', 'c', 'x', 'v', 'f', 'a',
+                    ])),
                     false,
                     true,
                 )

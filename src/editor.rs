@@ -10,6 +10,9 @@ pub type CursorPos = (Vec<(usize, Field)>, usize);
 pub type BlockRef = (Vec<(usize, Field)>, usize);
 use crate::symbols::{accent_by_name, bigop_by_char, bigop_by_name, is_func_name, symbol_by_name};
 
+/// One undo step: the formula with the cursor that belonged to it.
+type Snapshot = (Row, Vec<(usize, Field)>, usize);
+
 pub struct Editor {
     pub root: Row,
     pub path: Vec<(usize, Field)>,
@@ -19,6 +22,14 @@ pub struct Editor {
     /// Some((star, name)) while the `\op` in-place operator-name box is
     /// open (star = `\op*`, a big operator taking under-limits).
     pub op_entry: Option<(bool, String)>,
+    /// Grid edit mode (^E inside a matrix): arrows move cells, r/R c/C
+    /// add rows/columns, d/D delete them.
+    pub grid_mode: bool,
+    /// Undo/redo stacks of snapshots. Pushed by `input` whenever a key
+    /// changes the formula; cursor-only motion is not a history step
+    /// (but the cursor is restored with the formula it belonged to).
+    undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
     pub message: String,
     pub italic: bool,
     /// EasyMotion-style jump: Some(targets) while waiting for a label
@@ -238,6 +249,9 @@ impl Editor {
             col: 0,
             minibuffer: None,
             op_entry: None,
+            grid_mode: false,
+            undo: Vec::new(),
+            redo: Vec::new(),
             message: String::new(),
             italic: true,
             jump: None,
@@ -879,7 +893,7 @@ impl Editor {
     }
 
     /// Innermost enclosing Array: (path index, node index, cell index).
-    fn enclosing_array(&self) -> Option<(usize, usize, usize)> {
+    pub(crate) fn enclosing_array(&self) -> Option<(usize, usize, usize)> {
         self.path
             .iter()
             .rposition(|&(_, f)| matches!(f, Field::Cell(_)))
@@ -963,6 +977,46 @@ impl Editor {
             }
             Some((rows, cols - 1, (c / cols) * (cols - 1) + j.min(cols - 2)))
         });
+    }
+
+    /// Insert an empty row above the cursor's row (grid mode `R`).
+    pub fn add_row_above(&mut self) {
+        self.edit_array(|rows, cols, cells, c| {
+            let r = c / cols;
+            for j in 0..cols {
+                cells.insert(r * cols + j, vec![]);
+            }
+            Some((rows + 1, cols, r * cols + c % cols))
+        });
+    }
+
+    /// Insert an empty column left of the cursor's column (grid mode `C`).
+    pub fn add_col_left(&mut self) {
+        self.edit_array(|rows, cols, cells, c| {
+            let j = c % cols;
+            for r in (0..rows).rev() {
+                cells.insert(r * cols + j, vec![]);
+            }
+            Some((rows, cols + 1, (c / cols) * (cols + 1) + j))
+        });
+    }
+
+    /// Grid mode: move one cell in the given direction (clamped at the
+    /// edges), cursor at the end of the target cell.
+    pub fn grid_move(&mut self, dr: isize, dc: isize) {
+        let Some((k, i, c)) = self.enclosing_array() else {
+            return;
+        };
+        let parent_path = self.path[..k].to_vec();
+        let Node::Array { rows, cols, .. } = &row_at(&self.root, &parent_path)[i] else {
+            unreachable!()
+        };
+        let (rows, cols) = (*rows, *cols);
+        let r = (c / cols).saturating_add_signed(dr).min(rows - 1);
+        let j = (c % cols).saturating_add_signed(dc).min(cols - 1);
+        self.path.truncate(k);
+        self.path.push((i, Field::Cell(r * cols + j)));
+        self.col = self.cur_row().len();
     }
 
     /// `\mid`: split the current Delim segment at the cursor, inserting a
@@ -1623,6 +1677,69 @@ impl Editor {
         (root, Some((path, col)))
     }
 
+    /// Toggle grid edit mode (only meaningful inside a matrix).
+    pub fn grid_mode_toggle(&mut self) {
+        if self.grid_mode {
+            self.grid_mode = false;
+        } else if self.enclosing_array().is_some() {
+            self.grid_mode = true;
+            self.select_anchor = None;
+        } else {
+            self.message = "^E works inside a matrix/array".into();
+        }
+    }
+
+    /// A modal state is capturing keys (jump/block/free/minibuffer/op
+    /// box) — undo/redo chords stay out of the way there.
+    pub fn mode_active(&self) -> bool {
+        self.jump.is_some()
+            || self.block.is_some()
+            || self.free.is_some()
+            || self.minibuffer.is_some()
+            || self.op_entry.is_some()
+    }
+
+    pub(crate) fn push_undo(&mut self, state: Snapshot) {
+        const UNDO_CAP: usize = 1000;
+        self.undo.push(state);
+        if self.undo.len() > UNDO_CAP {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+    }
+
+    pub fn undo(&mut self) {
+        let Some((root, path, col)) = self.undo.pop() else {
+            self.message = "nothing to undo".into();
+            return;
+        };
+        self.select_anchor = None;
+        self.ghost.clear();
+        self.redo.push((
+            std::mem::replace(&mut self.root, root),
+            self.path.clone(),
+            self.col,
+        ));
+        self.path = path;
+        self.col = col;
+    }
+
+    pub fn redo(&mut self) {
+        let Some((root, path, col)) = self.redo.pop() else {
+            self.message = "nothing to redo".into();
+            return;
+        };
+        self.select_anchor = None;
+        self.ghost.clear();
+        self.undo.push((
+            std::mem::replace(&mut self.root, root),
+            self.path.clone(),
+            self.col,
+        ));
+        self.path = path;
+        self.col = col;
+    }
+
     /// Open the `\op` operator-name box at the cursor.
     pub fn op_start(&mut self, star: bool) {
         self.select_anchor = None;
@@ -2082,7 +2199,7 @@ mod tests {
         assert_eq!(ed.path.last().unwrap().1, Field::OpLower);
         ed.insert_sym('x');
         ed.exit_inset();
-        assert_eq!(row_to_latex(&ed.root), "\\arg \\max _{x}");
+        assert_eq!(row_to_latex(&ed.root), "\\mathop{\\arg \\max}_{x}");
     }
 
     #[test]

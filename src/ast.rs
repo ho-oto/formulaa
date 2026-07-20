@@ -226,6 +226,22 @@ pub fn row_at_mut<'a>(root: &'a mut Row, path: &[(usize, Field)]) -> &'a mut Row
 
 /// Canonical form: merge adjacent same-kind scripts (x^{a}^{b} == x^{ab} in
 /// the picture, so the parser can only ever return the merged form).
+/// Word pieces of a BigOp base (each piece a Func or math-Text word),
+/// with `true` when a Text piece is present — that is an \op* name,
+/// which LaTeX/Typst join into one \operatorname* / op("…") group.
+pub fn op_words(base: &Row) -> Option<(Vec<&str>, bool)> {
+    let words: Option<Vec<&str>> = base
+        .iter()
+        .map(|n| match n {
+            Node::Text { t, math: true } => Some(t.as_str()),
+            Node::Func(f) => Some(f.as_str()),
+            _ => None,
+        })
+        .collect();
+    let has_text = base.iter().any(|n| matches!(n, Node::Text { .. }));
+    words.map(|ws| (ws, has_text))
+}
+
 /// A band base the editor can re-promote from its bare form with ↑/↓:
 /// a single ∑-class symbol or lim-class function. Only these lose their
 /// band when both limits are empty.
