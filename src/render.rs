@@ -1058,26 +1058,86 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             }
             let h = body.height().max(1);
             let bl = body.baseline.min(h - 1);
-            let lcol = delim_column(*left, true, h, bl);
-            let rcol = delim_column(*right, false, h, bl);
-            let mut lines = Vec::with_capacity(h);
-            for (r, line) in body.lines.iter().enumerate() {
-                let mut row = Vec::with_capacity(body.width() + 2);
-                row.push(lcol[r]);
-                row.extend_from_slice(line);
-                row.push(rcol[r]);
+            // Tall angles are drawn from diagonals alone (the ⟨ ⟩ glyphs
+            // appear only in the one-line form — mixing them with ╱ ╲
+            // reads as a kink). The turn is a same-column vertical pair
+            // (╱ over ╲ on the left, ╲ over ╱ on the right); the extent
+            // is always even, the baseline is the upper turn row.
+            let angle = h >= 2 && (*left == '⟨' || *right == '⟩');
+            let (ext_h, ext_bl) = if angle {
+                let k = (bl + 1).max(h - 1 - bl);
+                (2 * k, k - 1)
+            } else {
+                (h, bl)
+            };
+            // Pad the body to the delimiter extent, then draw the │
+            // middles over the full extent (mid columns must span it).
+            let top_pad = ext_bl - bl;
+            let width = body.width();
+            let mut inner: Vec<Vec<char>> = Vec::with_capacity(ext_h);
+            for r in 0..ext_h {
+                inner.push(match r.checked_sub(top_pad) {
+                    Some(br) if br < h && br < body.lines.len() => body.lines[br].clone(),
+                    _ => vec![' '; width],
+                });
+            }
+            let mut x = 0;
+            for (kk, b) in parts.iter().enumerate() {
+                if kk % 2 == 1 {
+                    for line in inner.iter_mut() {
+                        line[x] = '│';
+                    }
+                }
+                x += b.width();
+            }
+            let side = |spec: char, is_left: bool| -> Vec<Vec<char>> {
+                if angle && (spec == '⟨' || spec == '⟩') {
+                    let k = ext_h / 2;
+                    (0..ext_h)
+                        .map(|r| {
+                            let (dist, glyph) = if r <= ext_bl {
+                                (ext_bl - r, if is_left { '╱' } else { '╲' })
+                            } else {
+                                (r - ext_bl - 1, if is_left { '╲' } else { '╱' })
+                            };
+                            let col = if is_left { dist } else { (k - 1) - dist };
+                            let mut row = vec![' '; k];
+                            row[col] = glyph;
+                            row
+                        })
+                        .collect()
+                } else {
+                    delim_column(spec, is_left, ext_h, ext_bl)
+                        .into_iter()
+                        .map(|c| vec![c])
+                        .collect()
+                }
+            };
+            let lcols = side(*left, true);
+            let rcols = side(*right, false);
+            let lw = lcols[0].len();
+            let mut lines = Vec::with_capacity(ext_h);
+            for (r, line) in inner.into_iter().enumerate() {
+                let mut row = Vec::with_capacity(lw + width + rcols[0].len());
+                row.extend_from_slice(&lcols[r]);
+                row.extend(line);
+                row.extend_from_slice(&rcols[r]);
                 lines.push(row);
             }
-            let cancel = body.cancel.iter().map(|&(r, c)| (r, c + 1)).collect();
+            let cancel = body
+                .cancel
+                .iter()
+                .map(|&(r, c)| (r + top_pad, c + lw))
+                .collect();
             Block {
                 lines,
-                baseline: body.baseline,
+                baseline: ext_bl,
                 cancel,
-                caret: body.caret.map(|(r, c)| (r, c + 1)),
+                caret: body.caret.map(|(r, c)| (r + top_pad, c + lw)),
                 marks: body
                     .marks
                     .iter()
-                    .map(|&(r, c, ch)| (r, c + 1, ch))
+                    .map(|&(r, c, ch)| (r + top_pad, c + lw, ch))
                     .collect(),
             }
         }

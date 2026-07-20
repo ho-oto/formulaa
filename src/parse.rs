@@ -256,6 +256,9 @@ fn fused_grid_markers(
 /// column to a family-distinct glyph (through ⎪ and further junctions).
 fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
     let ch = g.at(row, col);
+    if angle_open_turn(g, row, col) {
+        return Some('⟨');
+    }
     if ch != '┠' {
         return open_spec(ch);
     }
@@ -289,6 +292,9 @@ fn close_spec(c: char) -> Option<char> {
 /// column to a family-distinct glyph (through ⎪ and further junctions).
 fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
     let ch = g.at(row, col);
+    if angle_close_turn(g, row, col) {
+        return Some('⟩');
+    }
     if ch != '┨' {
         return close_spec(ch);
     }
@@ -325,6 +331,104 @@ fn left_family(spec: char) -> &'static [char] {
 /// side by walking the contiguous column run to a side-distinct glyph —
 /// without this, depth counting desyncs on rows that cut through a
 /// mismatched pair (e.g. a { … ┆ cases block).
+/// Tall angles are pure diagonals; the turn is a same-column vertical
+/// pair. Left angle: ╱ directly above ╲; right angle: ╲ directly above
+/// ╱. The upper turn row is the baseline.
+fn angle_open_turn(g: &Grid, row: usize, col: usize) -> bool {
+    g.at(row, col) == '╱'
+        && row + 1 < g.g.len()
+        && col < g.g[row + 1].len()
+        && g.at(row + 1, col) == '╲'
+}
+
+fn angle_close_turn(g: &Grid, row: usize, col: usize) -> bool {
+    g.at(row, col) == '╲'
+        && row + 1 < g.g.len()
+        && col < g.g[row + 1].len()
+        && g.at(row + 1, col) == '╱'
+}
+
+/// Resolve which angle an arm glyph belongs to by walking its diagonal
+/// toward the turn, testing the turn pattern at every step — adjacent
+/// angles can chain their arms into one diagonal run, so a walk must
+/// stop at the first turn it meets rather than at the end of the run.
+/// Some(true) = left/open, Some(false) = right/close.
+fn angle_arm_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
+    let ch = g.at(row, col);
+    let h = g.g.len();
+    let at = |r: usize, c: usize| -> char {
+        if r < h && c < g.g[r].len() {
+            g.at(r, c)
+        } else {
+            ' '
+        }
+    };
+    match ch {
+        '╱' => {
+            // Left upper arm: follow ╱ down-left; the turn shows as
+            // ╱-over-╲ at some cell of the run.
+            let (mut r, mut c) = (row, col);
+            loop {
+                if angle_open_turn(g, r, c) {
+                    return Some(true);
+                }
+                if c > 0 && at(r + 1, c - 1) == '╱' {
+                    r += 1;
+                    c -= 1;
+                } else {
+                    break;
+                }
+            }
+            // Right lower arm: follow ╱ up-right; the turn's ╲ sits
+            // directly above a run cell.
+            let (mut r, mut c) = (row, col);
+            loop {
+                if r > 0 && angle_close_turn(g, r - 1, c) {
+                    return Some(false);
+                }
+                if r > 0 && at(r - 1, c + 1) == '╱' {
+                    r -= 1;
+                    c += 1;
+                } else {
+                    break;
+                }
+            }
+            None
+        }
+        '╲' => {
+            // Right upper arm: follow ╲ down-right to a ╲-over-╱ turn.
+            let (mut r, mut c) = (row, col);
+            loop {
+                if angle_close_turn(g, r, c) {
+                    return Some(false);
+                }
+                if at(r + 1, c + 1) == '╲' {
+                    r += 1;
+                    c += 1;
+                } else {
+                    break;
+                }
+            }
+            // Left lower arm: follow ╲ up-left; the turn's ╱ sits
+            // directly above a run cell.
+            let (mut r, mut c) = (row, col);
+            loop {
+                if r > 0 && angle_open_turn(g, r - 1, c) {
+                    return Some(true);
+                }
+                if r > 0 && c > 0 && at(r - 1, c - 1) == '╲' {
+                    r -= 1;
+                    c -= 1;
+                } else {
+                    break;
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
     let ch = g.at(row, col);
     if OPEN_BRACKETS.contains(&ch) {
@@ -333,8 +437,12 @@ fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
     if CLOSE_BRACKETS.contains(&ch) {
         return Some(false);
     }
+    if let s @ Some(_) = angle_arm_side(g, row, col) {
+        return s;
+    }
     let family: &[char] = match ch {
         '⎪' => &['⎧', '⎨', '⎩', '⎫', '⎬', '⎭', '⎪'],
+        // Legacy single-column angle form (╱⟨╲ stacked).
         '╱' | '╲' => &['⟨', '⟩', '╱', '╲'],
         _ => return None,
     };
@@ -451,12 +559,15 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
             })
             .ok_or(())
             .or_else(|_| err("brace column without ⎨", first, c)),
+        // Angle: the ⟨ vertex (one-line / legacy column form) or the
+        // diagonal turn pair — ╱ directly above ╲ in the leftmost
+        // column. The upper turn row is the baseline.
         '⟨' | '╱' | '╲' => occupied
             .iter()
-            .find(|&&r| g.at(r, c) == '⟨')
+            .find(|&&r| g.at(r, c) == '⟨' || angle_open_turn(g, r, c))
             .copied()
             .ok_or(())
-            .or_else(|_| err("angle column without ⟨", first, c)),
+            .or_else(|_| err("angle column without a vertex or turn", first, c)),
         // Lattice left-edge column: the grid centers on its extent.
         '┌' | '├' | '└' => Ok((first + last) / 2),
         // Over/under brace corner: the argument owns the baseline on the
@@ -1390,7 +1501,28 @@ fn parse_delim(
         Some(sp) => sp,
         None => return err("cannot resolve delimiter family", bl, close_col),
     };
-    let (top, bot) = vertical_extent(g, rect, col, bl, left_family(left));
+    // Tall diagonal angles: the arms slant one column per row away from
+    // the turn, so the extent comes from the diagonal and the interior
+    // starts after the widest arm cell.
+    let (top, bot, interior_l) = if angle_open_turn(g, bl, col) {
+        let mut k = 1usize;
+        while bl + 1 > k && bl >= k && col + k <= rect.r && g.at(bl - k, col + k) == '╱' {
+            k += 1;
+        }
+        (bl + 1 - k, (bl + k).min(rect.b), col + k)
+    } else {
+        let (t, b) = vertical_extent(g, rect, col, bl, left_family(left));
+        (t, b, col + 1)
+    };
+    let interior_r = if angle_close_turn(g, bl, close_col) {
+        let mut k = 1usize;
+        while bl >= k && close_col > k && g.at(bl - k, close_col - k) == '╲' {
+            k += 1;
+        }
+        close_col - k
+    } else {
+        close_col - 1
+    };
 
     // Fused grid: ┬ markers on the delimiter's top row and/or ┠ junction
     // rows in the left column mean the interior is one grid whose edges
@@ -1440,14 +1572,14 @@ fn parse_delim(
         }
     }
 
-    let mid_cols = if close_col > col + 1 {
+    let mid_cols = if interior_r >= interior_l {
         mid_columns(
             g,
             Rect {
                 t: top,
                 b: bot,
-                l: col + 1,
-                r: close_col - 1,
+                l: interior_l,
+                r: interior_r,
             },
         )
     } else {
@@ -1455,8 +1587,9 @@ fn parse_delim(
     };
 
     let mut segs: Vec<Row> = Vec::new();
-    let mut start = col + 1;
-    for &m in mid_cols.iter().chain(std::iter::once(&close_col)) {
+    let mut start = interior_l;
+    let end_sentinel = interior_r + 1;
+    for &m in mid_cols.iter().chain(std::iter::once(&end_sentinel)) {
         let seg = if start >= m {
             vec![]
         } else {

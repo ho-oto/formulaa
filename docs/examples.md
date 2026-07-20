@@ -586,7 +586,7 @@ lim_(x → 0) f lr(( x ))
 LaTeX:
 
 ```latex
-\arg \max _{x\in S}f\left(x\right)
+\mathop{\arg \max}_{x\in S}f\left(x\right)
 ```
 
 Typst:

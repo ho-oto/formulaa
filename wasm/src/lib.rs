@@ -83,11 +83,10 @@ impl MasciiEditor {
         // Caret and decorations are zero-width metadata; the text screen
         // draws them over the glyphs (▌ caret, ⟦ ⟧ selection ends,
         // a/s/d… jump and block labels).
-        let mut lines: Vec<Vec<char>> = block
-            .to_strings()
-            .iter()
-            .map(|l| l.chars().collect())
-            .collect();
+        // Cell grid (no embedded combining strikes): overlay coords are
+        // cell coords, so strikes must not occupy indices. They are
+        // re-applied when the screen string is assembled below.
+        let mut lines: Vec<Vec<char>> = block.lines.clone();
         if lines.is_empty() {
             lines.push(Vec::new());
         }
@@ -121,9 +120,23 @@ impl MasciiEditor {
         if let Some((r, c)) = block.caret {
             put(&mut lines, r, c, CURSOR_CHAR);
         }
+        // Re-apply the cancel strikes cell-by-cell (skipping cells the
+        // caret overlay replaced).
+        let struck: std::collections::HashSet<(usize, usize)> =
+            block.cancel.iter().copied().collect();
         lines
             .into_iter()
-            .map(|l| l.into_iter().collect::<String>())
+            .enumerate()
+            .map(|(r, l)| {
+                let mut out = String::with_capacity(l.len() * 2);
+                for (c, ch) in l.into_iter().enumerate() {
+                    out.push(ch);
+                    if ch != CURSOR_CHAR && struck.contains(&(r, c)) {
+                        out.push('\u{338}');
+                    }
+                }
+                out
+            })
             .collect::<Vec<_>>()
             .join("\n")
     }

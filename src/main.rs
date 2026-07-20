@@ -51,8 +51,8 @@ usage: mascii [--session] [SAVE_PATH]  interactive TUI editor (default: formula.
 --session: persist the formula to .mascii-session after every edit and
 restore it on startup — survives restarts, e.g. cargo watch -x 'run -- --session'";
 
-/// Session file for `--session` (canonical AA; formatting spacers are
-/// lost on restore because reparsing drops them).
+/// Session file for `--session` (canonical AA with formatting spacers
+/// written as explicit ␠ so the restore parse keeps them).
 const SESSION_FILE: &str = ".mascii-session";
 
 /// Load the session formula, if a valid one is on disk.
@@ -406,11 +406,12 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
     // every block's rectangle, painted by nesting depth.
     if ed.structure {
         let block = render_root(&ed.root, None, &RenderCtx::canonical());
-        let lines = block.to_strings();
+        let struck: std::collections::HashSet<(usize, usize)> =
+            block.cancel.iter().copied().collect();
         let regions = mascii::parse::parse_with_regions(&block.to_text())
             .map(|(_, r)| r)
             .unwrap_or_default();
-        draw_structure(f, inner, &lines, &regions);
+        draw_structure(f, inner, &block.lines, &struck, &regions);
         return (inner.x, inner.y);
     }
 
@@ -418,34 +419,31 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
     let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
     let block = render_root(&root, cursor_ref, &ctx);
     let (lines, mut bg, mut cursor_cell) = marker_boxes(
-        &block.to_strings(),
+        &block.lines,
         &ed.marker_extents(),
         &block.marks,
         block.caret,
         ed.jump.is_some().then_some(ed.jump_selected),
     );
+    let struck: std::collections::HashSet<(usize, usize)> = block.cancel.iter().copied().collect();
     let mut lines = lines;
     // ^F: the free cursor itself gets the prominent caret style; the
     // snap preview is the subtler colored cell.
     if let Some(f) = &ed.free {
         let (sy, sx) = f.snap_at;
         if sy < lines.len() {
-            let mut row: Vec<char> = lines[sy].chars().collect();
-            if sx >= row.len() {
-                row.resize(sx + 1, ' ');
+            if sx >= lines[sy].len() {
+                lines[sy].resize(sx + 1, ' ');
                 bg[sy].resize(sx + 1, None);
-                lines[sy] = row.into_iter().collect();
             }
             let last = bg[sy].len().saturating_sub(1);
             bg[sy][sx.min(last)] = Some(FREE_BG);
         }
         let (fy, fx) = f.at;
         if fy < lines.len() {
-            let mut row: Vec<char> = lines[fy].chars().collect();
-            if fx >= row.len() {
-                row.resize(fx + 1, ' ');
+            if fx >= lines[fy].len() {
+                lines[fy].resize(fx + 1, ' ');
                 bg[fy].resize(fx + 1, None);
-                lines[fy] = row.into_iter().collect();
             }
             cursor_cell = Some((fy, fx));
         }
@@ -464,7 +462,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
     for (y, (l, bgrow)) in lines.iter().zip(&bg).enumerate() {
         let ccol = cursor_cell.and_then(|(cy, cx)| (cy == y).then_some(cx));
         let mut spans = vec![Span::raw(pad.clone())];
-        spans.extend(decorate_line(l, bgrow, ccol));
+        spans.extend(decorate_line(l, y, &struck, bgrow, ccol));
         text.push(Line::from(spans));
     }
     f.render_widget(Paragraph::new(text), inner);
@@ -489,13 +487,20 @@ const FREE_BG: Color = Color::Indexed(24);
 /// always equals the undecorated render.
 #[allow(clippy::type_complexity)]
 fn marker_boxes(
-    lines: &[String],
+    lines: &[Vec<char>],
     extents: &[(usize, usize, usize)],
     marks: &[(usize, usize, char)],
     caret: Option<(usize, usize)>,
     selected: Option<usize>,
-) -> (Vec<String>, Vec<Vec<Option<Color>>>, Option<(usize, usize)>) {
-    let mut grid: Vec<Vec<char>> = lines.iter().map(|l| l.chars().collect()).collect();
+) -> (
+    Vec<Vec<char>>,
+    Vec<Vec<Option<Color>>>,
+    Option<(usize, usize)>,
+) {
+    // Cell coordinates throughout — cancel strikes (combining U+0338)
+    // are a separate channel applied at span emission, so a struck cell
+    // never desyncs the column indexing (or splits its ligature).
+    let mut grid: Vec<Vec<char>> = lines.to_vec();
     if grid.is_empty() {
         grid.push(Vec::new());
     }
@@ -612,17 +617,21 @@ fn marker_boxes(
         }
         (y, x)
     });
-    (
-        grid.into_iter().map(String::from_iter).collect(),
-        bg,
-        cursor_cell,
-    )
+    (grid, bg, cursor_cell)
 }
 
-/// Turn a rendered line into spans: private-use marker chars become
+/// Turn a rendered cell row into spans: private-use marker chars become
 /// colored jump/block labels, the cursor glyph blinks, and box
-/// backgrounds from `marker_boxes` are applied to plain glyphs.
-fn decorate_line(line: &str, bg: &[Option<Color>], cursor: Option<usize>) -> Vec<Span<'static>> {
+/// backgrounds from `marker_boxes` are applied to plain glyphs. A
+/// struck cell gets its combining U+0338 appended *inside* its span,
+/// so the ligature is never split across style boundaries.
+fn decorate_line(
+    line: &[char],
+    y: usize,
+    struck: &std::collections::HashSet<(usize, usize)>,
+    bg: &[Option<Color>],
+    cursor: Option<usize>,
+) -> Vec<Span<'static>> {
     let cursor_style =
         Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD | Modifier::SLOW_BLINK);
     let label_style = Style::default()
@@ -642,9 +651,14 @@ fn decorate_line(line: &str, bg: &[Option<Color>], cursor: Option<usize>) -> Vec
             });
         }
     };
-    for (i, c) in line.chars().enumerate() {
+    for (i, &c) in line.iter().enumerate() {
         let u = c as u32;
         let cell_bg = bg.get(i).copied().flatten();
+        let cell = if struck.contains(&(y, i)) {
+            format!("{}\u{338}", c)
+        } else {
+            c.to_string()
+        };
         if cursor == Some(i) {
             // Terminal-style caret: reverse video on the glyph right of
             // the insertion point.
@@ -653,7 +667,7 @@ fn decorate_line(line: &str, bg: &[Option<Color>], cursor: Option<usize>) -> Vec
                 Some(color) => cursor_style.bg(color),
                 None => cursor_style,
             };
-            spans.push(Span::styled(c.to_string(), style));
+            spans.push(Span::styled(cell, style));
         } else if c == '␣' {
             // Explicit space atom: keep visible but unobtrusive.
             flush(&mut buf, buf_bg, &mut spans);
@@ -661,7 +675,7 @@ fn decorate_line(line: &str, bg: &[Option<Color>], cursor: Option<usize>) -> Vec
             if let Some(color) = cell_bg {
                 style = style.bg(color);
             }
-            spans.push(Span::styled("␣", style));
+            spans.push(Span::styled(cell, style));
         } else if (JUMP_CHAR_BASE..JUMP_CHAR_BASE + JUMP_LABELS.chars().count() as u32).contains(&u)
         {
             let label = JUMP_LABELS
@@ -680,7 +694,7 @@ fn decorate_line(line: &str, bg: &[Option<Color>], cursor: Option<usize>) -> Vec
                 flush(&mut buf, buf_bg, &mut spans);
                 buf_bg = cell_bg;
             }
-            buf.push(c);
+            buf.push_str(&cell);
         }
     }
     flush(&mut buf, buf_bg, &mut spans);
@@ -696,9 +710,15 @@ const DEPTH_BG: [Color; 5] = [
     Color::Indexed(58), // olive
 ];
 
-fn draw_structure(f: &mut Frame, inner: Rect, lines: &[String], regions: &[RegionSpan]) {
+fn draw_structure(
+    f: &mut Frame,
+    inner: Rect,
+    lines: &[Vec<char>],
+    struck: &std::collections::HashSet<(usize, usize)>,
+    regions: &[RegionSpan],
+) {
     let height = lines.len();
-    let width = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+    let width = lines.iter().map(|l| l.len()).max().unwrap_or(0);
     // Deepest region wins per cell.
     let mut depth = vec![vec![0usize; width]; height];
     let mut sorted: Vec<&RegionSpan> = regions.iter().collect();
@@ -722,13 +742,16 @@ fn draw_structure(f: &mut Frame, inner: Rect, lines: &[String], regions: &[Regio
         let mut spans = vec![Span::raw(pad.clone())];
         let mut buf = String::new();
         let mut cur = 0usize;
-        for (x, c) in l.chars().enumerate() {
+        for (x, &c) in l.iter().enumerate() {
             let d = depth[y][x];
             if d != cur && !buf.is_empty() {
                 spans.push(styled_depth(std::mem::take(&mut buf), cur));
             }
             cur = d;
             buf.push(c);
+            if struck.contains(&(y, x)) {
+                buf.push('\u{338}');
+            }
         }
         if !buf.is_empty() {
             spans.push(styled_depth(buf, cur));
@@ -761,18 +784,82 @@ mod tests {
         let ctx = RenderCtx { italic: true };
         let block = render_root(&root, cursor_ref, &ctx);
         let (lines, _, _) = marker_boxes(
-            &block.to_strings(),
+            &block.lines,
             &ed.marker_extents(),
             &block.marks,
             block.caret,
             ed.jump.is_some().then_some(ed.jump_selected),
         );
-        lines
+        lines.into_iter().map(String::from_iter).collect()
+    }
+
+    #[test]
+    fn struck_cells_survive_cursor_decoration() {
+        // A cancel next to the cursor: cell indexing must not shift and
+        // the base+U+0338 ligature must stay inside one span (the bug:
+        // to_strings() embedded the strike, so char index != column and
+        // the caret split the ligature — the glyph vanished).
+        let mut ed = Editor::new();
+        type_script_keys(&mut ed, "ab");
+        ed.input(Key::Left, true, false); // select b
+        ed.input(Key::Char('\\'), false, false);
+        for c in "cancel".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        ed.input(Key::Enter, false, false);
+        // Cursor sits right of the struck b; walk it across the strike.
+        for _ in 0..3 {
+            let (root, cursor) = ed.decorated();
+            let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+            let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
+            let struck: std::collections::HashSet<(usize, usize)> =
+                block.cancel.iter().copied().collect();
+            assert!(!struck.is_empty(), "cancel present");
+            let (lines, bg, cursor_cell) = marker_boxes(
+                &block.lines,
+                &ed.marker_extents(),
+                &block.marks,
+                block.caret,
+                None,
+            );
+            let (y, x) = cursor_cell.expect("caret visible");
+            let spans = decorate_line(&lines[y], y, &struck, &bg[y], Some(x));
+            let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
+            // Every struck glyph is still there, followed by its strike.
+            for &(r, c) in &block.cancel {
+                if r == y {
+                    let cell: Vec<char> = joined.chars().collect();
+                    // find the base char count up to cell c: strikes are
+                    // combining, so count non-combining chars.
+                    let mut col = 0usize;
+                    let mut ok = false;
+                    let mut it = cell.iter().peekable();
+                    while let Some(&ch) = it.next() {
+                        if ch == '\u{338}' {
+                            continue;
+                        }
+                        if col == c {
+                            ok = it.peek() == Some(&&'\u{338}');
+                            break;
+                        }
+                        col += 1;
+                    }
+                    assert!(ok, "strike stays glued at col {}: {:?}", c, joined);
+                }
+            }
+            ed.input(Key::Left, false, false);
+        }
+    }
+
+    fn type_script_keys(ed: &mut Editor, s: &str) {
+        for c in s.chars() {
+            ed.input(Key::Char(c), false, false);
+        }
     }
 
     #[test]
     fn selection_box_paints_without_touching_the_text() {
-        let lines = vec![" ab ".to_string()];
+        let lines: Vec<Vec<char>> = vec![" ab ".chars().collect()];
         let marks = [(0, 1, SEL_OPEN), (0, 3, SEL_CLOSE)];
         let (out, bg, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None, None);
         assert_eq!(out, lines, "text must be untouched");
@@ -787,7 +874,11 @@ mod tests {
         // A selected fraction: rows from the extent, not from content
         // scanning — the denominator row below the box stays unpainted
         // when the extent says so.
-        let lines = vec![" 1 ".to_string(), "───".to_string(), " 2 ".to_string()];
+        let lines: Vec<Vec<char>> = vec![
+            " 1 ".chars().collect(),
+            "───".chars().collect(),
+            " 2 ".chars().collect(),
+        ];
         let marks = [(1, 0, SEL_OPEN), (1, 3, SEL_CLOSE)];
         let (_, bg, _) = marker_boxes(&lines, &[(1, 1, 0)], &marks, None, None);
         assert!(bg.iter().all(|row| row.iter().all(|c| c.is_some())));
@@ -801,9 +892,9 @@ mod tests {
     #[test]
     fn labels_overlay_and_caret_pads() {
         let label = char::from_u32(JUMP_CHAR_BASE).unwrap();
-        let lines = vec!["xy".to_string()];
+        let lines: Vec<Vec<char>> = vec!["xy".chars().collect()];
         let (out, _, cursor) = marker_boxes(&lines, &[], &[(0, 0, label)], Some((0, 2)), None);
-        let chars: Vec<char> = out[0].chars().collect();
+        let chars: Vec<char> = out[0].clone();
         assert_eq!(chars[0], label, "label over the glyph");
         assert_eq!(chars[1], 'y');
         assert_eq!(cursor, Some((0, 2)));

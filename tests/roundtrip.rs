@@ -285,6 +285,14 @@ fn tall_middle_braket() {
         row_to_latex(&normalize(&row)),
         "\\left\\langle \\psi \\middle|\\frac{H}{2}\\middle|\\psi \\right\\rangle "
     );
+    // Tall angles are pure diagonals (even height, the turn is a
+    // same-column ╱╲ / ╲╱ pair, upper turn row = baseline); the ⟨ ⟩
+    // glyphs appear only in the one-line form.
+    let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
+    assert_eq!(aa, " ╱ │ 𝐻 │ ╲\n╱ ψ│───│ψ ╲\n╲  │ 2 │  ╱\n ╲ │   │ ╱");
+    // The legacy single-column ╱⟨╲ form still parses.
+    let legacy = "╱     1 ╲\n⟨𝑥 + ───⟩\n╲     2 ╱";
+    assert!(parse(legacy).is_ok());
 }
 
 /// Multi-line formula: Breaks stack the lines with a lone-┄ continuation
