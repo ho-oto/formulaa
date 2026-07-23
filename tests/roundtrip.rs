@@ -412,6 +412,26 @@ fn box_drawing_delim_forms() {
     );
 }
 
+/// The sqrt ┌─ overline and its separation from aligned ─ neighbours.
+#[test]
+fn sqrt_box_overline() {
+    let row = n(sqrt(cat(&[s("1+"), n(frac(s("1"), s("2")))])));
+    roundtrip("sqrt-box", &row);
+    let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
+    assert!(aa.starts_with("┌────"), "{}", aa);
+    // A sup whose arrow body lands on the overline row must not merge
+    // into the greedy ─ scan (geometric separation space).
+    let row = cat(&[
+        n(sqrt(s("2"))),
+        n(sup(n(Node::Arrow {
+            op: '→',
+            over: vec![],
+            under: vec![],
+        }))),
+    ]);
+    roundtrip("sqrt-then-arrow-sup", &row);
+}
+
 /// Ceil / floor / double-bar norm delimiters.
 #[test]
 fn ceil_floor_norm() {

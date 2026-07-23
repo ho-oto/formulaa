@@ -191,6 +191,17 @@ fn accent_wraps_selection_as_wide_accent() {
 }
 
 #[test]
+fn caret_underscore_commands_insert_scripts() {
+    // \^z and \_i make real Sup/Sub nodes (not modifier-letter atoms).
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"x \^z");
+    assert_eq!(latex(&ed), "x^{z}");
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"x \_10 \^gamma");
+    assert_eq!(latex(&ed), "x_{10}^{\\gamma }");
+}
+
+#[test]
 fn cancel_wraps_the_selection() {
     // Shift-selection then \cancel.
     let mut ed = Editor::new();

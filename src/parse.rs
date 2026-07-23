@@ -538,6 +538,13 @@ fn angle_arm_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
 
 fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
     let ch = g.at(row, col);
+    // The sqrt overline corner (┌ directly above the radical stem) is
+    // not a delimiter: its row has no matching close, and counting it
+    // would desync the depth scan.
+    if ch == '┌' && row + 1 < g.g.len() && matches!(g.at(row + 1, col), '│' | '√' | '∛' | '∜')
+    {
+        return None;
+    }
     // Norm columns use the same ‖ on both sides: parity along the row
     // decides (full-height columns keep the parity consistent per row).
     // Direct norm-in-norm is therefore unsupported.
@@ -679,6 +686,20 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
             .ok_or(())
             .or_else(|_| err("angle column without a vertex or turn", first, c)),
         // Lattice left-edge column: the grid centers on its extent.
+        // A ┌ directly above a radical stem is the sqrt overline corner
+        // (a lattice ┌ has a blank gap below instead): dive into the
+        // radicand right of the stem.
+        '┌' if first < last && matches!(g.at(first + 1, c), '│' | '√' | '∛' | '∜') => {
+            find_baseline(
+                g,
+                Rect {
+                    t: first + 1,
+                    b: last,
+                    l: c + 1,
+                    r: rect.r,
+                },
+            )
+        }
         '┌' | '├' | '└' => Ok((first + last) / 2),
         // Accent band: the base owns the baseline on the other side
         // (over marks ride above their base, under marks below).
@@ -1166,11 +1187,11 @@ fn parse_region(
                     }
                     bot += 1;
                 }
-                if top == 0 {
-                    return err("radical without overline", top, col);
+                if top == 0 || g.at(top - 1, col) != '┌' {
+                    return err("radical without its ┌─ overline", top, col);
                 }
                 let index = radical_index(g.at(bot, col)).unwrap();
-                let w = scan_while(g, top - 1, col + 1, rect.r, |c| c == '_') - col;
+                let w = scan_while(g, top - 1, col + 1, rect.r, |c| c == FRAC_BAR) - col;
                 let inner = Rect {
                     t: top,
                     b: bot,
@@ -1496,10 +1517,7 @@ fn accent_band_run(
         } else if !trailed
             // The full material alphabet: ─ and > for the vec arrow,
             // the fill/centered drawn marks for everything else.
-            && matches!(
-                ch,
-                FRAC_BAR | '>' | '_' | '¯' | '˜' | '˷' | '˰' | '˯' | '˳' | '․'
-            )
+            && matches!(ch, '￫' | '_' | '¯' | '˜' | '˷' | '˰' | '˯' | '˳' | '․')
         {
             piece.push(ch);
         } else {
@@ -1515,9 +1533,8 @@ fn accent_band_run(
     // baseline dive relies on the over/under classification being
     // positionally unambiguous.
     let all = |m: char| piece.iter().all(|&c| c == m);
-    let mark = if over && piece.contains(&'>') && piece.iter().all(|&c| c == '>' || c == FRAC_BAR) {
-        // ─…─> arrow: \vec.
-        Some('⇀')
+    let mark = if over && all('￫') {
+        Some('⇀') // centered halfwidth arrow: \overrightarrow
     } else if over && all('˰') {
         Some('^') // centered low arrowhead: \widehat
     } else if over && all('˯') {

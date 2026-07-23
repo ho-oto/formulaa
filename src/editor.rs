@@ -175,6 +175,20 @@ impl Default for Editor {
 /// so `\lr(]`, `\lr{|}` and `\lr\langle||\rangle` all read like the
 /// picture. None when the string is not a delimiter spec (a `\lr…`
 /// symbol name like \lrcorner then resolves normally).
+/// Argument row for a \^… / \_… script command: a symbol name
+/// (\^gamma) or a run of ASCII alphanumerics (\^z, \_10).
+fn script_cmd_arg(rest: &str) -> Option<crate::ast::Row> {
+    if rest.is_empty() {
+        return None;
+    }
+    if let Some(c) = symbol_by_name(rest) {
+        return Some(vec![Node::Sym(c)]);
+    }
+    rest.chars()
+        .all(|c| c.is_ascii_alphanumeric())
+        .then(|| rest.chars().map(Node::Sym).collect())
+}
+
 fn lr_spec(cmd: &str) -> Option<(char, char, Vec<char>)> {
     let spec = cmd
         .strip_prefix("delim")
@@ -2121,6 +2135,25 @@ impl Editor {
                     self.col += 1;
                 } else if let Some((mark, _)) = accent_by_name(cmd) {
                     self.apply_accent(mark);
+                } else if let Some(arg) = cmd
+                    .strip_prefix('^')
+                    .map(|r| (true, r))
+                    .or_else(|| cmd.strip_prefix('_').map(|r| (false, r)))
+                    .and_then(|(sup, rest)| script_cmd_arg(rest).map(|a| (sup, a)))
+                {
+                    // \^z / \_i insert a real Sup / Sub node (the ext
+                    // symbol table's modifier-letter spellings like
+                    // "^A" -> ᴬ are shadowed on purpose: a superscript
+                    // should be structure, not a look-alike atom).
+                    let (sup, arg) = arg;
+                    let col = self.col;
+                    let node = if sup {
+                        Node::Sup { arg }
+                    } else {
+                        Node::Sub { arg }
+                    };
+                    self.cur_row_mut().insert(col, node);
+                    self.col += 1;
                 } else if let Some(c) = symbol_by_name(cmd) {
                     if bigop_by_char(c) {
                         self.insert_and_enter(Node::BigOp {

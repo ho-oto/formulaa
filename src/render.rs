@@ -628,9 +628,10 @@ pub fn render_row(
     // A 2D script right after a cancel instead needs a non-blank baseline
     // anchor (⬚), or the strike scan would fuse raised content.
     // Rows (relative to the baseline) where a block's edge column holds
-    // '_': the sqrt overline scans '_' greedily, and the compact bar
-    // accent draws '_' too, so two runs touching across a sibling
-    // boundary would merge into one overline.
+    // '─': the sqrt overline scans its ─ run greedily off the baseline
+    // (a sup's fraction bar can align with it), so two ─ cells touching
+    // across a sibling boundary on any row get a separating space (the
+    // baseline case is also covered by the fuse rules above).
     let bar_edge_rows = |b: &Block, right: bool| -> Vec<isize> {
         let w = b.width();
         b.lines
@@ -642,7 +643,7 @@ pub fn render_row(
                 } else {
                     l.first().copied()
                 };
-                (c == Some('_')).then_some(i as isize - b.baseline as isize)
+                (c == Some(FRAC_BAR)).then_some(i as isize - b.baseline as isize)
             })
             .collect()
     };
@@ -879,15 +880,9 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             let band_row = |m: char| {
                 let mut r = vec![OP_BAND; w];
                 match m {
-                    // Vec: ─ body with an ASCII > head, like the
-                    // stretchy \xrightarrow (─ and → do not always
-                    // connect visually across fonts).
-                    '⇀' => {
-                        for cell in r.iter_mut().take(w - 1).skip(1) {
-                            *cell = FRAC_BAR;
-                        }
-                        r[w - 2] = '>';
-                    }
+                    // Vec: the single centered halfwidth arrow, like
+                    // the other centered marks.
+                    '⇀' => r[w / 2] = '￫',
                     // Hat / check: the single low arrowhead, centered
                     // (the ╱╲ / ╲╱ slope pairs still read leniently).
                     '^' => r[w / 2] = '˰',
@@ -1023,8 +1018,9 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             let a = render_row(arg, cur(Field::SqrtArg), true, ctx);
             let h = a.height();
             let w = a.width();
-            // Overline row on top, radical stem hugging the left:
-            //  ___
+            // Box-drawing overline row on top (┌ corner + ─ run),
+            // radical stem hugging the left:
+            // ┌────
             // √x+1
             let radical = match index {
                 3 => '∛',
@@ -1032,10 +1028,8 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 _ => '√',
             };
             let mut lines = Vec::with_capacity(h + 1);
-            let mut top = vec![' '; w + 1];
-            for c in top.iter_mut().skip(1) {
-                *c = '_';
-            }
+            let mut top = vec![FRAC_BAR; w + 1];
+            top[0] = '┌';
             lines.push(top);
             for (r, line) in a.lines.iter().enumerate() {
                 let head = if r == h - 1 { radical } else { '│' };
@@ -1799,7 +1793,7 @@ mod tests {
             arg: sym_row("2"),
             index: 2,
         }];
-        assert_eq!(plain(&root), vec![" _", "√2"]);
+        assert_eq!(plain(&root), vec!["┌─", "√2"]);
     }
 
     #[test]
