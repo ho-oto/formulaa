@@ -16,8 +16,8 @@ pub enum Node {
     /// (Use the ␣ atom, \space, for a *semantic* space.)
     Spacer,
     /// Line break of a multi-line formula (top-level row only). Renders
-    /// as a vertical stack: the continuation line starts with the `┄ `
-    /// marker at its baseline (a lone ┄ has no other reading — a band
+    /// as a vertical stack: the continuation line starts with the `┈ `
+    /// marker at its baseline (a lone ┈ has no other reading — a band
     /// always sandwiches its pieces without spaces). LaTeX: `\\`,
     /// Typst: `\ `.
     Break,
@@ -45,7 +45,7 @@ pub enum Node {
         unders: Vec<char>,
         base: char,
     },
-    /// Stretchy accent over/under a multi-character base: a ┄band┄
+    /// Stretchy accent over/under a multi-character base: a ┈band┈
     /// whose limit region holds nothing but the mark character —
     /// reserved marks cannot be atoms, so a marks-only limit row is
     /// unambiguous (\widehat{abc}, \overline{xy}, \underline{...}).
@@ -72,9 +72,9 @@ pub enum Node {
     Sub {
         arg: Row,
     },
-    /// Band with under/over limits: anything sandwiched in ┄ without
-    /// spaces (`┄∑┄`, `┄lim┄`, `┄arg┄max┄` …). The base is a flat one-line
-    /// row; blank columns inside it are drawn as ┄. With both limits
+    /// Band with under/over limits: anything sandwiched in ┈ without
+    /// spaces (`┈∑┈`, `┈lim┈`, `┈arg┈max┈` …). The base is a flat one-line
+    /// row; blank columns inside it are drawn as ┈. With both limits
     /// empty the node normalizes away *only* for promotable bases (a
     /// bare ∑ / lim is just an atom, ↑/↓ lifts it back); an \op* name
     /// keeps its band (`promotable_base`).
@@ -94,7 +94,7 @@ pub enum Node {
     /// Stretchy labeled arrow (\xrightarrow / \xleftarrow and the ⇒/⇐
     /// doubles): a ─ (or ═) body with an ASCII head (< or >) at the
     /// pointing end, labels over/under spanning its extent (same
-    /// range-band idea as ┄). `op` is → ← ⇒ or ⇐.
+    /// range-band idea as ┈). `op` is → ← ⇒ or ⇐.
     Arrow {
         op: char,
         over: Row,
@@ -102,7 +102,7 @@ pub enum Node {
     },
     /// Auto-scaling delimiter block. `left`/`right`/`mids` hold delimiter
     /// *spec* chars: ( ) [ ] { } ⟨ ⟩ | and '.' (null delimiter, drawn as
-    /// the thin ▏ ▕ markers). Middles ('|' only) separate the segments;
+    /// the dashed ┆ ┊ ghosts). Middles ('|' only) separate the segments;
     /// segs.len() == mids.len() + 1. Segments are ordinary rows — a matrix
     /// is nothing more than a Delim whose segment contains an Array.
     Delim {
@@ -292,7 +292,7 @@ pub fn op_words(base: &Row) -> Option<(Vec<&str>, bool)> {
 pub fn promotable_base(base: &Row) -> bool {
     match &base[..] {
         [Node::Sym(c)] => crate::symbols::bigop_by_char(*c),
-        [Node::Func(f)] => crate::symbols::LIMIT_FUNCS.contains(&f.as_str()),
+        [Node::Func(f)] => crate::symbols::func_takes_limits(f),
         _ => false,
     }
 }
@@ -303,7 +303,7 @@ pub fn normalize(row: &Row) -> Row {
     // the editor can lift that base back into a band (∑-class atoms and
     // lim-class functions, via ↑/↓). An \op* name (Text piece or a
     // multi-piece base) has no such way back, so its band survives
-    // empty limits: ┄ess┄sup┄ stays a band.
+    // empty limits: ┈ess┈sup┈ stays a band.
     let mut pre: Row = Vec::with_capacity(row.len());
     for node in row {
         match normalize_node(node) {

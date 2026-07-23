@@ -776,7 +776,7 @@ impl Editor {
             let col = self.col - 1;
             let promotable = match &self.cur_row()[col] {
                 Node::Sym(c) => bigop_by_char(*c),
-                Node::Func(name) => crate::symbols::LIMIT_FUNCS.contains(&name.as_str()),
+                Node::Func(name) => crate::symbols::func_takes_limits(name),
                 _ => false,
             };
             if promotable {
@@ -1898,7 +1898,7 @@ impl Editor {
 
     /// Commit the box: each space-separated word becomes a Func
     /// (dictionary words) or a bare upright run (Text). `\op*` builds a
-    /// ┄band┄ with the words as its pieces (┄arg┄max┄) and enters the
+    /// ┈band┈ with the words as its pieces (┈arg┈max┈) and enters the
     /// lower limit; plain `\op` inserts the words joined by ␣.
     pub fn op_commit(&mut self) {
         let Some((kind, text)) = self.op_entry.take() else {
@@ -2083,7 +2083,7 @@ impl Editor {
                 over: vec![],
                 under: vec![],
             }),
-            // Multi-piece limit operators (┄arg┄max┄). Hardcoded for now;
+            // Multi-piece limit operators (┈arg┈max┈). Hardcoded for now;
             // arbitrary bases need OpBase editing (roadmap).
             "argmax" | "argmin" => {
                 let f = if cmd == "argmax" { "max" } else { "min" };
@@ -2108,8 +2108,8 @@ impl Editor {
                         lower: vec![],
                         upper: vec![],
                     });
-                } else if crate::symbols::LIMIT_FUNCS.contains(&cmd) {
-                    // Limit-taking operators enter the lower limit (┄lim┄).
+                } else if crate::symbols::func_takes_limits(cmd) {
+                    // Limit-taking operators enter the lower limit (┈lim┈).
                     self.insert_and_enter(Node::BigOp {
                         base: vec![Node::Func(cmd.to_string())],
                         lower: vec![],
@@ -2313,7 +2313,7 @@ mod tests {
             ]
         );
         // \op*: an operator band; space-separated words become the band
-        // pieces (┄ess┄sup┄), dictionary words as Funcs.
+        // pieces (┈ess┈sup┈), dictionary words as Funcs.
         let mut ed = Editor::new();
         ed.execute("op*");
         type_name(&mut ed, "ess sup");
@@ -2611,7 +2611,7 @@ mod tests {
         ed.insert_sym('n');
         ed.exit_inset();
         assert_eq!(row_to_latex(&ed.root), "\\sum _{n}");
-        // Same for limit-taking functions (┄lim┄).
+        // Same for limit-taking functions (┈lim┈).
         let mut ed = Editor::new();
         ed.root = vec![Node::Func("lim".into())];
         ed.col = 1;

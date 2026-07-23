@@ -32,7 +32,7 @@ fn node_to_latex(node: &Node) -> String {
         Node::Break => " \\\\ ".into(),
         Node::Sym(c) => sym_to_latex(*c),
         Node::Func(name) => {
-            if crate::symbols::LATEX_FUNCS.contains(&name.as_str()) {
+            if crate::symbols::latex_knows_func(name) {
                 format!("\\{} ", name)
             } else {
                 format!("\\operatorname{{{}}}", name)
@@ -69,13 +69,13 @@ fn node_to_latex(node: &Node) -> String {
             // \sum_{..}^{..}, \lim_{..}, \arg\max_{..} — the base row's
             // own serialization already yields the operator commands.
             // Word pieces with a Text among them are an \op* name
-            // (┄ess┄sup┄): \operatorname* keeps the limits underneath
+            // (┈ess┈sup┈): \operatorname* keeps the limits underneath
             // (plain \mathrm would set them aside).
             let mut s = match crate::ast::op_words(base) {
                 Some((ws, true)) => {
                     format!("\\operatorname*{{{}}}", ws.join(" "))
                 }
-                // A multi-piece base (┄arg┄min┄) is *one* operator: group
+                // A multi-piece base (┈arg┈min┈) is *one* operator: group
                 // it so the limits center under the whole thing —
                 // \arg \min_{θ} would hang θ under \min alone.
                 _ if base.len() > 1 => format!("\\mathop{{{}}}", row_to_latex(base).trim_end()),

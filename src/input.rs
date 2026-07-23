@@ -175,7 +175,7 @@ impl Editor {
 
     /// \op name box: printable keys build the name; any key that is not
     /// part of it commits first, then falls through to the base layer.
-    /// Space separates band pieces in \op* (`ess sup` → ┄ess┄sup┄) but
+    /// Space separates band pieces in \op* (`ess sup` → ┈ess┈sup┈) but
     /// simply commits a plain \op (one word is the whole name there).
     fn op_box_keys(&mut self, key: Key, ctrl: bool) -> Option<Effect> {
         use crate::editor::BoxKind;

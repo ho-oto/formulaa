@@ -17,9 +17,8 @@ use crate::render::{
 };
 
 /// Left-edge glyphs of a grid lattice column (see render::LATTICE_CHARS).
-const LATTICE_LEFT: &[char] = &['┌', '├', '└'];
+const LATTICE_LEFT: &[char] = &['┌', '├', '└']; // U+250C/251C/2514
 const LATTICE_TOP: &[char] = &['┌', '┬', '┐'];
-use crate::symbols::{is_over_mark, is_under_mark};
 
 const RADICALS: &[(char, u8)] = &[('√', 2), ('∛', 3), ('∜', 4)];
 
@@ -132,12 +131,12 @@ fn trim(g: &Grid, mut rect: Rect) -> Option<Rect> {
 /// Lattice edges (┌├└ / ┐┤┘) are included so a lattice interior is
 /// bracket-protected against cell/script splitting like any other pair.
 const OPEN_BRACKETS: &[char] = &[
-    '(', '⎛', '⎜', '⎝', '[', '⎡', '⎢', '⎣', '{', '⎧', '⎨', '⎩', '⟨', '⎸', '╎', '▏', '┌', '├', '└',
-    '┠', '⌈', '⌊',
+    '(', '⎛', '⎜', '⎝', '[', '⎡', '⎢', '⎣', '{', '⎧', '⎨', '⎩', '⟨', '⎸', '┆', '┌', '├', '└', '⌈',
+    '⌊',
 ];
 const CLOSE_BRACKETS: &[char] = &[
-    ')', '⎞', '⎟', '⎠', ']', '⎤', '⎥', '⎦', '}', '⎫', '⎬', '⎭', '⟩', '⎹', '┆', '▕', '┐', '┤', '┘',
-    '┨', '⌉', '⌋',
+    ')', '⎞', '⎟', '⎠', ']', '⎤', '⎥', '⎦', '}', '⎫', '⎬', '⎭', '⟩', '⎹', '┊', '┐', '┤', '┘', '⌉',
+    '⌋',
 ];
 
 /// Delimiter spec char for a glyph that can appear on the *baseline row*
@@ -149,21 +148,21 @@ fn open_spec(c: char) -> Option<char> {
         '[' | '⎡' | '⎢' | '⎣' => '[',
         '⌈' => '⌈',
         '⌊' => '⌊',
-        '‖' | '║' => '‖',
+        '‖' => '‖',
         '{' | '⎨' => '{',
         '⟨' => '⟨',
         '⎸' => '|',
-        '╎' | '▏' => '.',
-        // ┠ (fused-grid junction) resolves its family via the column walk
-        // in open_spec_at; standalone it only marks "an open side".
-        '┠' => return None,
+        '┆' => '.',
+        // ├ (fused-grid junction) resolves its family via the column walk
+        // in open_spec_at; standalone it is a lattice edge.
+        '├' => return None,
         _ => return None,
     })
 }
 
 /// Fused-grid markers of a delimiter block, if its interior is one.
 /// Canonical shapes: pure ┼-rows (multi-row × multi-col), ┬/┴ edge rows
-/// (one row), ┠/┨ junctions in the delimiter columns (one column) — and
+/// (one row), ├/┤ junctions in the delimiter columns (one column) — and
 /// any mix of these is accepted as input. A "pure" row contains nothing
 /// but blanks and its marker (a nested structure always shows some other
 /// glyph on that row). Returns (marker_cols, marker_rows, t, b) with the
@@ -219,7 +218,7 @@ fn fused_grid_markers(
                 _ => cols_marks = Some(cs),
             }
             marker_rows.push(r);
-        } else if g.at(r, col) == '┠' || g.at(r, close) == '┨' {
+        } else if g.at(r, col) == '├' || g.at(r, close) == '┤' {
             marker_rows.push(r);
         }
     }
@@ -232,14 +231,17 @@ fn fused_grid_markers(
 
 /// Resolve the delimiter family of a glyph on the baseline row.
 /// Bracket pieces are shared with ceil/floor (⎡+⎢ = ceil, ⎢+⎣ = floor,
-/// both corners = bracket) and ┠ junctions belong to any family, so the
+/// both corners = bracket) and ├ junctions belong to any family, so the
 /// contiguous column run's glyph set decides.
 fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
+    if curly_pair_side(g, row, col) == Some(true) {
+        return Some('{');
+    }
     let ch = g.at(row, col);
     if angle_open_turn(g, row, col) {
         return Some('⟨');
     }
-    if !matches!(ch, '⎡' | '⎢' | '⎣' | '┠') {
+    if !matches!(ch, '⎡' | '⎢' | '⎣') && !(ch == '├' && fused_junction(g, row, col)) {
         return open_spec(ch);
     }
     let h = g.g.len();
@@ -248,7 +250,7 @@ fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
             c,
             '⎡' | '⎢'
                 | '⎣'
-                | '┠'
+                | '├'
                 | '⎪'
                 | '⎛'
                 | '⎜'
@@ -257,8 +259,7 @@ fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
                 | '⎨'
                 | '⎩'
                 | '⎸'
-                | '╎'
-                | '▏'
+                | '┆'
         )
     };
     let mut top = row;
@@ -279,14 +280,14 @@ fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
     if has('⎸') {
         return Some('|');
     }
-    if has('╎') || has('▏') {
+    if has('┆') {
         return Some('.');
     }
     Some(match (has('⎡'), has('⎣')) {
         (true, true) => '[',
         (true, false) => '⌈',
         (false, true) => '⌊',
-        // Only ⎢ / ┠: read as a bracket (lenient).
+        // Only ⎢ / ├: read as a bracket (lenient).
         (false, false) => '[',
     })
 }
@@ -297,24 +298,27 @@ fn close_spec(c: char) -> Option<char> {
         ']' | '⎤' | '⎥' | '⎦' => ']',
         '⌉' => '⌉',
         '⌋' => '⌋',
-        '‖' | '║' => '‖',
+        '‖' => '‖',
         '}' | '⎬' => '}',
         '⟩' => '⟩',
         '⎹' => '|',
-        '┆' | '▕' => '.',
+        '┊' => '.',
         _ => return None,
     })
 }
 
-/// Like `close_spec`, resolving a fused-grid junction (┨) by walking its
+/// Like `close_spec`, resolving a fused-grid junction (┤) by walking its
 /// column to a family-distinct glyph (through ⎪ and further junctions).
 fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
+    if curly_pair_side(g, row, col) == Some(false) {
+        return Some('}');
+    }
     let ch = g.at(row, col);
     if angle_close_turn(g, row, col) {
         return Some('⟩');
     }
     let h = g.g.len();
-    if !matches!(ch, '⎤' | '⎥' | '⎦' | '┨') {
+    if !matches!(ch, '⎤' | '⎥' | '⎦') && !(ch == '┤' && fused_junction(g, row, col)) {
         return close_spec(ch);
     }
     let in_run = |c: char| {
@@ -322,7 +326,7 @@ fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
             c,
             '⎤' | '⎥'
                 | '⎦'
-                | '┨'
+                | '┤'
                 | '⎪'
                 | '⎞'
                 | '⎟'
@@ -331,8 +335,7 @@ fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
                 | '⎬'
                 | '⎭'
                 | '⎹'
-                | '┆'
-                | '▕'
+                | '┊'
         )
     };
     let mut top = row;
@@ -353,7 +356,7 @@ fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
     if has('⎹') {
         return Some('|');
     }
-    if has('┆') || has('▕') {
+    if has('┊') {
         return Some('.');
     }
     Some(match (has('⎤'), has('⎦')) {
@@ -368,15 +371,53 @@ fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
 /// vertical-extent scan).
 fn left_family(spec: char) -> &'static [char] {
     match spec {
-        '(' => &['(', '⎛', '⎜', '⎝', '┠'],
-        '[' => &['[', '⎡', '⎢', '⎣', '┠'],
-        '⌈' => &['⌈', '⎡', '⎢', '┠'],
-        '⌊' => &['⌊', '⎢', '⎣', '┠'],
-        '‖' => &['‖', '║'],
-        '{' => &['{', '⎧', '⎪', '⎨', '⎩', '┠'],
-        '⟨' => &['⟨', '╱', '╲'],
-        '|' => &['⎸', '┠'],
-        _ => &['╎', '▏', '┠'],
+        '(' => &['(', '⎛', '⎜', '⎝', '├'],
+        '[' => &['[', '⎡', '⎢', '⎣', '├'],
+        '⌈' => &['⌈', '⎡', '⎢', '├'],
+        '⌊' => &['⌊', '⎢', '⎣', '├'],
+        '‖' => &['‖'],
+        '{' => &['{', '⎧', '⎪', '⎨', '⎩', '⎰', '⎱'],
+        '⟨' => &['⟨'],
+        '|' => &['⎸', '├'],
+        _ => &['┆', '├'],
+    }
+}
+
+/// A ├ / ┤ (U+251C/2524) dug into a delimiter column as a fused-grid
+/// row junction: the contiguous column run continues with delimiter
+/// glyphs above/below. A bare-lattice edge marker has blank gaps
+/// instead, so it never classifies.
+fn fused_junction(g: &Grid, row: usize, col: usize) -> bool {
+    let (junction, family): (char, &str) = match g.at(row, col) {
+        '├' => ('├', "⎛⎜⎝⎡⎢⎣⎧⎪⎨⎩⎸┆"),
+        '┤' => ('┤', "⎞⎟⎠⎤⎥⎦⎫⎬⎭⎹┊"),
+        _ => return false,
+    };
+    let in_run = |c: char| c == junction || family.contains(c);
+    let mut r = row;
+    while r > 0 && in_run(g.at(r - 1, col)) {
+        r -= 1;
+    }
+    let top = r;
+    let mut r = row;
+    while r + 1 < g.g.len() && in_run(g.at(r + 1, col)) {
+        r += 1;
+    }
+    (top..=r).any(|rr| family.contains(g.at(rr, col)))
+}
+
+/// Side of a height-2 curly section pair (⎰ U+23B0 / ⎱ U+23B1): the
+/// left brace is ⎰ over ⎱, the right brace ⎱ over ⎰, so the side falls
+/// out of which of the two sits on top.
+fn curly_pair_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
+    let above = row.checked_sub(1).map(|r| g.at(r, col));
+    let below = (row + 1 < g.g.len()).then(|| g.at(row + 1, col));
+    match g.at(row, col) {
+        '⎰' if below == Some('⎱') => Some(true),
+        '⎰' if above == Some('⎱') => Some(false),
+        '⎱' if above == Some('⎰') => Some(true),
+        '⎱' if below == Some('⎰') => Some(false),
+        _ => None,
     }
 }
 
@@ -395,10 +436,10 @@ fn angle_open_turn(g: &Grid, row: usize, col: usize) -> bool {
         && row + 1 < g.g.len()
         && col < width(row + 1)
         && g.at(row + 1, col) == '╲'
-        // A hat accent band (┄╱╲┄) fakes this pair when its ╱ sits right
+        // A hat accent band (┈╱╲┈) fakes this pair when its ╱ sits right
         // above another band's ╲. The hat's ╱ always has its partner ╲
         // directly to its right; a real turn's interior never starts
-        // with ╲ (a ┄ band may hug the turn, so ┄ stays allowed).
+        // with ╲ (a ┈ band may hug the turn, so ┈ stays allowed).
         && (col + 1 >= width(row) || g.at(row, col + 1) != '╲')
 }
 
@@ -410,7 +451,7 @@ fn angle_close_turn(g: &Grid, row: usize, col: usize) -> bool {
         && g.at(row + 1, col) == '╱'
         // Mirror of the open-turn guard: a stacked hat's ╲ has its
         // partner ╱ directly to its left; a real turn's interior never
-        // ends with ╱ (a ┄ band may hug the turn, so ┄ stays allowed).
+        // ends with ╱ (a ┈ band may hug the turn, so ┈ stays allowed).
         && (col == 0 || g.at(row, col - 1) != '╱')
 }
 
@@ -500,10 +541,8 @@ fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
     // Norm columns use the same ‖ on both sides: parity along the row
     // decides (full-height columns keep the parity consistent per row).
     // Direct norm-in-norm is therefore unsupported.
-    if matches!(ch, '‖' | '║') {
-        let before = (0..col)
-            .filter(|&c2| matches!(g.at(row, c2), '‖' | '║'))
-            .count();
+    if ch == '‖' {
+        let before = (0..col).filter(|&c2| g.at(row, c2) == '‖').count();
         return Some(before % 2 == 0);
     }
     if OPEN_BRACKETS.contains(&ch) {
@@ -512,13 +551,14 @@ fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
     if CLOSE_BRACKETS.contains(&ch) {
         return Some(false);
     }
+    if let s @ Some(_) = curly_pair_side(g, row, col) {
+        return s;
+    }
     if let s @ Some(_) = angle_arm_side(g, row, col) {
         return s;
     }
     let family: &[char] = match ch {
         '⎪' => &['⎧', '⎨', '⎩', '⎫', '⎬', '⎭', '⎪'],
-        // Legacy single-column angle form (╱⟨╲ stacked).
-        '╱' | '╲' => &['⟨', '⟩', '╱', '╲'],
         _ => return None,
     };
     let mut r = row;
@@ -601,11 +641,11 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
     let first = *occupied.first().unwrap();
     let last = *occupied.last().unwrap();
     match g.at(first, c) {
-        // Delimiter columns: a fused grid (┠ junctions in this column or
+        // Delimiter columns: a fused grid (├ junctions in this column or
         // ┬ markers on the top row) centers on the extent; otherwise the
         // baseline is that of the inner region (a lattice inside answers
         // with its own ┌├└ center rule).
-        '⎡' | '[' | '⎛' | '⎸' | '╎' | '▏' | '⎢' | '║' => {
+        '⎡' | '[' | '⎛' | '⎸' | '┆' | '⎢' | '‖' | '⎰' => {
             if let Ok(close) = match_delim(g, first, c, rect.r)
                 && fused_grid_markers(g, first, last, c, close).is_some()
             {
@@ -622,23 +662,16 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
             )
         }
         '(' => Ok(first),
-        // Brace / angle columns carry their vertex on the baseline row.
-        '⎧' | '⎪' | '⎨' | '⎩' | '┠' => occupied
+        // Brace columns carry their vertex on the baseline row.
+        '⎧' | '⎪' | '⎨' | '⎩' => occupied
             .iter()
             .find(|&&r| g.at(r, c) == '⎨')
             .copied()
-            // A fused grid whose baseline lands on a junction row shows ┠
-            // there instead of the vertex; the grid centers on the extent.
-            .or_else(|| {
-                (first..=last)
-                    .any(|r| g.at(r, c) == '┠')
-                    .then_some((first + last) / 2)
-            })
             .ok_or(())
             .or_else(|_| err("brace column without ⎨", first, c)),
-        // Angle: the ⟨ vertex (one-line / legacy column form) or the
-        // diagonal turn pair — ╱ directly above ╲ in the leftmost
-        // column. The upper turn row is the baseline.
+        // Angle: the ⟨ vertex (one-line form) or the diagonal turn
+        // pair — ╱ directly above ╲ in the leftmost column. The upper
+        // turn row is the baseline.
         '⟨' | '╱' | '╲' => occupied
             .iter()
             .find(|&&r| g.at(r, c) == '⟨' || angle_open_turn(g, r, c))
@@ -832,7 +865,7 @@ fn parse_region(
                 });
                 // A ╭ above (or ╰ below) the baseline in the run marks an
                 // over/under brace whose argument owns this baseline; an
-                // accent band (┄ run holding only a mark) the same way.
+                // accent band (┈ run holding only a mark) the same way.
                 let brace_start = (col..=run_end).find_map(|c| {
                     brace_at(g, rect, bl, c).map(|(r, over, right)| (c, r, over, right))
                 });
@@ -894,7 +927,10 @@ fn parse_region(
                 parse_script_run(g, rect, bl, col, run_end, depth, trace, in_cancel, &mut out)?;
                 col = run_end + 1;
             }
-            '┌' | '├' | '└' => {
+            // A ├ inside a delimiter column run is a fused-grid row
+            // junction, not a bare-lattice edge — the delimiter arm
+            // below handles it.
+            '┌' | '├' | '└' if !fused_junction(g, bl, col) => {
                 let (node, right) = parse_lattice(g, rect, col, depth, trace, in_cancel)?;
                 out.push(node);
                 col = right + 1;
@@ -941,8 +977,8 @@ fn parse_region(
                 col = run_end + 1;
             }
             _ if ch == OP_BAND => {
-                // General band: ┄+ (piece ┄+)+ — anything sandwiched in ┄
-                // without spaces takes over/under limits (∑, lim, arg┄max
+                // General band: ┈+ (piece ┈+)+ — anything sandwiched in ┈
+                // without spaces takes over/under limits (∑, lim, arg┈max
                 // …). Pieces are flat one-line rows joined into the base.
                 let (pieces, end) = scan_band(g, rect, bl, col, OP_BAND)?;
                 if pieces.is_empty() {
@@ -1426,7 +1462,7 @@ fn brace_at(g: &Grid, rect: Rect, bl: usize, c: usize) -> Option<(usize, bool, u
         .then_some((brow, over, right))
 }
 
-/// Is the ┄ run through (row, col) an accent band — pieces holding one
+/// Is the ┈ run through (row, col) an accent band — pieces holding one
 /// repeated accent mark and nothing else? Returns (mark, right end).
 /// `over` selects which mark set applies (the band above the base wears
 /// over marks, the one below wears under marks).
@@ -1440,22 +1476,12 @@ fn accent_band_run(
     if g.at(row, col) != OP_BAND {
         return None;
     }
-    // Self-terminating scan: the run is cells from {┄} plus the mark
-    // material, stopping at anything else (inside a delimiter the band
-    // hugs the delimiter column with no gap). Stretched marks bring
-    // extra glyphs: an arrow body ─ with a ⇀ head, hat/check slopes
-    // ╱ ╲, or a line-like mark repeated. The run must end on ┄.
-    let is_mark = |c: char| {
-        if over {
-            crate::symbols::is_over_mark(c)
-        } else {
-            crate::symbols::is_under_mark(c)
-        }
-    };
-    // Phased scan — leading ┄s, one material group, trailing ┄s — and
-    // STOP there: material appearing after the trailing ┄s belongs to a
+    // Phased scan — leading ┈s, one material group, trailing ┈s — and
+    // STOP there: material appearing after the trailing ┈s belongs to a
     // neighbour (a sibling's raised superscript can sit flush against
-    // the band when an ancestor block crops tightly).
+    // the band when an ancestor block crops tightly). The run also
+    // self-terminates on any non-material char (inside a delimiter the
+    // band hugs the delimiter column with no gap).
     let mut piece: Vec<char> = Vec::new();
     let mut end = col;
     let mut trailed = false;
@@ -1468,23 +1494,12 @@ fn accent_band_run(
                 trailed = true;
             }
         } else if !trailed
-            && (is_mark(ch)
-                || matches!(
-                    ch,
-                    FRAC_BAR
-                        | '╱'
-                        | '╲'
-                        | '→'
-                        | '>'
-                        | '_'
-                        | '¯'
-                        | '˜'
-                        | '˷'
-                        | '˰'
-                        | '˯'
-                        | '˳'
-                        | '․'
-                ))
+            // The full material alphabet: ─ and > for the vec arrow,
+            // the fill/centered drawn marks for everything else.
+            && matches!(
+                ch,
+                FRAC_BAR | '>' | '_' | '¯' | '˜' | '˷' | '˰' | '˯' | '˳' | '․'
+            )
         {
             piece.push(ch);
         } else {
@@ -1495,74 +1510,39 @@ fn accent_band_run(
     if !trailed || piece.is_empty() {
         return None;
     }
-    // Classify the material: a ─…─> arrow is \vec (canonical head is
-    // the ASCII >, lenient → also reads), ╱╲ the widehat, ╲╱ the
-    // widecheck, a _ run the overline, else a repeated mark.
-    let is_head = |c: char| c == '>' || c == '→';
-    let mark = if piece.iter().any(|&c| is_head(c))
-        && piece.iter().all(|&c| is_head(c) || c == FRAC_BAR)
-    {
+    // Classify the material. Every fill belongs to exactly one side
+    // (over bar _ vs under bar ¯, over tilde ˷ vs under tilde ˜): the
+    // baseline dive relies on the over/under classification being
+    // positionally unambiguous.
+    let all = |m: char| piece.iter().all(|&c| c == m);
+    let mark = if over && piece.contains(&'>') && piece.iter().all(|&c| c == '>' || c == FRAC_BAR) {
+        // ─…─> arrow: \vec.
         Some('⇀')
-    } else if piece.iter().all(|&c| c == '˰') {
-        // Hat: the low arrowhead, centered.
-        Some('^')
-    } else if piece.iter().all(|&c| c == '˯') {
-        Some('ˇ')
-    } else if piece[0] == '╱'
-        && *piece.last().unwrap() == '╲'
-        && piece[1..piece.len() - 1].iter().all(|&c| c == FRAC_BAR)
-    {
-        // Legacy slope-pair hat / check bands still read.
-        Some('^')
-    } else if piece[0] == '╲'
-        && *piece.last().unwrap() == '╱'
-        && piece[1..piece.len() - 1].iter().all(|&c| c == FRAC_BAR)
-    {
-        Some('ˇ')
-    } else if piece.iter().all(|&c| c == '_') {
-        // The over line draws low to hug its base.
-        Some('¯')
-    } else if !over && piece.iter().all(|&c| c == '¯') {
-        // … and the under line draws high, same reason.
-        Some('‗')
-    } else if over && piece.iter().all(|&c| c == '˷') {
-        // The over tilde draws low (˷) to hug its base …
-        Some('˜')
-    } else if !over && piece.iter().all(|&c| c == '˜') {
-        // … and the under tilde fills with the high ˜, same logic. Each
-        // tilde fill belongs to exactly one side (like ¯ vs _): the
-        // baseline dive relies on over/under classification being
-        // positionally unambiguous.
-        Some('˷')
-    } else if piece.iter().all(|&c| c == '˳') {
-        // … as does the ring's single centered mark.
-        Some('˚')
-    } else if piece.iter().all(|&c| c == '․') {
+    } else if over && all('˰') {
+        Some('^') // centered low arrowhead: \widehat
+    } else if over && all('˯') {
+        Some('ˇ') // \widecheck
+    } else if over && all('_') {
+        Some('¯') // low fill hugging the base: \overline
+    } else if !over && all('¯') {
+        Some('‗') // high fill hugging from below: \underline
+    } else if over && all('˷') {
+        Some('˜') // low tilde fill: \widetilde
+    } else if !over && all('˜') {
+        Some('˷') // high tilde fill: \utilde
+    } else if over && all('˳') {
+        Some('˚') // centered low ring: \mathring
+    } else if over && all('․') {
         // Leader dots: one is \dot, two are \ddot.
         match piece.len() {
             1 => Some('˙'),
             2 => Some('¨'),
             _ => None,
         }
-    } else if piece.iter().all(|&c| c == piece[0])
-        && is_mark(piece[0])
-        && !matches!(piece[0], '¯' | '˜' | '˷')
-    {
-        // A repeated mark — except ¯ and the tildes, whose fills are
-        // claimed by one side above (¯ = underline, ˜ = under tilde,
-        // ˷ = over tilde).
-        Some(piece[0])
     } else {
         None
     };
-    mark.filter(|&m| {
-        if over {
-            matches!(m, '^' | 'ˇ' | '⇀' | '¯') || is_mark(m)
-        } else {
-            m == '‗' || m == '˷'
-        }
-    })
-    .map(|m| (m, end))
+    mark.map(|m| (m, end))
 }
 
 /// Locate a wide accent anchored at column `c` for the caller's
@@ -1753,25 +1733,23 @@ fn check_flat_columns(
 /// floating glyphs (¯ ˜ ^ ˇ ˚ ˙ above, ‗ below) still read leniently.
 fn over_mark_at(c: char) -> Option<char> {
     match c {
-        '_' => Some('¯'),
-        '˷' => Some('˜'),
-        '˰' => Some('^'),
-        '˯' => Some('ˇ'),
-        '˳' => Some('˚'),
-        '․' => Some('˙'),
-        '￫' => Some('⇀'),
-        c if is_over_mark(c) => Some(c),
+        '_' => Some('¯'), // U+005F LOW LINE -> bar
+        '˷' => Some('˜'), // U+02F7 LOW TILDE -> tilde
+        '˰' => Some('^'), // U+02F0 LOW UP ARROWHEAD -> hat
+        '˯' => Some('ˇ'), // U+02EF LOW DOWN ARROWHEAD -> check
+        '˳' => Some('˚'), // U+02F3 LOW RING -> ring
+        '․' => Some('˙'), // U+2024 ONE DOT LEADER -> dot (.. -> ddot)
+        '￫' => Some('⇀'), // U+FFEB HALFWIDTH RIGHTWARDS ARROW -> vec
         _ => None,
     }
 }
 
 fn under_mark_at(c: char) -> Option<char> {
     match c {
-        '¯' => Some('‗'),
+        '¯' => Some('‗'), // U+00AF MACRON -> underline
         // The drawn under tilde is the high ˜ (hugging from below); the
         // AST mark is ˷ — the tilde pair swaps between the two roles.
-        '˜' => Some('˷'),
-        c if is_under_mark(c) => Some(c),
+        '˜' => Some('˷'), // U+02DC SMALL TILDE -> utilde
         _ => None,
     }
 }
@@ -1956,7 +1934,7 @@ fn parse_delim(
         close_col - 1
     };
 
-    // Fused grid: ┬ markers on the delimiter's top row and/or ┠ junction
+    // Fused grid: ┬ markers on the delimiter's top row and/or ├ junction
     // rows in the left column mean the interior is one grid whose edges
     // are the delimiter columns themselves.
     {
@@ -2138,8 +2116,8 @@ pub fn parse_with_regions(text: &str) -> Result<(Row, Vec<RegionSpan>)> {
         g: lines,
         cancel: flags,
     };
-    // Multi-line formulas: a row whose only glyph is a single ┄ is a
-    // line separator (a band always sandwiches its pieces, so a lone ┄
+    // Multi-line formulas: a row whose only glyph is a single ┈ is a
+    // line separator (a band always sandwiches its pieces, so a lone ┈
     // never occurs inside one formula). Each segment between separators
     // is an ordinary formula, read with the usual baseline inference;
     // segments are joined with Break. Blank rows next to separators are
@@ -2178,7 +2156,7 @@ pub fn parse_with_regions(text: &str) -> Result<(Row, Vec<RegionSpan>)> {
             continue; // empty line
         };
         if (t..=b).any(blank_row) {
-            return err("stacked formula lines need a lone ┄ separator row", t, 0);
+            return err("stacked formula lines need a lone ┈ separator row", t, 0);
         }
         let rect = Rect {
             t,
@@ -2305,8 +2283,8 @@ mod tests {
     fn tilde_is_a_plain_atom() {
         assert_eq!(parse("a~b").unwrap(), syms("a~b"));
         assert_eq!(parse("a ~ b").unwrap(), syms("a~b"));
-        // A literal ~ still takes accents.
-        let row = parse("^\n~").unwrap();
+        // A literal ~ still takes accents (drawn low-hat form).
+        let row = parse("˰\n~").unwrap();
         assert_eq!(
             row,
             vec![Node::Accent {

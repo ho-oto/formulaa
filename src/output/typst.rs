@@ -75,7 +75,7 @@ fn node_to_typst(node: &Node) -> String {
             c => c.to_string(),
         },
         Node::Func(name) => {
-            if crate::symbols::TYPST_FUNCS.contains(&name.as_str()) {
+            if crate::symbols::typst_knows_func(name) {
                 name.clone()
             } else {
                 format!("op(\"{}\")", name)
@@ -113,7 +113,7 @@ fn node_to_typst(node: &Node) -> String {
                     format!("op(\"{}\", limits: #true)", ws.join(" "))
                 }
                 _ => match &base[..] {
-                    [Node::Func(f)] if !crate::symbols::TYPST_FUNCS.contains(&f.as_str()) => {
+                    [Node::Func(f)] if !crate::symbols::typst_knows_func(f) => {
                         format!("op(\"{}\", limits: #true)", f)
                     }
                     [_] => row_to_typst(base),

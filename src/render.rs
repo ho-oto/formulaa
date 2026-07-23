@@ -7,20 +7,20 @@
 
 use crate::ast::{Field, Node, Row, promotable_base};
 
-pub const CURSOR_CHAR: char = '▌';
+pub const CURSOR_CHAR: char = '▌'; // U+258C LEFT HALF BLOCK (view-only)
 /// Placeholder for an empty mandatory slot, and explicit base of a script
 /// that starts a row (so `[Sup(x)]` is distinguishable from `[Sym(x)]`).
-pub const PLACEHOLDER: char = '⬚';
+pub const PLACEHOLDER: char = '⬚'; // U+2B1A DOTTED SQUARE
 /// Fraction bar. Distinct from '-' (rendered '−') and the big-op band.
-pub const FRAC_BAR: char = '─';
+pub const FRAC_BAR: char = '─'; // U+2500 BOX DRAWINGS LIGHT HORIZONTAL
 /// Big-operator band: marks the horizontal extent of over/under limits.
-pub const OP_BAND: char = '┄';
+pub const OP_BAND: char = '┈'; // U+2508 BOX DRAWINGS LIGHT QUADRUPLE DASH HORIZONTAL
 /// Stretchy single-arrow bodies reuse the ─ bar: a bar run directly
 /// capped by a head (`──>`) *is* the arrow; a fraction next to a `>` atom
 /// is written with a separating space (space presence, not count, is what
 /// changes the reading). Double arrows (⇒ ⇐) use a ═ body. Heads render
 /// as ASCII < > ; the Unicode arrows are accepted as lenient input heads.
-pub const DOUBLE_BODY: char = '═';
+pub const DOUBLE_BODY: char = '═'; // U+2550 BOX DRAWINGS DOUBLE HORIZONTAL
 
 /// Body glyph for an arrow head.
 pub fn arrow_body(op: char) -> char {
@@ -543,7 +543,7 @@ pub fn render_row(
         /// adjacent letter run or period into one token, so the fuse
         /// rules keep a space after it.
         dot_run: bool,
-        /// Wide accents carry off-baseline ┄ band rows with no closing
+        /// Wide accents carry off-baseline ┈ band rows with no closing
         /// glyph; a tall neighbour touching that row would be munched
         /// into the band scan, so they keep a space on both sides.
         wide_accent: bool,
@@ -619,7 +619,7 @@ pub fn render_row(
     // Single-space separators between siblings, inserted only where
     // adjacent glyphs would otherwise fuse into one token — space
     // *presence* (never count) is what changes a reading:
-    //  - between two identical bar glyphs (── / ┄┄ / ══ would merge)
+    //  - between two identical bar glyphs (── / ┈┈ / ══ would merge)
     //  - between a bar edge and an arrow head that would cap it (─ then →,
     //    ═ then ⇒) and between a head and a body that would absorb it
     //    (← then ─, ⇐ then ═)
@@ -664,7 +664,7 @@ pub fn render_row(
                 let fuse = match edges {
                     (Some(a), Some(b)) => {
                         // A band edge fuses with *anything* adjacent (the
-                        // general ┄piece┄ grammar munches non-space runs).
+                        // general ┈piece┈ grammar munches non-space runs).
                         a == OP_BAND
                             || b == OP_BAND
                             // Adjacent upright letter runs (Func / bare
@@ -721,8 +721,8 @@ pub fn render_row(
 
 /// Top-level entry: a root row may contain `Node::Break`s splitting the
 /// formula into display lines. Lines are stacked left-aligned with one
-/// blank row between them; every continuation line carries the `┄ `
-/// marker at its baseline (col 0) — a lone ┄ has no other reading, and
+/// blank row between them; every continuation line carries the `┈ `
+/// marker at its baseline (col 0) — a lone ┈ has no other reading, and
 /// it hands the parser the line's baseline for free. Rows without
 /// Breaks render exactly as render_row.
 pub fn render_root(row: &Row, cursor: Option<CursorRef>, ctx: &RenderCtx) -> Block {
@@ -771,11 +771,11 @@ pub fn render_root(row: &Row, cursor: Option<CursorRef>, ctx: &RenderCtx) -> Blo
     vstack(&segments)
 }
 
-/// Stack blocks vertically, left-aligned, a lone-┄ separator row
+/// Stack blocks vertically, left-aligned, a lone-┈ separator row
 /// between lines; the result's baseline is the first block's. All
 /// annotations translate.
 fn vstack(blocks: &[Block]) -> Block {
-    // At least one column: the ┄ separator row needs a cell even when
+    // At least one column: the ┈ separator row needs a cell even when
     // every segment is empty (Enter on an empty formula).
     let width = blocks.iter().map(|b| b.width()).max().unwrap_or(0).max(1);
     let mut lines: Vec<Vec<char>> = Vec::new();
@@ -860,22 +860,29 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
         Node::Text { t, math } => text_block(t, *math, false),
 
         // Stretchy accent: the base stays bare on the baseline; an
-        // accent band — a ┄ run whose only piece is the mark — rides
+        // accent band — a ┈ run whose only piece is the mark — rides
         // above (over) and/or below (under) marking the extent.
         Node::WideAccent { over, under, base } => {
             let b = render_row(base, None, true, ctx);
-            let bw = b.width().max(1);
+            // The ddot material ․․ needs two cells between the band
+            // edges, so its band widens past a one-cell base.
+            let bw = if *over == Some('¨') {
+                b.width().max(2)
+            } else {
+                b.width().max(1)
+            };
             let w = bw + 2;
             // Stretchable marks fill the base width: arrows grow a ─
-            // body, the hat/check slope with ╱ ╲, line-like marks
-            // repeat; dot-like marks stay a single centered glyph.
+            // body, line-like marks repeat; dot-like marks stay a
+            // single centered glyph (low drawn forms, like the compact
+            // accents).
             let band_row = |m: char| {
                 let mut r = vec![OP_BAND; w];
                 match m {
                     // Vec: ─ body with an ASCII > head, like the
                     // stretchy \xrightarrow (─ and → do not always
                     // connect visually across fonts).
-                    '⇀' if bw >= 2 => {
+                    '⇀' => {
                         for cell in r.iter_mut().take(w - 1).skip(1) {
                             *cell = FRAC_BAR;
                         }
@@ -967,7 +974,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 '˚' => '˳',
                 '˙' => '․',
                 // The vec draws as a plain arrow (halfwidth ￫ U+FFEB,
-                // distinct from the → atom) to match the wide ┄──>┄.
+                // distinct from the → atom) to match the wide ┈──>┈.
                 '⇀' => '￫',
                 m => m,
             };
@@ -1102,8 +1109,8 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 return b;
             }
             // Band marks the horizontal extent of the limits; the base is
-            // centered on the band row with its blank cells drawn as ┄
-            // ("anything sandwiched in ┄ without spaces takes limits").
+            // centered on the band row with its blank cells drawn as ┈
+            // ("anything sandwiched in ┈ without spaces takes limits").
             let bw = b.width().max(1);
             let w = u.width().max(l.width()).max(bw) + 2;
             let mut band = vec![OP_BAND; w];
@@ -1191,7 +1198,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             segs,
         } => {
             // A sole Array segment fuses with the delimiter: the delimiter
-            // columns absorb the lattice edges (junction rows show ┠ ┨,
+            // columns absorb the lattice edges (junction rows show ├ ┤,
             // column markers ┬ ┴ ride the delimiter's top/bottom rows).
             // Angles keep their vertex geometry and wrap a bare lattice
             // instead.
@@ -1199,6 +1206,10 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 && *left != '⟨'
                 && *right != '⟩'
                 && *left != '‖'
+                // Curly braces keep their vertex column and wrap a bare
+                // lattice instead (no clean junction glyphs exist).
+                && *left != '{'
+                && *right != '}'
                 && let [seg] = &segs[..]
                 // Display markers are transparent: a labeled sole-Array
                 // segment still fuses (the label overlays a cell).
@@ -1366,9 +1377,9 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
 /// Delimiter fused with a sole grid segment, in the minimal shape:
 /// - rows>=2 and cols>=2: separator rows carry only ┼ at the crossings
 /// - one row: ┬ / ┴ marker rows above and below the cells
-/// - one column: ┠ ┨ junctions in the delimiter columns
+/// - one column: ├ ┤ junctions in the delimiter columns
 ///
-/// The older ┬┴+┠┨ shape stays legal input; fmt tightens it.
+/// The older ┬┴+junction mixed shape stays legal input; fmt tightens it.
 #[allow(clippy::too_many_arguments)]
 fn render_fused_grid(
     left: char,
@@ -1474,8 +1485,11 @@ fn render_fused_grid(
     let rcol = delim_column(right, false, h, bl);
     let mut out = Vec::with_capacity(h);
     for (r, line) in lines.into_iter().enumerate() {
+        // Single-column grids dig their row junctions into the
+        // delimiter columns as ├ ┤ (U+251C/2524 — the light joints; the
+        // heavy ┠ ┨ stood out as the only heavy strokes in the format).
         let (lc, rc) = if junction && sep_rows.contains(&r) {
-            ('┠', '┨')
+            ('├', '┤')
         } else {
             (lcol[r], rcol[r])
         };
@@ -1606,11 +1620,13 @@ fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
                     '⎹'
                 }
             }
+            // Null delimiters: dashed ghosts (┆ U+2506 TRIPLE DASH /
+            // ┊ U+250A QUADRUPLE DASH VERTICAL, matching the ┈ band).
             '.' => {
                 if left {
-                    '╎'
-                } else {
                     '┆'
+                } else {
+                    '┊'
                 }
             }
             c => c,
@@ -1634,19 +1650,32 @@ fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
                 }
             }
             '{' | '}' => {
-                let (top, mid, bot) = if spec == '{' {
-                    ('⎧', '⎨', '⎩')
+                // Height 2 has no room for hook + ⎨ vertex + hook: use
+                // the two-row sections ⎰ U+23B0 / ⎱ U+23B1 instead
+                // (left = ⎰ over ⎱, right = ⎱ over ⎰; the side resolves
+                // from which of the pair sits on top).
+                if h == 2 {
+                    let (top, bot) = if spec == '{' {
+                        ('⎰', '⎱')
+                    } else {
+                        ('⎱', '⎰')
+                    };
+                    if r == 0 { top } else { bot }
                 } else {
-                    ('⎫', '⎬', '⎭')
-                };
-                if r == bl {
-                    mid
-                } else if r == 0 {
-                    top
-                } else if r == h - 1 {
-                    bot
-                } else {
-                    '⎪'
+                    let (top, mid, bot) = if spec == '{' {
+                        ('⎧', '⎨', '⎩')
+                    } else {
+                        ('⎫', '⎬', '⎭')
+                    };
+                    if r == bl {
+                        mid
+                    } else if r == 0 {
+                        top
+                    } else if r == h - 1 {
+                        bot
+                    } else {
+                        '⎪'
+                    }
                 }
             }
             '⟨' => match r.cmp(&bl) {
@@ -1666,10 +1695,10 @@ fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
                     '⎹'
                 }
             }
-            // Norm: ║ box-drawing columns on both sides (the strokes
-            // connect across rows; sides resolve by per-row parity, so
-            // direct norm-in-norm is unsupported). One line uses ‖.
-            '‖' => '║',
+            // Norm: the same ‖ (U+2016 DOUBLE VERTICAL LINE) stacked on
+            // both sides (sides resolve by per-row parity, so direct
+            // norm-in-norm is unsupported).
+            '‖' => '‖',
             // Ceil/floor: the bracket pieces with one corner missing —
             // ⎡+⎢ without the foot, ⎢+⎣ without the head. The corner
             // set present in a column decides the family.
@@ -1703,9 +1732,9 @@ fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
             }
             _ => {
                 if left {
-                    '╎'
-                } else {
                     '┆'
+                } else {
+                    '┊'
                 }
             }
         })
@@ -1751,7 +1780,7 @@ mod tests {
             lower: sym_row("i=0"),
             upper: sym_row("n"),
         }];
-        assert_eq!(plain(&root), vec!["  n", "┄┄∑┄┄", " i=0"]);
+        assert_eq!(plain(&root), vec!["  n", "┈┈∑┈┈", " i=0"]);
     }
 
     #[test]

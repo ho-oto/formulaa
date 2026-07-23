@@ -146,7 +146,7 @@ fn stray_stacked_content_is_an_error() {
     assert!(parse("1\n─ + x\n2   y").is_err());
 }
 
-/// ess sup_x f(x)  — \op*<name> (\operatorname*): a ┄band┄ whose base is
+/// ess sup_x f(x)  — \op*<name> (\operatorname*): a ┈band┈ whose base is
 /// an arbitrary upright Text run instead of a dictionary Func.
 #[test]
 fn operatorname_star_band() {
@@ -168,7 +168,7 @@ fn operatorname_star_band() {
         "\\operatorname*{esssup}_{x}f\\left(x\\right)"
     );
     // Multi-word \op* name: each word is its own band piece, dictionary
-    // words as the Funcs they are (┄ess┄sup┄).
+    // words as the Funcs they are (┈ess┈sup┈).
     let row = cat(&[n(Node::BigOp {
         base: vec![
             Node::Text {
@@ -282,7 +282,7 @@ fn wide_accents() {
     let row = n(wa(Some('^'), None, s("abc")));
     roundtrip("widehat", &row);
     let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
-    assert_eq!(aa, "┄┄˰┄┄\n 𝑎𝑏𝑐");
+    assert_eq!(aa, "┈┈˰┈┈\n 𝑎𝑏𝑐");
     assert_eq!(row_to_latex(&normalize(&row)), "\\widehat{abc}");
     // Both sides at once.
     let row = n(wa(Some('⇀'), Some('‗'), s("AB")));
@@ -296,7 +296,7 @@ fn wide_accents() {
     let row = n(wa(None, Some('˷'), s("AB")));
     roundtrip("wide-utilde", &row);
     let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
-    assert_eq!(aa, " 𝐴𝐵\n┄˜˜┄");
+    assert_eq!(aa, " 𝐴𝐵\n┈˜˜┈");
     assert_eq!(row_to_latex(&normalize(&row)), "\\utilde{AB}");
     assert_eq!(row_to_typst(&normalize(&row)), "attach(A B, b: sym.tilde)");
     let row = n(wa(Some('˜'), Some('˷'), s("xy")));
@@ -323,6 +323,93 @@ fn wide_accents() {
     // The old base-banded picture reads leniently as a BigOp whose
     // upper limit is the bare mark atom — distinct from the accent
     // band, which never sits on the baseline.
+}
+
+/// Fused grids use the ⎛/⎡ column glyphs with light ├ ┤ row junctions;
+/// curly braces do not fuse; height-2 curly uses the ⎰⎱ sections.
+#[test]
+fn box_drawing_delim_forms() {
+    let arr = |rows: usize, cols: usize, cells: Vec<Row>| Node::Array { rows, cols, cells };
+    // Fused grids: 1 column (junctions ├ ┤ dug into the delimiter
+    // columns), 2x2 (interior ┼ row), 1 row (┬ ┴ marker rows), and a
+    // mixed ( ] pair.
+    let row = n(delim(
+        '(',
+        ')',
+        vec![],
+        vec![n(arr(2, 1, vec![s("a"), s("b")]))],
+    ));
+    roundtrip("fused-grid-1col", &row);
+    let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
+    assert_eq!(aa, "⎛ 𝑎 ⎞\n├   ┤\n⎝ 𝑏 ⎠");
+    let row = n(delim(
+        '(',
+        ')',
+        vec![],
+        vec![n(arr(2, 2, vec![s("a"), s("b"), s("c"), s("d")]))],
+    ));
+    roundtrip("fused-grid-2x2", &row);
+    let row = n(delim(
+        '(',
+        ')',
+        vec![],
+        vec![n(arr(1, 2, vec![s("a"), s("b")]))],
+    ));
+    roundtrip("fused-grid-1row", &row);
+    let row = n(delim(
+        '(',
+        ']',
+        vec![],
+        vec![n(arr(2, 1, vec![s("a"), s("b")]))],
+    ));
+    roundtrip("fused-grid-mixed", &row);
+    let row = n(delim(
+        '[',
+        ']',
+        vec![],
+        vec![n(arr(2, 1, vec![s("a"), s("b")]))],
+    ));
+    roundtrip("fused-grid-bracket", &row);
+    let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
+    assert_eq!(aa, "⎡ 𝑎 ⎤\n├   ┤\n⎣ 𝑏 ⎦");
+    // Curly braces do not fuse: the grid keeps its bare-lattice frame.
+    let row = n(delim(
+        '{',
+        '}',
+        vec![],
+        vec![n(arr(2, 1, vec![s("a"), s("b")]))],
+    ));
+    roundtrip("curly-wraps-lattice", &row);
+    let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
+    assert!(
+        aa.contains('┌') && aa.contains('⎨'),
+        "no fusion for curly:\n{}",
+        aa
+    );
+    // Height-2 curly: the ⎰⎱ sections (left ⎰ over ⎱, right mirrored).
+    let row = n(delim(
+        '{',
+        '}',
+        vec![],
+        vec![cat(&[s("a"), n(sup(s("α+")))])],
+    ));
+    roundtrip("curly-h2-sections", &row);
+    let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
+    assert_eq!(aa, "⎰ α+⎱\n⎱𝑎  ⎰");
+    // Null pair ┆ ┊ and a tall norm as stacked ‖.
+    let row = n(delim('.', ')', vec![], vec![n(frac(s("1"), s("2")))]));
+    roundtrip("null-left", &row);
+    let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
+    assert!(aa.contains('┆') && aa.contains('⎞'), "{}", aa);
+    let row = n(delim('‖', '‖', vec![], vec![n(frac(s("1"), s("2")))]));
+    roundtrip("tall-norm-stacked", &row);
+    let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
+    assert_eq!(
+        aa.matches('‖').count(),
+        6,
+        "stacked ‖ on both sides:\n{}",
+        aa
+    );
 }
 
 /// Ceil / floor / double-bar norm delimiters.
@@ -461,7 +548,7 @@ fn tall_middle_braket() {
     assert!(parse(legacy).is_ok());
 }
 
-/// Multi-line formula: Breaks stack the lines with a lone-┄ continuation
+/// Multi-line formula: Breaks stack the lines with a lone-┈ continuation
 /// marker on each following baseline.
 #[test]
 fn multi_line_formula() {
@@ -479,7 +566,7 @@ fn multi_line_formula() {
     roundtrip("multi-line", &row);
     let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
     assert_eq!(
-        aa.lines().filter(|l| l.trim_end() == "┄").count(),
+        aa.lines().filter(|l| l.trim_end() == "┈").count(),
         2,
         "two separator rows:\n{}",
         aa
@@ -844,7 +931,7 @@ fn delimiter_blocks() {
         "lattice-in-sup",
         &cat(&[s("e"), n(sup(n(array(1, 2, vec![s("0"), s("t")]))))]),
     );
-    // Explicit ╎ ┆ null pair still available via \delim..
+    // Explicit ┆ ┊ null pair still available via \delim..
     roundtrip(
         "null-delim-grid",
         &n(delim(
@@ -1157,7 +1244,7 @@ fn continued_fraction() {
 }
 
 /// Generalized bands: \lim, \argmax and friends take under-limits with
-/// the same ┄band┄ notation as big operators.
+/// the same ┈band┈ notation as big operators.
 #[test]
 fn limit_functions() {
     let row = cat(&[

@@ -208,7 +208,7 @@ fn cancel_wraps_the_selection() {
 
 #[test]
 fn enter_on_empty_formula_does_not_crash() {
-    // All-empty segments: the ┄ separator still needs a column (fuzz
+    // All-empty segments: the ┈ separator still needs a column (fuzz
     // found a zero-width vstack panic here).
     let mut ed = Editor::new();
     type_script(&mut ed, "Enter Enter Up Down a");
@@ -334,7 +334,7 @@ fn enter_at_top_level_breaks_the_line() {
     assert_eq!(latex(&ed), "a+b \\\\ =c");
     let pic = aa(&ed);
     assert!(
-        pic.lines().nth(1).is_some_and(|l| l.trim_end() == "┄"),
+        pic.lines().nth(1).is_some_and(|l| l.trim_end() == "┈"),
         "separator row:\n{}",
         pic
     );

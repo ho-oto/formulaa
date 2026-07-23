@@ -1,6 +1,6 @@
 //! Regression demo for the over/under-limit ambiguity.
 //!
-//! Before the ┄-band notation, these two different ASTs rendered to the
+//! Before the ┈-band notation, these two different ASTs rendered to the
 //! same picture, so no parser could invert the output. The band makes the
 //! horizontal extent of limits explicit and the two now differ.
 //! Run: cargo run --example ambig

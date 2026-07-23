@@ -347,23 +347,10 @@ fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers, save_path: &st
 /// Draw the whole UI; returns the screen coordinates of the formula's
 /// top-left cell (for mouse hit-testing).
 fn draw(f: &mut Frame, ed: &Editor) -> (u16, u16) {
-    let [canvas_area, tex_area, help_area] = Layout::vertical([
-        Constraint::Min(3),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .areas(f.area());
+    let [canvas_area, help_area] =
+        Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
 
     let origin = draw_canvas(f, canvas_area, ed);
-
-    let tex = latex::row_to_latex(&ed.root);
-    f.render_widget(
-        Line::from(vec![
-            Span::styled(" LaTeX: ", Style::default().fg(Color::DarkGray)),
-            Span::raw(tex),
-        ]),
-        tex_area,
-    );
 
     // One bottom line: messages overlay the usage line when present
     // (the minibuffer itself shows in-place at the cursor).

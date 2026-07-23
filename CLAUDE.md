@@ -25,7 +25,7 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
    (`render(parse(aa)) == aa` は要求ではない — AA はソースコードで、
    受理は正準形より広い。fmt が整える)
 2. 新しい描画グリフを導入するときは docs/aa-spec.md の予約グリフ表を更新し、
-   `symbols.rs` / `symbols_ext.rs` に原子として同じ文字が存在しないことを確認。
+   `symbols/mod.rs`(is_reserved_glyph)/ `symbols/ext.rs` に原子として同じ文字が存在しないことを確認。
 3. `normalize`(ast.rs)は**冪等**でなければならない(合流後の再正規化)。
 4. 機能追加はまず `tests/roundtrip.rs` に実式を足してから実装する。
    キー操作の変更は `tests/ui.rs`(キースクリプト)に足す。キーの意味は
@@ -48,9 +48,9 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
 | `src/parse.rs` | AA → AST。領域+基線の再帰下降。正準AAの受理側+寛容入力 |
 | `src/editor.rs` | 構造エディタ(LyX 型カーソル、コマンド実行) |
 | `src/input.rs` | **共有キーマップ**(`Key`/`Effect`/`Editor::input`)。TUI と wasm は変換だけ |
-| `src/latex.rs` / `src/typst.rs` | AST → LaTeX / Typst |
-| `src/symbols.rs` | 厳選シンボル表・関数名辞書・アクセント表・LaTeX 逆引き |
-| `src/symbols_ext.rs` | **生成物**(ho-oto/mathematical-symbols 由来、4000+)。手編集しない |
+| `src/output/latex.rs` / `src/output/typst.rs` | AST → LaTeX / Typst(crate ルートの `mascii::latex`/`typst` で再輸出) |
+| `src/symbols/mod.rs` | 厳選シンボル表・関数表 FUNCS(limits/LaTeX/Typst フラグ付き)・BIG_OPS・アクセント表・予約グリフ判定 |
+| `src/symbols/ext.rs` | **生成物**(ho-oto/mathematical-symbols 由来、4000+)。手編集しない |
 | `src/main.rs` | TUI(ratatui)+ CLI サブコマンド |
 | `tests/roundtrip.rs` | 実式コーパス + ランダムプロパティテスト |
 | `tests/ui.rs` | キー駆動 UI テスト(キースクリプト DSL + ランダムキー列。`MASCII_UI_PROP_N`/`_SEED`) |
@@ -84,11 +84,12 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
   1 文字(Row ではない)。
 - 括弧は `Node::Delim{left,right,mids,segs}` に統一(旧 Paren/Matrix は廃止)。
   `Node::Array` はどこでも格子(裸なら ┌┬┐ フルフレーム、デリミタの単独 seg
-  なら最小マーカーの融合形 — ┼ 区切り行 / ┬┴ 行 / ┠┨ 接合)。空白の個数に
+  なら最小マーカーの融合形 — ┼ 区切り行 / ┬┴ 行 / ├┤ 接合。
+  波括弧は融合しない)。空白の個数に
   依存する規則は存在しない(docs/parse-model.md §0)。
 - Space は整形スペーサ(再パースで消える)、`\space`=␣、脱出は Tab、
   Enter はグリッド内で行追加・トップレベルで数式改行(`Node::Break`、
-  行間に `┄` 単体の区切り行)、Ctrl+Y で AA をクリップボードへ。
+  行間に `┈` 単体の区切り行)、Ctrl+Y で AA をクリップボードへ。
   トップレベルの描画入口は `render_root`(Break 分割+縦積み)——
   ルート行を描くときに `render_row` を直接呼ばない。
 - ratatui は feature "tui"(bin 専用)。ライブラリ本体に TUI 依存を
