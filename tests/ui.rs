@@ -199,6 +199,15 @@ fn caret_underscore_commands_insert_scripts() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"x \_10 \^gamma");
     assert_eq!(latex(&ed), "x_{10}^{\\gamma }");
+    // The marker may lead, trail, or both: \^z = \z^ = \^z^.
+    for spelling in [r"x \z^", r"x \^z^"] {
+        let mut ed = Editor::new();
+        type_script(&mut ed, spelling);
+        assert_eq!(latex(&ed), "x^{z}", "{}", spelling);
+    }
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"x \i_");
+    assert_eq!(latex(&ed), "x_{i}");
 }
 
 #[test]
@@ -207,9 +216,10 @@ fn cancel_wraps_the_selection() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"x+y S-Left S-Left \cancel");
     assert_eq!(latex(&ed), "x\\cancel{+y}");
-    // Block selection (^B + label) then \cancel.
+    // Block selection (^B from inside, Enter picks the parent) then
+    // \cancel.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"a+(b+c) C-b a \cancel");
+    type_script(&mut ed, r"a+(b+c C-b Enter \cancel");
     assert_eq!(latex(&ed), "a+\\cancel{\\left(b+c\\right)}");
     // Parent selection (Shift+Up) then \cancel.
     let mut ed = Editor::new();
@@ -525,8 +535,9 @@ fn selection_does_not_survive_leaving_the_row() {
 #[test]
 fn block_select_mode_selects_a_structure() {
     let mut ed = Editor::new();
-    // 1 + a fraction; ^B labels the fraction 'a', picking it selects it.
-    type_script(&mut ed, r"1 // 2 Down 3 Tab C-b");
+    // Cursor inside the fraction's denominator: ^B highlights the
+    // fraction (innermost parent); Enter selects it.
+    type_script(&mut ed, r"1 // 2 Down 3 C-b");
     // The label marker must actually appear in the decorated view
     // (this display path once silently missed the block branch).
     let (root, cursor) = ed.decorated();
@@ -538,10 +549,36 @@ fn block_select_mode_selects_a_structure() {
         "label marker missing: {:?}",
         root
     );
-    type_script(&mut ed, "a");
+    type_script(&mut ed, "Enter");
     assert_eq!(ed.selection(), Some((1, 2)));
     type_script(&mut ed, "Backspace");
     assert_eq!(latex(&ed), "1");
+    // ^B at the top level has no enclosing block: mode does not start.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"x+y C-b");
+    assert!(ed.block.is_none());
+    // Walking the chain: from a cell of a matrix inside parens, ↑ moves
+    // outward Array -> Delim; a second ^B cancels without moving.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\pmatrix x");
+    let (path, col) = (ed.path.clone(), ed.col);
+    type_script(&mut ed, r"C-b");
+    assert_eq!(ed.block.as_ref().map(Vec::len), Some(2), "Array + Delim");
+    assert_eq!(ed.block_sel, 0, "innermost parent first");
+    type_script(&mut ed, "Up");
+    assert_eq!(ed.block_sel, 1);
+    type_script(&mut ed, "Down");
+    assert_eq!(ed.block_sel, 0);
+    type_script(&mut ed, "C-b");
+    assert!(ed.block.is_none());
+    assert_eq!((ed.path, ed.col), (path, col), "cursor untouched");
+    // Enter on the outer ancestor selects the delimiter block.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\pmatrix x C-b Up Enter \cancel");
+    assert_eq!(
+        latex(&ed),
+        "\\cancel{\\begin{pmatrix} x &  \\\\  &  \\end{pmatrix}}"
+    );
 }
 
 // ----- random key sequences: never panic, always roundtrip -----

@@ -1197,13 +1197,11 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             // Angles keep their vertex geometry and wrap a bare lattice
             // instead.
             if mids.is_empty()
-                && *left != '⟨'
-                && *right != '⟩'
-                && *left != '‖'
-                // Curly braces keep their vertex column and wrap a bare
-                // lattice instead (no clean junction glyphs exist).
-                && *left != '{'
-                && *right != '}'
+                // Only ( [ ⌈ ⌊ | columns fuse with a sole grid: curly
+                // braces keep their vertex column, null ┆ ┊ ghosts and
+                // norm/angle geometry take a bare lattice instead.
+                && matches!(*left, '(' | '[' | '⌈' | '⌊' | '|')
+                && matches!(*right, ')' | ']' | '⌉' | '⌋' | '|')
                 && let [seg] = &segs[..]
                 // Display markers are transparent: a labeled sole-Array
                 // segment still fuses (the label overlays a cell).
@@ -1227,7 +1225,10 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                         if let Node::Sym(c) = n
                             && is_display_marker(*c)
                         {
-                            let x = if i < ai { 0 } else { w.saturating_sub(1) };
+                            // Just inside the delimiter columns, so the
+                            // fused Array paints as its own (interior)
+                            // box distinct from the enclosing Delim.
+                            let x = if i < ai { 1 } else { w.saturating_sub(2) };
                             b.marks.push((bl, x, *c));
                         }
                     }
@@ -1262,9 +1263,14 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             // (╱ over ╲ on the left, ╲ over ╱ on the right); the extent
             // is always even, the baseline is the upper turn row.
             let angle = h >= 2 && (*left == '⟨' || *right == '⟩');
+            let curly = *left == '{' || *right == '}';
             let (ext_h, ext_bl) = if angle {
                 let k = (bl + 1).max(h - 1 - bl);
                 (2 * k, k - 1)
+            } else if curly && h == 2 {
+                // A curly column needs hook + ⎨ vertex + hook: a 2-row
+                // body rides in a 3-row extent with the vertex centered.
+                (3, 1)
             } else {
                 (h, bl)
             };
@@ -1607,11 +1613,14 @@ fn render_lattice(
 fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
     if h == 1 {
         return vec![match spec {
+            // Vertical bars reuse the bracket extension pieces ⎢ ⎥
+            // (U+23A2/23A5, like ceil/floor reuse the corners): the
+            // ⎸ ⎹ box lines sat oddly in most fonts.
             '|' => {
                 if left {
-                    '⎸'
+                    '⎢'
                 } else {
-                    '⎹'
+                    '⎥'
                 }
             }
             // Null delimiters: dashed ghosts (┆ U+2506 TRIPLE DASH /
@@ -1644,32 +1653,19 @@ fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
                 }
             }
             '{' | '}' => {
-                // Height 2 has no room for hook + ⎨ vertex + hook: use
-                // the two-row sections ⎰ U+23B0 / ⎱ U+23B1 instead
-                // (left = ⎰ over ⎱, right = ⎱ over ⎰; the side resolves
-                // from which of the pair sits on top).
-                if h == 2 {
-                    let (top, bot) = if spec == '{' {
-                        ('⎰', '⎱')
-                    } else {
-                        ('⎱', '⎰')
-                    };
-                    if r == 0 { top } else { bot }
+                let (top, mid, bot) = if spec == '{' {
+                    ('⎧', '⎨', '⎩')
                 } else {
-                    let (top, mid, bot) = if spec == '{' {
-                        ('⎧', '⎨', '⎩')
-                    } else {
-                        ('⎫', '⎬', '⎭')
-                    };
-                    if r == bl {
-                        mid
-                    } else if r == 0 {
-                        top
-                    } else if r == h - 1 {
-                        bot
-                    } else {
-                        '⎪'
-                    }
+                    ('⎫', '⎬', '⎭')
+                };
+                if r == bl {
+                    mid
+                } else if r == 0 {
+                    top
+                } else if r == h - 1 {
+                    bot
+                } else {
+                    '⎪'
                 }
             }
             '⟨' => match r.cmp(&bl) {
@@ -1684,9 +1680,9 @@ fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
             },
             '|' => {
                 if left {
-                    '⎸'
+                    '⎢'
                 } else {
-                    '⎹'
+                    '⎥'
                 }
             }
             // Norm: the same ‖ (U+2016 DOUBLE VERTICAL LINE) stacked on

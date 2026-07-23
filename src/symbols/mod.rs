@@ -142,12 +142,12 @@ pub fn is_reserved_glyph(c: char) -> bool {
         // Square brackets (U+23A1-23A6 pieces); ceil/floor reuse them
         | '[' | ']' | '⎡' | '⎢' | '⎣' | '⎤' | '⎥' | '⎦'
         | '⌈' | '⌉' | '⌊' | '⌋' // U+2308/2309/230A/230B CEILING / FLOOR
-        // Curly braces (U+23A7-23AD pieces; ⎰⎱ U+23B0/23B1 = height 2)
-        | '{' | '}' | '⎧' | '⎨' | '⎩' | '⎪' | '⎫' | '⎬' | '⎭' | '⎰' | '⎱'
+        // Curly braces (U+23A7-23AD pieces; min height 3 when tall)
+        | '{' | '}' | '⎧' | '⎨' | '⎩' | '⎪' | '⎫' | '⎬' | '⎭'
         // Angles: U+27E8/27E9 one-line; arms U+2571/2572 diagonals
         | '⟨' | '⟩' | '╱' | '╲'
-        // Vertical bars: U+23B8/23B9 LEFT/RIGHT VERTICAL BOX LINE
-        | '⎸' | '⎹'
+        // (the vertical bar \abs reuses the bracket extensions ⎢ ⎥;
+        // ⎸ ⎹ U+23B8/23B9 are no longer part of the format)
         | '‖'                   // U+2016 DOUBLE VERTICAL LINE: norm (stacked when tall)
         | '┆'                   // U+2506 LIGHT TRIPLE DASH VERTICAL: null delimiter left
         | '┊'                   // U+250A LIGHT QUADRUPLE DASH VERTICAL: null delimiter right
@@ -232,6 +232,54 @@ pub fn is_under_mark(c: char) -> bool {
     ACCENTS.iter().any(|&(_, m, under, _)| m == c && under)
 }
 
+/// Multi-word operator names: the command inserts a band with one piece
+/// per word (`\argmax` -> ┈arg┈max┈, `\limsup` -> ┈lim┈sup┈), so the
+/// spacing matches the words. `latex`/`typst` flag whether the joined
+/// name is native there (\limsup); otherwise the serializers group the
+/// pieces (\mathop{\arg\max} / op("arg max")).
+pub struct WordOp {
+    pub name: &'static str,
+    pub words: [&'static str; 2],
+    pub latex: bool,
+    pub typst: bool,
+}
+
+pub const WORD_OPS: &[WordOp] = &[
+    WordOp {
+        name: "argmax",
+        words: ["arg", "max"],
+        latex: false,
+        typst: false,
+    },
+    WordOp {
+        name: "argmin",
+        words: ["arg", "min"],
+        latex: false,
+        typst: false,
+    },
+    WordOp {
+        name: "limsup",
+        words: ["lim", "sup"],
+        latex: true,
+        typst: true,
+    },
+    WordOp {
+        name: "liminf",
+        words: ["lim", "inf"],
+        latex: true,
+        typst: true,
+    },
+];
+
+pub fn word_op(name: &str) -> Option<&'static WordOp> {
+    WORD_OPS.iter().find(|w| w.name == name)
+}
+
+/// The word op a run of band pieces spells, if any.
+pub fn word_op_of(words: &[&str]) -> Option<&'static WordOp> {
+    WORD_OPS.iter().find(|w| w.words == words)
+}
+
 /// Big operators available as `\name` (typeset with under/over limits).
 pub const BIG_OPS: &[(&str, char)] = &[
     ("sum", '∑'),
@@ -303,8 +351,6 @@ pub const FUNCS: &[FuncSpec] = &[
     fun("ker", false, true, true),
     fun("lg", false, true, true),
     fun("lim", true, true, true),
-    fun("liminf", true, true, true),
-    fun("limsup", true, true, true),
     fun("ln", false, true, true),
     fun("log", false, true, true),
     fun("max", true, true, true),

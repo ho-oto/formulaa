@@ -41,10 +41,13 @@ pub struct Editor {
     pub jump_selected: usize,
     /// Free-cursor mode (^F): Some while active.
     pub free: Option<FreeCursor>,
-    /// Block-select mode (Ctrl+B): Some(targets) while waiting for a
-    /// label key; each target is (parent row path, node index) of a
-    /// structure node, and picking one selects the whole block.
+    /// Block-select mode (Ctrl+B): Some(ancestors of the cursor,
+    /// innermost first); each target is (parent row path, node index).
+    /// ↑/→ widen the highlighted ancestor, ↓/← narrow it, Enter (or the
+    /// target's label key) selects the whole block.
     pub block: Option<Vec<BlockRef>>,
+    /// Index into `block` of the highlighted ancestor.
+    pub block_sel: usize,
     /// Empty slots kept materialized after jump mode ends (the ⬚ cells
     /// ^G labeled stay visible until the next input, so toggling ^G
     /// twice does not shift the layout).
@@ -175,18 +178,40 @@ impl Default for Editor {
 /// so `\lr(]`, `\lr{|}` and `\lr\langle||\rangle` all read like the
 /// picture. None when the string is not a delimiter spec (a `\lr…`
 /// symbol name like \lrcorner then resolves normally).
-/// Argument row for a \^… / \_… script command: a symbol name
-/// (\^gamma) or a run of ASCII alphanumerics (\^z, \_10).
-fn script_cmd_arg(rest: &str) -> Option<crate::ast::Row> {
+/// A script-spelled command: the ^ / _ marker may lead, trail, or both
+/// (\^z, \z^ and \^z^ are the same superscript). Returns (sup?, arg).
+fn script_cmd(cmd: &str) -> Option<(bool, crate::ast::Row)> {
+    let lead = cmd.chars().next().filter(|c| matches!(c, '^' | '_'));
+    let trail = if cmd.chars().count() > 1 {
+        cmd.chars().last().filter(|c| matches!(c, '^' | '_'))
+    } else {
+        None
+    };
+    let marker = match (lead, trail) {
+        (Some(a), Some(b)) if a == b => a,
+        (Some(a), None) => a,
+        (None, Some(b)) => b,
+        _ => return None,
+    };
+    let mut rest = cmd;
+    if lead.is_some() {
+        rest = &rest[1..];
+    }
+    if trail.is_some() {
+        rest = &rest[..rest.len() - 1];
+    }
     if rest.is_empty() {
         return None;
     }
-    if let Some(c) = symbol_by_name(rest) {
-        return Some(vec![Node::Sym(c)]);
-    }
-    rest.chars()
-        .all(|c| c.is_ascii_alphanumeric())
-        .then(|| rest.chars().map(Node::Sym).collect())
+    // A symbol name (\^gamma) or a run of ASCII alphanumerics (\_10).
+    let arg: crate::ast::Row = if let Some(c) = symbol_by_name(rest) {
+        vec![Node::Sym(c)]
+    } else if rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+        rest.chars().map(Node::Sym).collect()
+    } else {
+        return None;
+    };
+    Some((marker == '^', arg))
 }
 
 fn lr_spec(cmd: &str) -> Option<(char, char, Vec<char>)> {
@@ -285,6 +310,7 @@ impl Editor {
             jump_selected: 0,
             free: None,
             block: None,
+            block_sel: 0,
             ghost: Vec::new(),
             select_anchor: None,
             select_path: Vec::new(),
@@ -1613,63 +1639,75 @@ impl Editor {
         }
     }
 
-    // ----- block-select mode (Ctrl+B: labels on structure blocks) -----
+    // ----- block-select mode (Ctrl+B: the cursor's ancestor chain) -----
 
-    /// All structure nodes (anything with cursor fields) in document
-    /// order: (parent row path, node index).
+    /// The cursor's enclosing structure nodes, innermost first: one
+    /// (parent row path, node index) per ancestor.
     pub fn block_targets(&self) -> Vec<BlockRef> {
-        fn walk(row: &Row, path: &mut Vec<(usize, Field)>, out: &mut Vec<BlockRef>) {
-            // A grid that is a delimiter segment's sole node fuses with
-            // the delimiter — label atoms inside the segment would break
-            // that shape, and the enclosing Delim target covers it.
-            let fused_array = row.len() == 1
-                && matches!(row[0], Node::Array { .. })
-                && matches!(path.last(), Some((_, Field::Seg(_))));
-            for (i, node) in row.iter().enumerate() {
-                if !node.fields().is_empty() && !fused_array {
-                    out.push((path.clone(), i));
-                }
-                for f in node.fields() {
-                    path.push((i, f));
-                    walk(node.field(f), path, out);
-                    path.pop();
-                }
-            }
-        }
-        let mut out = Vec::new();
-        walk(&self.root, &mut Vec::new(), &mut out);
-        out
+        (0..self.path.len())
+            .rev()
+            .map(|k| (self.path[..k].to_vec(), self.path[k].0))
+            .collect()
     }
 
     pub fn start_block_select(&mut self) {
-        let mut targets = self.block_targets();
-        if targets.is_empty() {
-            self.message = "no blocks to select".into();
+        if self.block.is_some() {
+            // ^B again: back to where the cursor was (it never moved).
+            self.block_cancel();
             return;
         }
-        let max = JUMP_LABELS.chars().count();
-        if targets.len() > max {
-            targets.truncate(max);
-            self.message = "block: press a label key (some blocks unlabeled)".into();
-        } else {
-            self.message = "block: press a label key (Esc cancels)".into();
+        let targets = self.block_targets();
+        if targets.is_empty() {
+            self.message = "no enclosing block (cursor is at the top level)".into();
+            return;
         }
+        self.block_sel = 0;
         self.block = Some(targets);
+        self.message = "block: ↑/→ wider  ↓/← narrower  Enter/label select  ^B/Esc cancel".into();
     }
 
-    /// Pick a labeled block: the whole node becomes the selection, ready
-    /// for ^C/^X, wrapping or deletion.
+    pub fn block_cancel(&mut self) {
+        self.block = None;
+        self.message.clear();
+    }
+
+    /// Move the highlighted ancestor outward (↑/→) or inward (↓/←).
+    pub fn block_move(&mut self, outward: bool) {
+        let len = self.block.as_ref().map_or(0, Vec::len);
+        if outward {
+            self.block_sel = (self.block_sel + 1).min(len.saturating_sub(1));
+        } else {
+            self.block_sel = self.block_sel.saturating_sub(1);
+        }
+    }
+
+    /// Select the highlighted ancestor: the whole node becomes the
+    /// selection, ready for ^C/^X, wrapping or deletion.
+    pub fn block_commit(&mut self) {
+        let sel = self.block_sel;
+        if let Some(targets) = self.block.take()
+            && let Some((p, i)) = targets.get(sel)
+        {
+            self.path = p.clone();
+            self.select_anchor = Some(*i);
+            self.select_path = p.clone();
+            self.col = i + 1;
+        }
+        self.message.clear();
+    }
+
+    /// Select the ancestor behind a label key directly.
     pub fn block_to(&mut self, label: char) {
-        if let Some(targets) = self.block.take() {
-            if let Some(idx) = JUMP_LABELS.chars().position(|c| c == label)
-                && let Some((p, i)) = targets.get(idx)
-            {
-                self.path = p.clone();
-                self.select_anchor = Some(*i);
-                self.select_path = p.clone();
-                self.col = i + 1;
-            }
-            self.message.clear();
+        let len = self.block.as_ref().map_or(0, Vec::len);
+        if let Some(idx) = JUMP_LABELS
+            .chars()
+            .position(|c| c == label)
+            .filter(|&i| i < len)
+        {
+            self.block_sel = idx;
+            self.block_commit();
+        } else {
+            self.block_cancel();
         }
     }
 
@@ -1691,24 +1729,56 @@ impl Editor {
         if let Some(targets) = &self.block {
             targets
                 .iter()
-                .map(|(p, i)| {
+                .enumerate()
+                .map(|(rank, (p, i))| {
+                    // An Array fused into its delimiter has no isolated
+                    // layout of its own: measure the parent Delim slice
+                    // instead (the fused interior spans its full height).
+                    let (p, i) = if self.fused_in_delim(p, *i) {
+                        (&p[..p.len() - 1], p.last().unwrap().0)
+                    } else {
+                        (&p[..], *i)
+                    };
                     // If the cursor is inside this block, lay the slice
                     // out in its editing view (matches the display).
                     let cur = (self.path.len() > p.len()
                         && self.path[..p.len()] == p[..]
-                        && self.path[p.len()].0 == *i)
+                        && self.path[p.len()].0 == i)
                         .then(|| {
                             let mut rel = self.path[p.len()..].to_vec();
                             rel[0].0 = 0;
                             (rel, self.col)
                         });
-                    extent(&row_at(&self.root, p)[*i..*i + 1], cur, p.len())
+                    // The gradient ranks by ancestry (innermost first).
+                    extent(&row_at(&self.root, p)[i..i + 1], cur, rank)
                 })
                 .collect()
         } else if let Some((lo, hi)) = self.selection() {
             vec![extent(&self.cur_row()[lo..hi], None, 0)]
         } else {
             Vec::new()
+        }
+    }
+
+    /// Is the node at (p, i) an Array that fuses with its enclosing
+    /// delimiter (sole node of a Seg of a fusing ( [ ⌈ ⌊ | pair)?
+    fn fused_in_delim(&self, p: &[(usize, Field)], i: usize) -> bool {
+        let Some(&(pi, Field::Seg(_))) = p.last() else {
+            return false;
+        };
+        let row = row_at(&self.root, p);
+        if i != 0 || row.len() != 1 || !matches!(row[0], Node::Array { .. }) {
+            return false;
+        }
+        match &row_at(&self.root, &p[..p.len() - 1])[pi] {
+            Node::Delim {
+                left, right, mids, ..
+            } => {
+                mids.is_empty()
+                    && matches!(*left, '(' | '[' | '⌈' | '⌊' | '|')
+                    && matches!(*right, ')' | ']' | '⌉' | '⌋' | '|')
+            }
+            _ => false,
         }
     }
 
@@ -1770,9 +1840,10 @@ impl Editor {
             let mut path = self.path.clone();
             let mut col = self.col;
             // Label sits immediately left of its block and a close marker
-            // right after it, so the display can paint the block's extent
-            // (reverse document order keeps positions valid).
-            for (idx, (p, i)) in targets.iter().enumerate().rev() {
+            // right after it, so the display can paint the block's extent.
+            // Targets are innermost first = deepest first: inserting into
+            // a deep row never shifts a shallower target's position.
+            for (idx, (p, i)) in targets.iter().enumerate() {
                 let mark = char::from_u32(JUMP_CHAR_BASE + idx as u32).unwrap();
                 let row = row_at_mut(&mut root, p);
                 row.insert(i + 1, Node::Sym(BLK_CLOSE));
@@ -2099,10 +2170,12 @@ impl Editor {
             }),
             // Multi-piece limit operators (┈arg┈max┈). Hardcoded for now;
             // arbitrary bases need OpBase editing (roadmap).
-            "argmax" | "argmin" => {
-                let f = if cmd == "argmax" { "max" } else { "min" };
+            _ if crate::symbols::word_op(cmd).is_some() => {
+                // Multi-word operators (\argmax, \limsup, …): one band
+                // piece per word, entering the lower limit.
+                let w = crate::symbols::word_op(cmd).unwrap();
                 self.insert_and_enter(Node::BigOp {
-                    base: vec![Node::Func("arg".into()), Node::Func(f.into())],
+                    base: w.words.iter().map(|&f| Node::Func(f.into())).collect(),
                     lower: vec![],
                     upper: vec![],
                 });
@@ -2135,17 +2208,12 @@ impl Editor {
                     self.col += 1;
                 } else if let Some((mark, _)) = accent_by_name(cmd) {
                     self.apply_accent(mark);
-                } else if let Some(arg) = cmd
-                    .strip_prefix('^')
-                    .map(|r| (true, r))
-                    .or_else(|| cmd.strip_prefix('_').map(|r| (false, r)))
-                    .and_then(|(sup, rest)| script_cmd_arg(rest).map(|a| (sup, a)))
-                {
-                    // \^z / \_i insert a real Sup / Sub node (the ext
-                    // symbol table's modifier-letter spellings like
-                    // "^A" -> ᴬ are shadowed on purpose: a superscript
-                    // should be structure, not a look-alike atom).
-                    let (sup, arg) = arg;
+                } else if let Some((sup, arg)) = script_cmd(cmd) {
+                    // \^z / \z^ / \^z^ (and the _ variants) insert a
+                    // real Sup / Sub node (the ext symbol table's
+                    // modifier-letter spellings like "^A" -> ᴬ are
+                    // shadowed on purpose: a superscript should be
+                    // structure, not a look-alike atom).
                     let col = self.col;
                     let node = if sup {
                         Node::Sup { arg }

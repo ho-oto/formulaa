@@ -108,15 +108,17 @@ impl Editor {
         })
     }
 
-    /// Block-select mode: the next key picks a block label.
+    /// Block-select mode: arrows walk the ancestor chain (↑/→ wider,
+    /// ↓/← narrower), Enter or a label key selects, ^B/Esc cancels.
     fn block_keys(&mut self, key: Key, ctrl: bool) -> Option<Effect> {
         self.block.is_some().then(|| {
             match key {
+                Key::Up | Key::Right if !ctrl => self.block_move(true),
+                Key::Down | Key::Left if !ctrl => self.block_move(false),
+                Key::Enter => self.block_commit(),
+                Key::Char('b') if ctrl => self.block_cancel(),
                 Key::Char(c) if !ctrl => self.block_to(c),
-                _ => {
-                    self.block = None;
-                    self.message.clear();
-                }
+                _ => self.block_cancel(),
             }
             Effect::None
         })

@@ -11,6 +11,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block as UiBlock, Borders, Paragraph};
 
+mod theme;
+
 use mascii::editor::{
     BLK_CLOSE, Editor, JUMP_CHAR_BASE, JUMP_LABELS, JUMP_RANK_BASE, SEL_CLOSE, SEL_OPEN,
 };
@@ -51,15 +53,6 @@ fn help_line(ed: &Editor) -> &'static str {
     }
 }
 
-const USAGE: &str = "\
-usage: mascii [--session] [SAVE_PATH]  interactive TUI editor (default: formula.tex)
-       mascii aa2tex   [FILE]     AA formula (file or stdin) -> LaTeX
-       mascii aa2typst [FILE]     AA formula (file or stdin) -> Typst
-       mascii fmt      [FILE]     AA formula -> canonical AA (normalize)
-
---session: persist the formula to .mascii-session after every edit and
-restore it on startup — survives restarts, e.g. cargo watch -x 'run -- --session'";
-
 /// Session file for `--session` (canonical AA with formatting spacers
 /// written as explicit ␠ so the restore parse keeps them).
 const SESSION_FILE: &str = ".mascii-session";
@@ -86,26 +79,45 @@ fn save_session(ed: &Editor) {
     }
 }
 
+#[derive(clap::Parser)]
+#[command(
+    version,
+    about = "LyX-like TUI math editor + AA <-> LaTeX/Typst converter"
+)]
+struct Cli {
+    #[command(subcommand)]
+    cmd: Option<Convert>,
+    /// LaTeX save path for ^S in the TUI
+    #[arg(default_value = "formula.tex")]
+    save_path: String,
+    /// Persist the formula to .mascii-session after every edit and
+    /// restore it on startup (survives cargo-watch restarts)
+    #[arg(long)]
+    session: bool,
+}
+
+#[derive(clap::Subcommand)]
+enum Convert {
+    /// AA formula (file or stdin) -> LaTeX
+    Aa2tex { file: Option<String> },
+    /// AA formula (file or stdin) -> Typst
+    Aa2typst { file: Option<String> },
+    /// AA formula -> canonical AA (normalize)
+    Fmt { file: Option<String> },
+}
+
 fn main() -> std::io::Result<()> {
-    let mut args: Vec<String> = std::env::args().skip(1).collect();
-    let session = args.iter().any(|a| a == "--session");
-    args.retain(|a| a != "--session");
-    match args.first().map(String::as_str) {
-        Some("aa2tex") | Some("aa2typst") | Some("fmt") => {
-            let rest: Vec<&str> = args[1..].iter().map(String::as_str).collect();
-            let file = rest.into_iter().find(|a| !a.starts_with("--"));
-            return convert(&args[0].clone(), file);
-        }
-        Some("-h") | Some("--help") => {
-            println!("{}", USAGE);
-            return Ok(());
-        }
-        _ => {}
+    let cli = <Cli as clap::Parser>::parse();
+    if let Some(cmd) = cli.cmd {
+        let (kind, file) = match &cmd {
+            Convert::Aa2tex { file } => ("aa2tex", file),
+            Convert::Aa2typst { file } => ("aa2typst", file),
+            Convert::Fmt { file } => ("fmt", file),
+        };
+        return convert(kind, file.as_deref());
     }
-    let save_path = args
-        .first()
-        .cloned()
-        .unwrap_or_else(|| "formula.tex".into());
+    let session = cli.session;
+    let save_path = cli.save_path;
     let mut terminal = ratatui::init();
     let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
     let mut ed = Editor::new();
@@ -172,6 +184,37 @@ fn convert(mode: &str, file: Option<&str>) -> std::io::Result<()> {
 }
 
 /// Pipe `text` into the first available system clipboard command.
+/// OSC 52: hand the text to the terminal's clipboard through an escape
+/// sequence — works in most modern terminals, including over ssh where
+/// no clipboard command exists.
+fn osc52_copy(text: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut out = std::io::stdout();
+    write!(out, "\x1b]52;c;{}\x07", base64(text.as_bytes()))?;
+    out.flush()
+}
+
+fn base64(data: &[u8]) -> String {
+    const ABC: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut s = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = u32::from_be_bytes([0, b[0], b[1], b[2]]);
+        for i in 0..4 {
+            if i <= chunk.len() {
+                s.push(ABC[(n >> (18 - 6 * i) & 0x3f) as usize] as char);
+            } else {
+                s.push('=');
+            }
+        }
+    }
+    s
+}
+
 fn copy_to_clipboard(text: &str) -> Result<&'static str, String> {
     use std::io::Write as _;
     use std::process::{Command, Stdio};
@@ -334,9 +377,16 @@ fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers, save_path: &st
         Effect::CopyAa => {
             let row = ast::normalize(&ed.root);
             let aa = render_root(&row, None, &RenderCtx::canonical()).to_text();
+            // A clipboard command gives a definite success signal;
+            // otherwise fall back to OSC 52 through the terminal.
             match copy_to_clipboard(&aa) {
                 Ok(cmd) => ed.message = format!("copied AA to clipboard ({})", cmd),
-                Err(e) => ed.message = format!("copy failed: {}", e),
+                Err(_) => {
+                    ed.message = match osc52_copy(&aa) {
+                        Ok(()) => "copied AA to clipboard (OSC 52)".into(),
+                        Err(e) => format!("copy failed: {}", e),
+                    }
+                }
             }
         }
         Effect::None => {}
@@ -357,12 +407,12 @@ fn draw(f: &mut Frame, ed: &Editor) -> (u16, u16) {
     let bottom = if !ed.message.is_empty() {
         Line::from(Span::styled(
             format!(" {}", ed.message),
-            Style::default().fg(Color::Green),
+            Style::default().fg(theme::MESSAGE_FG),
         ))
     } else {
         Line::from(Span::styled(
             format!(" {}", help_line(ed)),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::CHROME_FG),
         ))
     };
     f.render_widget(bottom, help_area);
@@ -374,7 +424,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
     let border = UiBlock::default()
         .borders(Borders::ALL)
         .title(" mascii ")
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(Style::default().fg(theme::BORDER_FG));
     let inner = border.inner(area);
     f.render_widget(border, area);
 
@@ -388,6 +438,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
         &block.marks,
         block.caret,
         ed.jump.is_some().then_some(ed.jump_selected),
+        ed.block.is_some().then_some(ed.block_sel),
     );
     let struck: std::collections::HashSet<(usize, usize)> = block.cancel.iter().copied().collect();
     let mut lines = lines;
@@ -401,7 +452,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
                 bg[sy].resize(sx + 1, None);
             }
             let last = bg[sy].len().saturating_sub(1);
-            bg[sy][sx.min(last)] = Some(FREE_BG);
+            bg[sy][sx.min(last)] = Some(theme::FREE_BG);
         }
         let (fy, fx) = f.at;
         if fy < lines.len() {
@@ -435,24 +486,11 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
     (inner.x + left, inner.y + top)
 }
 
-/// Selection box background (replaces the old ⟦ ⟧ bracket display).
-const SELECTION_BG: Color = Color::Indexed(89);
-/// Unlabeled jump markers (beyond the label alphabet).
-const UNLABELED_BG: Color = Color::Indexed(238);
-/// The arrow-selected jump marker.
-const SELECTED_BG: Color = Color::Indexed(172);
-/// In-place minibuffer overlay (`\cmd` typed at the cursor).
-const MINIBUF_BG: Color = Color::Indexed(94);
-/// The free cursor cell itself (^F): tinted so the mode is obvious.
-const FREE_CURSOR_BG: Color = Color::Indexed(127);
-/// The ^F snap-preview cell (the free cursor uses the caret style).
-const FREE_BG: Color = Color::Indexed(24);
-
 /// Turn the zero-width display annotations of a rendered block into
 /// colored boxes, overlaid labels and the caret cell. Marks carry
 /// (row, col, char): jump/block labels overlay the glyph at their
 /// position; selection/block mark pairs paint a background box (the
-/// selection in SELECTION_BG, ^B blocks in the depth palette
+/// selection in theme::SELECTION_BG, ^B blocks in the depth palette
 /// by nesting depth). Nothing is inserted or removed, so the geometry
 /// always equals the undecorated render.
 #[allow(clippy::type_complexity)]
@@ -462,6 +500,7 @@ fn marker_boxes(
     marks: &[(usize, usize, char)],
     caret: Option<(usize, usize)>,
     selected: Option<usize>,
+    block_selected: Option<usize>,
 ) -> (
     Vec<Vec<char>>,
     Vec<Vec<Option<Color>>>,
@@ -494,11 +533,16 @@ fn marker_boxes(
             if c == SEL_CLOSE || c == BLK_CLOSE {
                 if let Some((o, oc)) = stack.pop() {
                     let (color, depth) = if oc == SEL_OPEN {
-                        (SELECTION_BG, 0)
+                        (theme::SELECTION_BG, 0)
                     } else {
                         let idx = (oc as u32 - JUMP_CHAR_BASE) as usize;
                         let d = extents.get(idx).map_or(0, |&(_, _, d)| d);
-                        (DEPTH_BG[d % DEPTH_BG.len()], d)
+                        let c = if block_selected == Some(idx) {
+                            theme::SELECTED_BG
+                        } else {
+                            theme::DEPTH_BG[d % theme::DEPTH_BG.len()]
+                        };
+                        (c, d)
                     };
                     boxes.push((y, o, x, color));
                     order.push(depth);
@@ -508,9 +552,11 @@ fn marker_boxes(
             }
         }
     }
-    // Outer (shallow) boxes first so nested ones paint over them.
+    // Outer boxes first so nested ones paint over them. The ^B rank is
+    // innermost-first (rank 0 = the innermost parent), so paint in
+    // descending rank: outermost ancestors below, inner ones on top.
     let mut idx: Vec<usize> = (0..boxes.len()).collect();
-    idx.sort_by_key(|&i| order[i]);
+    idx.sort_by_key(|&i| std::cmp::Reverse(order[i]));
     for i in idx {
         let (oy, o, close, color) = boxes[i];
         // Which extent? Selection has one entry; a ^B box finds its
@@ -571,10 +617,10 @@ fn marker_boxes(
                     // Re-encode as a display label char for styling.
                     row[x] = char::from_u32(JUMP_CHAR_BASE + r as u32).unwrap_or(label);
                 } else if bg[y][x].is_none() {
-                    bg[y][x] = Some(UNLABELED_BG);
+                    bg[y][x] = Some(theme::UNLABELED_BG);
                 }
                 if is_sel {
-                    bg[y][x] = Some(SELECTED_BG);
+                    bg[y][x] = Some(theme::SELECTED_BG);
                 }
             }
         }
@@ -614,7 +660,7 @@ fn overlay_minibuffer(
     }
     for (i, &ch) in text.iter().enumerate() {
         lines[cy][cx + i] = ch;
-        bg[cy][cx + i] = Some(MINIBUF_BG);
+        bg[cy][cx + i] = Some(theme::MINIBUF_BG);
     }
     *cursor_cell = Some((cy, end));
 }
@@ -638,15 +684,15 @@ fn decorate_line(
     // color", not "the cursor changed color").
     let cursor_style = if free_caret {
         Style::default()
-            .fg(Color::White)
-            .bg(FREE_CURSOR_BG)
+            .fg(theme::FREE_CURSOR_FG)
+            .bg(theme::FREE_CURSOR_BG)
             .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK)
     } else {
         Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD | Modifier::SLOW_BLINK)
     };
     let label_style = Style::default()
-        .fg(Color::Black)
-        .bg(Color::Yellow)
+        .fg(theme::LABEL_FG)
+        .bg(theme::LABEL_BG)
         .add_modifier(Modifier::BOLD);
 
     let mut spans = Vec::new();
@@ -681,7 +727,7 @@ fn decorate_line(
         } else if c == '␣' {
             // Explicit space atom: keep visible but unobtrusive.
             flush(&mut buf, buf_bg, &mut spans);
-            let mut style = Style::default().fg(Color::DarkGray);
+            let mut style = Style::default().fg(theme::SPACE_FG);
             if let Some(color) = cell_bg {
                 style = style.bg(color);
             }
@@ -711,17 +757,68 @@ fn decorate_line(
     spans
 }
 
-/// Background palette for ^B block boxes, cycling with depth.
-const DEPTH_BG: [Color; 5] = [
-    Color::Indexed(17), // dark blue
-    Color::Indexed(22), // dark green
-    Color::Indexed(54), // purple
-    Color::Indexed(23), // teal
-    Color::Indexed(58), // olive
-];
-
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn block_mode_paints_the_ancestor_gradient() {
+        // Cursor in a cell of a fused (matrix): ^B shows two ancestors
+        // — the Array (innermost, highlighted) and the Delim — painted
+        // as distinct boxes: the interior gets the selected color, the
+        // delimiter columns the next gradient shade.
+        let mut ed = Editor::new();
+        for c in "\\pmatrix\n".chars() {
+            let key = if c == '\n' { Key::Enter } else { Key::Char(c) };
+            ed.input(key, false, false);
+        }
+        ed.input(Key::Char('x'), false, false);
+        ed.input(Key::Char('b'), false, true);
+        assert_eq!(ed.block.as_ref().map(Vec::len), Some(2));
+        let (root, cursor) = ed.decorated();
+        let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+        let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
+        let (lines, bg, _) = marker_boxes(
+            &block.lines,
+            &ed.marker_extents(),
+            &block.marks,
+            block.caret,
+            None,
+            Some(ed.block_sel),
+        );
+        // Left delimiter column = outer (Delim) shade; some interior
+        // cell = the highlighted innermost (Array) color.
+        let row = block.baseline;
+        assert_eq!(
+            bg[row][0],
+            Some(theme::DEPTH_BG[1]),
+            "delim column shade\n{:?}",
+            lines
+        );
+        let inner = bg[row][2..lines[row].len() - 1]
+            .iter()
+            .filter_map(|c| *c)
+            .collect::<Vec<_>>();
+        assert!(
+            inner.contains(&theme::SELECTED_BG),
+            "interior highlighted: {:?}",
+            inner
+        );
+    }
+
+    #[test]
+    fn base64_matches_the_rfc_vectors() {
+        for (raw, enc) in [
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="),
+            ("fooba", "Zm9vYmE="),
+            ("foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(super::base64(raw.as_bytes()), enc);
+        }
+    }
+
     use super::*;
     use mascii::input::Key;
 
@@ -737,6 +834,7 @@ mod tests {
             &block.marks,
             block.caret,
             ed.jump.is_some().then_some(ed.jump_selected),
+            ed.block.is_some().then_some(ed.block_sel),
         );
         lines.into_iter().map(String::from_iter).collect()
     }
@@ -758,6 +856,7 @@ mod tests {
             &ed.marker_extents(),
             &block.marks,
             block.caret,
+            None,
             None,
         );
         let (cy, cx) = cursor_cell.unwrap();
@@ -802,6 +901,7 @@ mod tests {
                 &block.marks,
                 block.caret,
                 None,
+                None,
             );
             let (y, x) = cursor_cell.expect("caret visible");
             let spans = decorate_line(&lines[y], y, &struck, &bg[y], Some(x), false);
@@ -842,11 +942,16 @@ mod tests {
     fn selection_box_paints_without_touching_the_text() {
         let lines: Vec<Vec<char>> = vec![" ab ".chars().collect()];
         let marks = [(0, 1, SEL_OPEN), (0, 3, SEL_CLOSE)];
-        let (out, bg, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None, None);
+        let (out, bg, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None, None, None);
         assert_eq!(out, lines, "text must be untouched");
         assert_eq!(
             bg[0],
-            vec![None, Some(SELECTION_BG), Some(SELECTION_BG), None]
+            vec![
+                None,
+                Some(theme::SELECTION_BG),
+                Some(theme::SELECTION_BG),
+                None
+            ]
         );
     }
 
@@ -861,9 +966,9 @@ mod tests {
             " 2 ".chars().collect(),
         ];
         let marks = [(1, 0, SEL_OPEN), (1, 3, SEL_CLOSE)];
-        let (_, bg, _) = marker_boxes(&lines, &[(1, 1, 0)], &marks, None, None);
+        let (_, bg, _) = marker_boxes(&lines, &[(1, 1, 0)], &marks, None, None, None);
         assert!(bg.iter().all(|row| row.iter().all(|c| c.is_some())));
-        let (_, bg, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None, None);
+        let (_, bg, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None, None, None);
         assert!(
             bg[2].iter().all(|c| c.is_none()),
             "extent must bound the box"
@@ -874,7 +979,8 @@ mod tests {
     fn labels_overlay_and_caret_pads() {
         let label = char::from_u32(JUMP_CHAR_BASE).unwrap();
         let lines: Vec<Vec<char>> = vec!["xy".chars().collect()];
-        let (out, _, cursor) = marker_boxes(&lines, &[], &[(0, 0, label)], Some((0, 2)), None);
+        let (out, _, cursor) =
+            marker_boxes(&lines, &[], &[(0, 0, label)], Some((0, 2)), None, None);
         let chars: Vec<char> = out[0].clone();
         assert_eq!(chars[0], label, "label over the glyph");
         assert_eq!(chars[1], 'y');

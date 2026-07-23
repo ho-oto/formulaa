@@ -131,12 +131,10 @@ fn trim(g: &Grid, mut rect: Rect) -> Option<Rect> {
 /// Lattice edges (┌├└ / ┐┤┘) are included so a lattice interior is
 /// bracket-protected against cell/script splitting like any other pair.
 const OPEN_BRACKETS: &[char] = &[
-    '(', '⎛', '⎜', '⎝', '[', '⎡', '⎢', '⎣', '{', '⎧', '⎨', '⎩', '⟨', '⎸', '┆', '┌', '├', '└', '⌈',
-    '⌊',
+    '(', '⎛', '⎜', '⎝', '[', '⎡', '⎢', '⎣', '{', '⎧', '⎨', '⎩', '⟨', '┆', '┌', '├', '└', '⌈', '⌊',
 ];
 const CLOSE_BRACKETS: &[char] = &[
-    ')', '⎞', '⎟', '⎠', ']', '⎤', '⎥', '⎦', '}', '⎫', '⎬', '⎭', '⟩', '⎹', '┊', '┐', '┤', '┘', '⌉',
-    '⌋',
+    ')', '⎞', '⎟', '⎠', ']', '⎤', '⎥', '⎦', '}', '⎫', '⎬', '⎭', '⟩', '┊', '┐', '┤', '┘', '⌉', '⌋',
 ];
 
 /// Delimiter spec char for a glyph that can appear on the *baseline row*
@@ -151,7 +149,6 @@ fn open_spec(c: char) -> Option<char> {
         '‖' => '‖',
         '{' | '⎨' => '{',
         '⟨' => '⟨',
-        '⎸' => '|',
         '┆' => '.',
         // ├ (fused-grid junction) resolves its family via the column walk
         // in open_spec_at; standalone it is a lattice edge.
@@ -234,9 +231,6 @@ fn fused_grid_markers(
 /// both corners = bracket) and ├ junctions belong to any family, so the
 /// contiguous column run's glyph set decides.
 fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
-    if curly_pair_side(g, row, col) == Some(true) {
-        return Some('{');
-    }
     let ch = g.at(row, col);
     if angle_open_turn(g, row, col) {
         return Some('⟨');
@@ -248,18 +242,7 @@ fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
     let in_run = |c: char| {
         matches!(
             c,
-            '⎡' | '⎢'
-                | '⎣'
-                | '├'
-                | '⎪'
-                | '⎛'
-                | '⎜'
-                | '⎝'
-                | '⎧'
-                | '⎨'
-                | '⎩'
-                | '⎸'
-                | '┆'
+            '⎡' | '⎢' | '⎣' | '├' | '⎪' | '⎛' | '⎜' | '⎝' | '⎧' | '⎨' | '⎩' | '┆'
         )
     };
     let mut top = row;
@@ -277,9 +260,6 @@ fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
     if has('⎧') || has('⎨') || has('⎩') {
         return Some('{');
     }
-    if has('⎸') {
-        return Some('|');
-    }
     if has('┆') {
         return Some('.');
     }
@@ -287,8 +267,8 @@ fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
         (true, true) => '[',
         (true, false) => '⌈',
         (false, true) => '⌊',
-        // Only ⎢ / ├: read as a bracket (lenient).
-        (false, false) => '[',
+        // A cornerless extension run is the vertical bar (\abs).
+        (false, false) => '|',
     })
 }
 
@@ -301,7 +281,6 @@ fn close_spec(c: char) -> Option<char> {
         '‖' => '‖',
         '}' | '⎬' => '}',
         '⟩' => '⟩',
-        '⎹' => '|',
         '┊' => '.',
         _ => return None,
     })
@@ -310,9 +289,6 @@ fn close_spec(c: char) -> Option<char> {
 /// Like `close_spec`, resolving a fused-grid junction (┤) by walking its
 /// column to a family-distinct glyph (through ⎪ and further junctions).
 fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
-    if curly_pair_side(g, row, col) == Some(false) {
-        return Some('}');
-    }
     let ch = g.at(row, col);
     if angle_close_turn(g, row, col) {
         return Some('⟩');
@@ -324,18 +300,7 @@ fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
     let in_run = |c: char| {
         matches!(
             c,
-            '⎤' | '⎥'
-                | '⎦'
-                | '┤'
-                | '⎪'
-                | '⎞'
-                | '⎟'
-                | '⎠'
-                | '⎫'
-                | '⎬'
-                | '⎭'
-                | '⎹'
-                | '┊'
+            '⎤' | '⎥' | '⎦' | '┤' | '⎪' | '⎞' | '⎟' | '⎠' | '⎫' | '⎬' | '⎭' | '┊'
         )
     };
     let mut top = row;
@@ -353,9 +318,6 @@ fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
     if has('⎫') || has('⎬') || has('⎭') {
         return Some('}');
     }
-    if has('⎹') {
-        return Some('|');
-    }
     if has('┊') {
         return Some('.');
     }
@@ -363,7 +325,7 @@ fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
         (true, true) => ']',
         (true, false) => '⌉',
         (false, true) => '⌋',
-        (false, false) => ']',
+        (false, false) => '|',
     })
 }
 
@@ -376,9 +338,9 @@ fn left_family(spec: char) -> &'static [char] {
         '⌈' => &['⌈', '⎡', '⎢', '├'],
         '⌊' => &['⌊', '⎢', '⎣', '├'],
         '‖' => &['‖'],
-        '{' => &['{', '⎧', '⎪', '⎨', '⎩', '⎰', '⎱'],
+        '{' => &['{', '⎧', '⎪', '⎨', '⎩'],
         '⟨' => &['⟨'],
-        '|' => &['⎸', '├'],
+        '|' => &['⎢', '⎥', '├'],
         _ => &['┆', '├'],
     }
 }
@@ -404,21 +366,6 @@ fn fused_junction(g: &Grid, row: usize, col: usize) -> bool {
         r += 1;
     }
     (top..=r).any(|rr| family.contains(g.at(rr, col)))
-}
-
-/// Side of a height-2 curly section pair (⎰ U+23B0 / ⎱ U+23B1): the
-/// left brace is ⎰ over ⎱, the right brace ⎱ over ⎰, so the side falls
-/// out of which of the two sits on top.
-fn curly_pair_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
-    let above = row.checked_sub(1).map(|r| g.at(r, col));
-    let below = (row + 1 < g.g.len()).then(|| g.at(row + 1, col));
-    match g.at(row, col) {
-        '⎰' if below == Some('⎱') => Some(true),
-        '⎰' if above == Some('⎱') => Some(false),
-        '⎱' if above == Some('⎰') => Some(true),
-        '⎱' if below == Some('⎰') => Some(false),
-        _ => None,
-    }
 }
 
 /// Which side of a delimiter pair the glyph at (row, col) belongs to:
@@ -558,9 +505,6 @@ fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
     if CLOSE_BRACKETS.contains(&ch) {
         return Some(false);
     }
-    if let s @ Some(_) = curly_pair_side(g, row, col) {
-        return s;
-    }
     if let s @ Some(_) = angle_arm_side(g, row, col) {
         return s;
     }
@@ -652,7 +596,7 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
         // ┬ markers on the top row) centers on the extent; otherwise the
         // baseline is that of the inner region (a lattice inside answers
         // with its own ┌├└ center rule).
-        '⎡' | '[' | '⎛' | '⎸' | '┆' | '⎢' | '‖' | '⎰' => {
+        '⎡' | '[' | '⎛' | '┆' | '⎢' | '‖' => {
             if let Ok(close) = match_delim(g, first, c, rect.r)
                 && fused_grid_markers(g, first, last, c, close).is_some()
             {

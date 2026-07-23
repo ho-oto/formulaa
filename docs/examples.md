@@ -422,7 +422,7 @@ Typst:
 ```
     ⎧┌    ┬     ┐┊
     ⎪  𝑥    𝑥≥0  ┊
-⎸𝑥⎹=⎨├    ┼     ┤┊
+⎢𝑥⎥=⎨├    ┼     ┤┊
     ⎪  −𝑥   𝑥<0  ┊
     ⎩└    ┴     ┘┊
 ```
@@ -594,7 +594,7 @@ LaTeX:
 Typst:
 
 ```typst
-limits(arg max)_(x ∈ S) f lr(( x ))
+op("arg max", limits: #true)_(x ∈ S) f lr(( x ))
 ```
 
 ## ブレース

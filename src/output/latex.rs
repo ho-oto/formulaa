@@ -75,9 +75,13 @@ fn node_to_latex(node: &Node) -> String {
                 Some((ws, true)) => {
                     format!("\\operatorname*{{{}}}", ws.join(" "))
                 }
-                // A multi-piece base (┈arg┈min┈) is *one* operator: group
-                // it so the limits center under the whole thing —
+                // ┈lim┈sup┈ is \limsup where LaTeX knows the joined
+                // name; other multi-piece bases (┈arg┈min┈) group under
+                // \mathop so the limits center under the whole thing —
                 // \arg \min_{θ} would hang θ under \min alone.
+                Some((ws, false)) if crate::symbols::word_op_of(&ws).is_some_and(|w| w.latex) => {
+                    format!("\\{}", crate::symbols::word_op_of(&ws).unwrap().name)
+                }
                 _ if base.len() > 1 => format!("\\mathop{{{}}}", row_to_latex(base).trim_end()),
                 _ => row_to_latex(base),
             };

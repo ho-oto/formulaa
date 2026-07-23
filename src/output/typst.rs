@@ -112,6 +112,17 @@ fn node_to_typst(node: &Node) -> String {
                 Some((ws, true)) => {
                     format!("op(\"{}\", limits: #true)", ws.join(" "))
                 }
+                // ┈lim┈sup┈ is Typst's limsup; other known word ops
+                // (arg max) become one op("…") so the limits attach to
+                // the whole name.
+                Some((ws, false)) if crate::symbols::word_op_of(&ws).is_some() => {
+                    let w = crate::symbols::word_op_of(&ws).unwrap();
+                    if w.typst {
+                        w.name.to_string()
+                    } else {
+                        format!("op(\"{}\", limits: #true)", w.words.join(" "))
+                    }
+                }
                 _ => match &base[..] {
                     [Node::Func(f)] if !crate::symbols::typst_knows_func(f) => {
                         format!("op(\"{}\", limits: #true)", f)

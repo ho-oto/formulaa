@@ -206,6 +206,29 @@ fn operatorname_star_band() {
     assert!(matches!(&normalize(&row)[0], Node::BigOp { .. }));
 }
 
+/// Multi-word operators: one band piece per word, native joined names
+/// where the target format has them.
+#[test]
+fn word_operators() {
+    let row = n(Node::BigOp {
+        base: vec![Node::Func("lim".into()), Node::Func("sup".into())],
+        lower: s("n"),
+        upper: vec![],
+    });
+    roundtrip("limsup", &row);
+    let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
+    assert!(aa.contains("┈lim┈sup┈"), "{}", aa);
+    assert_eq!(row_to_latex(&normalize(&row)), "\\limsup_{n}");
+    assert_eq!(row_to_typst(&normalize(&row)), "limsup_n");
+    let row = n(Node::BigOp {
+        base: vec![Node::Func("arg".into()), Node::Func("max".into())],
+        lower: s("x"),
+        upper: vec![],
+    });
+    roundtrip("argmax", &row);
+    assert_eq!(row_to_latex(&normalize(&row)), "\\mathop{\\arg \\max}_{x}");
+}
+
 /// Roman differential: a lone upright letter drops its quotes exactly
 /// when a neighbour glues it into the \mathrm reading, and keeps them
 /// otherwise (the picture stays unambiguous either way).
@@ -386,16 +409,17 @@ fn box_drawing_delim_forms() {
         "no fusion for curly:\n{}",
         aa
     );
-    // Height-2 curly: the ⎰⎱ sections (left ⎰ over ⎱, right mirrored).
+    // A 2-row body still gets the full 3-row ⎧⎨⎩ column (the vertex
+    // needs hook + ⎨ + hook; the extent widens past the body).
     let row = n(delim(
         '{',
         '}',
         vec![],
         vec![cat(&[s("a"), n(sup(s("α+")))])],
     ));
-    roundtrip("curly-h2-sections", &row);
+    roundtrip("curly-min-height", &row);
     let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
-    assert_eq!(aa, "⎰ α+⎱\n⎱𝑎  ⎰");
+    assert_eq!(aa, "⎧ α+⎫\n⎨𝑎  ⎬\n⎩   ⎭");
     // Null pair ┆ ┊ and a tall norm as stacked ‖.
     let row = n(delim('.', ')', vec![], vec![n(frac(s("1"), s("2")))]));
     roundtrip("null-left", &row);
