@@ -1,14 +1,19 @@
-//! Styled alphabet families: `\bbR` `\calL` `\frakg` `\bfsf3` … Each
+//! Styled character families. The alphabet families (`\bbR` `\calL`
+//! `\frakg` `\bfsf3`) come first; the super/subscript modifier letters
+//! (`\supA` `\Asup`) follow as an explicit table. Each alphabet family
 //! family maps the 26+26 ASCII letters (and often the 10 digits) onto a
 //! contiguous Unicode block, with a handful of exceptions where the
 //! letterlike symbols live outside it (ℂ ℋ ℝ …). Storing the rule
 //! instead of ~1700 pairs keeps the table readable and turns the lookup
-//! into arithmetic; the modifier spellings of one family (\bfcal =
+//! into arithmetic; the style token may lead or trail (`\frakA` =
+//! `\Afrk`), and the modifier spellings of one family (\bfcal =
 //! \calbf = \scrbf …) are just extra prefixes on the same row.
 //!
-//! (The generated source has one typo — `\bbf` listed as the bold b
-//! of `\bfb` — which the rule form made obvious; it is not carried
-//! over here.)
+//! Exactly one spelling collides across the whole set (a test proves
+//! it): `\bbf` is both bb+f and b+bf. **The leading style wins**, so
+//! `\bbf` is the double-struck f; the bold b is `\bfb` (and the
+//! double-struck f is also `\fbb`), so both stay reachable
+//! unambiguously. The generated source resolved it the other way.
 
 pub struct Alphabet {
     /// Command prefixes that select this family (\calL, \scrL).
@@ -129,22 +134,131 @@ pub const ALPHABETS: &[Alphabet] = &[
     },
 ];
 
-/// `\<prefix><letter or digit>` -> the styled character.
+/// The styled character of `\<style><char>` or `\<char><style>` — the
+/// style token may lead or trail (`\frakA` = `\Afrk`). The leading
+/// form is tried first, which decides the one colliding spelling
+/// (`\bbf`, see the module docs); `alphabet_spellings_agree` proves
+/// every other spelling has a single reading.
 pub fn alphabet_char(name: &str) -> Option<char> {
-    let last = name
-        .chars()
-        .next_back()
-        .filter(char::is_ascii_alphanumeric)?;
-    let fam = ALPHABETS
-        .iter()
-        .find(|a| a.prefixes.contains(&&name[..name.len() - 1]))?;
-    if let Some(&(_, c)) = fam.exceptions.iter().find(|&&(l, _)| l == last) {
+    let of = |fam: &Alphabet, ch: char| -> Option<char> {
+        if let Some(&(_, c)) = fam.exceptions.iter().find(|&&(l, _)| l == ch) {
+            return Some(c);
+        }
+        let (base, first) = match ch {
+            'A'..='Z' => (fam.upper, b'A'),
+            'a'..='z' => (fam.lower, b'a'),
+            '0'..='9' => (fam.digits?, b'0'),
+            _ => return None,
+        };
+        char::from_u32(base + (ch as u8 - first) as u32)
+    };
+    let family = |s: &str| ALPHABETS.iter().find(|a| a.prefixes.contains(&s));
+    let first = name.chars().next()?;
+    let last = name.chars().next_back()?;
+    // <style><char>
+    if let Some(fam) = family(&name[..name.len() - last.len_utf8()])
+        && let Some(c) = of(fam, last)
+    {
         return Some(c);
     }
-    let (base, first) = match last {
-        'A'..='Z' => (fam.upper, b'A'),
-        'a'..='z' => (fam.lower, b'a'),
-        _ => (fam.digits?, b'0'),
-    };
-    char::from_u32(base + (last as u8 - first) as u32)
+    // <char><style>
+    of(family(&name[first.len_utf8()..])?, first)
+}
+
+/// Super/subscript modifier letters (`\supA` = `\Asup` = `\^A` =
+/// `\A^` = ᴬ). Unlike the alphabet families these are not a contiguous
+/// block — Unicode has no capital form for every letter — so the table
+/// is explicit. The editor shadows the `^` / `_` spellings with the
+/// script *commands* (`\^z` builds a real superscript node), so these
+/// normally reach a formula through `sup` / `sub`.
+///
+/// The style token is matched only against this table's arguments, so
+/// the ordinary names it happens to prefix (`\supset` ⊃, `\subseteq`
+/// ⊆) keep their own meaning.
+pub struct Script {
+    /// Style tokens that select it, leading or trailing.
+    pub names: &'static [&'static str],
+    /// (argument name, styled char) — a letter as a one-char name, or
+    /// a symbol name (`alpha`).
+    pub chars: &'static [(&'static str, char)],
+}
+
+pub const SCRIPTS: &[Script] = &[
+    Script {
+        names: &["sup", "^"],
+        chars: &[
+            ("A", 'ᴬ'),
+            ("B", 'ᴮ'),
+            ("D", 'ᴰ'),
+            ("E", 'ᴱ'),
+            ("G", 'ᴳ'),
+            ("H", 'ᴴ'),
+            ("I", 'ᴵ'),
+            ("J", 'ᴶ'),
+            ("K", 'ᴷ'),
+            ("L", 'ᴸ'),
+            ("M", 'ᴹ'),
+            ("N", 'ᴺ'),
+            ("O", 'ᴼ'),
+            ("P", 'ᴾ'),
+            ("R", 'ᴿ'),
+            ("T", 'ᵀ'),
+            ("U", 'ᵁ'),
+            ("V", 'ⱽ'),
+            ("W", 'ᵂ'),
+            ("Z", 'ᶻ'),
+            ("a", 'ᵃ'),
+            ("alpha", 'ᵅ'),
+            ("b", 'ᵇ'),
+            ("beta", 'ᵝ'),
+            ("c", 'ᶜ'),
+            ("chi", 'ᵡ'),
+            ("d", 'ᵈ'),
+            ("delta", 'ᵟ'),
+            ("e", 'ᵉ'),
+            ("f", 'ᶠ'),
+            ("g", 'ᵍ'),
+            ("gamma", 'ᵞ'),
+            ("h", 'ʰ'),
+            ("j", 'ʲ'),
+            ("k", 'ᵏ'),
+            ("l", 'ˡ'),
+            ("m", 'ᵐ'),
+            ("o", 'ᵒ'),
+            ("p", 'ᵖ'),
+            ("phi", 'ᵠ'),
+            ("r", 'ʳ'),
+            ("s", 'ˢ'),
+            ("t", 'ᵗ'),
+            ("theta", 'ᶿ'),
+            ("u", 'ᵘ'),
+            ("v", 'ᵛ'),
+            ("w", 'ʷ'),
+            ("x", 'ˣ'),
+            ("y", 'ʸ'),
+            ("z", 'ᶻ'),
+        ],
+    },
+    Script {
+        names: &["sub", "_"],
+        chars: &[("beta", 'ᵦ'), ("chi", 'ᵪ'), ("phi", 'ᵩ'), ("rho", 'ᵨ')],
+    },
+];
+
+/// `\<style><arg>` or `\<arg><style>` for the super/subscript styles.
+pub fn script_char(name: &str) -> Option<char> {
+    SCRIPTS.iter().find_map(|s| {
+        s.names.iter().find_map(|tok| {
+            let arg = name
+                .strip_prefix(tok)
+                .or_else(|| name.strip_suffix(tok))
+                .filter(|a| !a.is_empty())?;
+            s.chars.iter().find(|&&(k, _)| k == arg).map(|&(_, c)| c)
+        })
+    })
+}
+
+/// Any styled character: an alphabet family or a super/subscript.
+pub fn styled_char(name: &str) -> Option<char> {
+    alphabet_char(name).or_else(|| script_char(name))
 }

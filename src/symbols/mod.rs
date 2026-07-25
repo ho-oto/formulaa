@@ -424,21 +424,16 @@ pub fn func_prefix(s: &str) -> Option<&'static str> {
         .map(|f| f.name)
 }
 
-/// Lookup order: curated table, then the alphabet families (\bbR),
+/// Lookup order: curated table, then the styled families (\bbR \supA),
 /// then the large generated table (from ho-oto/mathematical-symbols,
-/// sorted so this is a binary search).
+/// a compile-time perfect hash).
 pub fn symbol_by_name(name: &str) -> Option<char> {
     SYMBOLS
         .iter()
         .find(|(n, _)| *n == name)
         .map(|&(_, c)| c)
-        .or_else(|| alphabets::alphabet_char(name))
-        .or_else(|| {
-            ext::EXT_SYMBOLS
-                .binary_search_by_key(&name, |&(n, _)| n)
-                .ok()
-                .map(|i| ext::EXT_SYMBOLS[i].1)
-        })
+        .or_else(|| alphabets::styled_char(name))
+        .or_else(|| ext::EXT_SYMBOLS.get(name).copied())
         .filter(|&c| !is_reserved_glyph(c))
 }
 
@@ -462,15 +457,6 @@ pub fn latex_name(c: char) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// `symbol_by_name` binary-searches EXT_SYMBOLS, so a regeneration
-    /// must keep the table sorted (and free of duplicates).
-    #[test]
-    fn ext_table_is_sorted() {
-        for w in ext::EXT_SYMBOLS.windows(2) {
-            assert!(w[0].0 < w[1].0, "unsorted: {:?} then {:?}", w[0].0, w[1].0);
-        }
-    }
 
     /// The alphabet families cover both cases, including the letterlike
     /// exceptions that sit outside their block.
@@ -525,5 +511,85 @@ mod tests {
             }
         }
         assert_eq!(symbol_by_name("nosuchfamilyX"), None);
+        // Both spelling orders, letters and digits.
+        for (a, b) in [("frakA", "Afrk"), ("bfsf3", "3bfsf"), ("ttz", "ztt")] {
+            assert_eq!(symbol_by_name(a), symbol_by_name(b), "{} vs {}", a, b);
+            assert!(symbol_by_name(a).is_some(), "{}", a);
+        }
+    }
+
+    /// The style token may lead or trail, so a name like `\bbb` has two
+    /// readings. Exhaustively check that they agree (and that every
+    /// spelling resolves), so the lookup is well-defined.
+    #[test]
+    fn alphabet_spellings_agree() {
+        for fam in alphabets::ALPHABETS {
+            for style in fam.prefixes {
+                for ch in ('A'..='Z')
+                    .chain('a'..='z')
+                    .chain(fam.digits.iter().flat_map(|_| '0'..='9'))
+                {
+                    let pre = alphabets::alphabet_char(&format!("{}{}", style, ch));
+                    let suf = alphabets::alphabet_char(&format!("{}{}", ch, style));
+                    assert!(pre.is_some(), "\\{}{} missing", style, ch);
+                    // …the trailing spelling agrees, except for the one
+                    // collision pinned down below.
+                    if format!("{}{}", ch, style) != "bbf" {
+                        assert_eq!(pre, suf, "\\{}{} vs \\{}{}", style, ch, ch, style);
+                    }
+                }
+            }
+        }
+        // \bbf is the only spelling both readings claim (bb+f vs b+bf):
+        // the leading style wins, and both chars stay reachable.
+        for a in alphabets::ALPHABETS {
+            for lead in a.prefixes {
+                for b in alphabets::ALPHABETS {
+                    for trail in b.prefixes {
+                        if lead.len() != trail.len() || lead[1..] != trail[..trail.len() - 1] {
+                            continue;
+                        }
+                        let name = format!("{}{}", lead, &trail[trail.len() - 1..]);
+                        let x = name.chars().next().unwrap();
+                        let y = name.chars().next_back().unwrap();
+                        let (as_lead, as_trail) = (
+                            alphabets::alphabet_char(&format!("{}{}", lead, y)),
+                            alphabets::alphabet_char(&format!("{}{}", x, trail)),
+                        );
+                        if as_lead != as_trail {
+                            assert_eq!(name, "bbf", "new collision: \\{}", name);
+                            assert_eq!(alphabets::alphabet_char("bbf"), as_lead);
+                            assert_eq!(alphabets::alphabet_char("fbb"), as_lead);
+                            assert_eq!(alphabets::alphabet_char("bfb"), as_trail);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Super/subscript letters resolve in all four spellings, and the
+    /// style token never swallows an ordinary name that starts with it.
+    #[test]
+    fn script_letters_resolve_without_eating_names() {
+        for style in ["sup", "^"] {
+            for (arg, want) in [("A", 'ᴬ'), ("x", 'ˣ'), ("alpha", 'ᵅ')] {
+                assert_eq!(symbol_by_name(&format!("{}{}", style, arg)), Some(want));
+                assert_eq!(symbol_by_name(&format!("{}{}", arg, style)), Some(want));
+            }
+        }
+        for style in ["sub", "_"] {
+            assert_eq!(symbol_by_name(&format!("{}beta", style)), Some('ᵦ'));
+            assert_eq!(symbol_by_name(&format!("beta{}", style)), Some('ᵦ'));
+        }
+        // …and the set relations keep their own meaning.
+        for (name, want) in [
+            ("supset", '⊃'),
+            ("subset", '⊂'),
+            ("supseteq", '⊇'),
+            ("subseteq", '⊆'),
+        ] {
+            assert_eq!(symbol_by_name(name), Some(want), "\\{}", name);
+        }
     }
 }

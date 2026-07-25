@@ -49,8 +49,8 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
 | `src/input.rs` | **共有キーマップ**(`Key`/`Effect`/`Editor::input`)。TUI と wasm は変換だけ |
 | `src/output/latex.rs` / `src/output/typst.rs` | AST → LaTeX / Typst(crate ルートの `mascii::latex`/`typst` で再輸出) |
 | `src/symbols/mod.rs` | 厳選シンボル表・関数表 FUNCS(limits/LaTeX/Typst フラグ付き)・BIG_OPS・アクセント表・予約グリフ判定 |
-| `src/symbols/ext.rs` | **生成物**(ho-oto/mathematical-symbols 由来、3500+)。名前順ソート必須(二分探索)。手編集しない |
-| `src/symbols/alphabets.rs` | スタイル付きアルファベット族(`\bbR` `\calL` `\bfsf3` …12族28綴り)を規則+例外表で表現 |
+| `src/symbols/ext.rs` | **生成物**(ho-oto/mathematical-symbols 由来、696件)。phf マップ(順序不要・重複はビルドエラー)。手編集しない |
+| `src/symbols/alphabets.rs` | スタイル付きアルファベット族(`\bbR` `\Afrk` `\bfsf3` …12族28綴り×前置/後置)を規則+例外表で表現 |
 | `src/theme.rs` | TUI の配色定数(bin 専用) |
 | `src/main.rs` | TUI(ratatui)+ CLI サブコマンド |
 | `tests/roundtrip.rs` | 実式コーパス + ランダムプロパティテスト |
