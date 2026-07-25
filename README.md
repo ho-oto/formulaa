@@ -102,7 +102,7 @@ TUI は毎編集後に AA→AST の逆変換を自動検査し、ラウンドト
 - ブレース: `\overbrace` `\underbrace`(選択があれば選択を引数にしてラベルへ)
 - 記号: 厳選テーブル + [ho-oto/mathematical-symbols](https://github.com/ho-oto/mathematical-symbols)
   由来の 4000+ エントリ(`\bbR`→ℝ, `\->`→→, `\oo`→∞ など。
-  スタイル付きアルファベット族は規則表に畳んである。`\frakA`=`\Afrk`)
+  スタイル族は規則表に畳んである: `\frakA`=`\Afrk`, `\supA`=`\Asup`)
 
 ## フォントについて
 
