@@ -277,7 +277,7 @@ fn dotted_roman_runs() {
     let row = cat(&[n(t("i.i.d.")), s("x")]);
     roundtrip("iid", &row);
     assert_eq!(aa(&row), "i.i.d.𝑥");
-    assert_eq!(row_to_latex(&normalize(&row)), "\\mathrm{i.i.d.}x");
+    assert_eq!(row_to_latex(&normalize(&row)), "\\operatorname{i.i.d.}x");
     // Adjacent letter run / period: the dotted run keeps a space so the
     // lexer cannot absorb them.
     let row = cat(&[n(t("i.i.d.")), n(t("ab"))]);
@@ -292,9 +292,10 @@ fn dotted_roman_runs() {
     let row = cat(&[n(t("x..y"))]);
     roundtrip("double-dot", &row);
     assert_eq!(aa(&row), "'x..y'");
-    // Primes never touch dots (a '.' pair would read as a quote).
-    let row = cat(&[n(Node::Sym('\'')), n(Node::Sym('.')), n(Node::Sym('\''))]);
-    roundtrip("prime-dot-prime", &row);
+    // The prime atom ′ is unrelated to the ' quote delimiter.
+    let row = cat(&[s("x"), n(Node::Sym('′')), n(Node::Sym('′'))]);
+    roundtrip("primes", &row);
+    assert_eq!(aa(&row), "𝑥′′");
 }
 
 /// Stretchy accents: a band whose limit region holds only the mark.
@@ -507,6 +508,16 @@ fn text_spaces_and_operator_names() {
         "\"if x holds\""
     );
     assert_eq!(row_to_latex(&normalize(&row)), "\\text{if x holds}");
+    // A literal quote (or backslash) inside \text is escaped in the AA.
+    let row = cat(&[n(Node::Text {
+        t: "a\"b\\c".into(),
+        math: false,
+    })]);
+    roundtrip("text-escapes", &row);
+    assert_eq!(
+        render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text(),
+        "\"a\\\"b\\\\c\""
+    );
     // KaTeX-known names emit \name; declared operators \operatorname.
     assert_eq!(row_to_latex(&vec![func("arcctg")]), "\\arcctg ");
     assert_eq!(row_to_latex(&vec![func("Tr")]), "\\operatorname{Tr}");
@@ -536,28 +547,6 @@ fn rcases_grid() {
         row_to_latex(&normalize(&row)),
         "\\begin{rcases} a & b \\\\ c & d \\end{rcases}"
     );
-}
-
-/// The session file writes formatting spacers as explicit ␠ so they
-/// survive the restore parse.
-#[test]
-fn session_spacers_roundtrip() {
-    let row = cat(&[
-        s("a"),
-        vec![Node::Spacer],
-        s("b+"),
-        vec![Node::Spacer, Node::Spacer],
-        s("c"),
-    ]);
-    let row = normalize(&row);
-    let marked = render_root(
-        &mascii::ast::mark_spacers(&row),
-        None,
-        &RenderCtx::canonical(),
-    )
-    .to_text();
-    assert!(marked.contains('␠'), "spacers visible: {}", marked);
-    assert_eq!(parse(&marked).unwrap(), row, "restore keeps spacers");
 }
 
 /// Tall middles: a braket whose content is taller than one row keeps the
@@ -1378,7 +1367,7 @@ impl Rng {
 
 const ATOMS: &[char] = &[
     'a', 'b', 'c', 'x', 'y', 'z', 'A', 'B', 'N', '0', '1', '2', '7', '+', '-', '=', '<', 'α', 'β',
-    'π', 'λ', '∞', '∂', '⋅', '±', '∈', '→', '␣', '~', '\'', '.',
+    'π', 'λ', '∞', '∂', '⋅', '±', '∈', '→', '␣', '~', '′', '.',
 ];
 
 fn gen_row(rng: &mut Rng, depth: usize, max_len: usize) -> Row {
@@ -1482,32 +1471,7 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             ];
             let (l, r) = pairs[rng.below(pairs.len())];
             let nsegs = 1 + rng.below(2); // 1 or 2 segs
-            let mut segs = (0..nsegs).map(|_| gen_row(rng, d, 3)).collect::<Vec<_>>();
-            // Direct norm-in-norm is unsupported (the picture is
-            // ambiguous — same ‖ on both sides); rewrite inner norms.
-            if l == '‖' {
-                fn denorm(row: &mut Row) {
-                    for n in row.iter_mut() {
-                        if let Node::Delim { left, right, .. } = n
-                            && *left == '‖'
-                        {
-                            *left = '|';
-                            *right = '|';
-                        }
-                        // WideAccent bases are not cursor fields; walk
-                        // them explicitly.
-                        if let Node::WideAccent { base, .. } = n {
-                            denorm(base);
-                        }
-                        for f in n.fields() {
-                            denorm(n.field_mut(f));
-                        }
-                    }
-                }
-                for seg in &mut segs {
-                    denorm(seg);
-                }
-            }
+            let segs = (0..nsegs).map(|_| gen_row(rng, d, 3)).collect::<Vec<_>>();
             Node::Delim {
                 left: l,
                 right: r,
@@ -1559,11 +1523,14 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             Node::Array { rows, cols, cells }
         }
         10 => {
-            let t = ["dx", "if", "abc", "T", "if x", "sin", "d"][rng.below(7)];
-            Node::Text {
-                t: t.into(),
-                math: rng.below(2) == 0,
-            }
+            let math = rng.below(2) == 0;
+            let t = if math {
+                ["dx", "abc", "T", "sin", "d"][rng.below(5)]
+            } else {
+                // \text content may need the \" \\ escapes.
+                ["if", "if x", "a\"b", "x\\y"][rng.below(4)]
+            };
+            Node::Text { t: t.into(), math }
         }
         11 => Node::Brace {
             over: rng.below(2) == 0,

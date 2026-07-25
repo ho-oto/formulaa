@@ -10,7 +10,6 @@ cargo check -p mascii-wasm --target wasm32-unknown-unknown  # wasm 側
 cargo clippy --all-targets     # 警告ゼロを維持
 cargo fmt                      # コミット前に必ず整形(リポジトリ全体が rustfmt 準拠)
 cargo run                      # TUI エディタ
-cargo watch -x 'run -- --session'  # UI 開発: 再起動しても数式が復元される(.mascii-session)
 cargo run --example demo       # レンダリングのサンプル出力(TUI なし)
 cargo run --example ambig      # バンド記法が解決した曖昧性の回帰デモ
 echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
@@ -50,7 +49,9 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
 | `src/input.rs` | **共有キーマップ**(`Key`/`Effect`/`Editor::input`)。TUI と wasm は変換だけ |
 | `src/output/latex.rs` / `src/output/typst.rs` | AST → LaTeX / Typst(crate ルートの `mascii::latex`/`typst` で再輸出) |
 | `src/symbols/mod.rs` | 厳選シンボル表・関数表 FUNCS(limits/LaTeX/Typst フラグ付き)・BIG_OPS・アクセント表・予約グリフ判定 |
-| `src/symbols/ext.rs` | **生成物**(ho-oto/mathematical-symbols 由来、4000+)。手編集しない |
+| `src/symbols/ext.rs` | **生成物**(ho-oto/mathematical-symbols 由来、3500+)。名前順ソート必須(二分探索)。手編集しない |
+| `src/symbols/alphabets.rs` | スタイル付きアルファベット族(`\bbR` `\calL` `\bfsf3` …12族28綴り)を規則+例外表で表現 |
+| `src/theme.rs` | TUI の配色定数(bin 専用) |
 | `src/main.rs` | TUI(ratatui)+ CLI サブコマンド |
 | `tests/roundtrip.rs` | 実式コーパス + ランダムプロパティテスト |
 | `tests/ui.rs` | キー駆動 UI テスト(キースクリプト DSL + ランダムキー列。`MASCII_UI_PROP_N`/`_SEED`) |

@@ -31,8 +31,6 @@ pub enum Key {
 pub enum Effect {
     None,
     Quit,
-    /// Write the current LaTeX to the host's save target.
-    SaveTex,
     /// Put the canonical AA on the host's clipboard.
     CopyAa,
 }
@@ -74,7 +72,7 @@ impl Editor {
         if let Some(e) = self.jump_keys(key, ctrl) {
             return e;
         }
-        if let Some(e) = self.block_keys(key, ctrl) {
+        if let Some(e) = self.block_keys(key, shift, ctrl) {
             return e;
         }
         if let Some(e) = self.minibuffer_keys(key) {
@@ -110,18 +108,23 @@ impl Editor {
 
     /// Block-select mode: arrows walk the ancestor chain (↑/→ wider,
     /// ↓/← narrower), Enter or a label key selects, ^B/Esc cancels.
-    fn block_keys(&mut self, key: Key, ctrl: bool) -> Option<Effect> {
-        self.block.is_some().then(|| {
-            match key {
-                Key::Up | Key::Right if !ctrl => self.block_move(true),
-                Key::Down | Key::Left if !ctrl => self.block_move(false),
-                Key::Enter => self.block_commit(),
-                Key::Char('b') if ctrl => self.block_cancel(),
-                Key::Char(c) if !ctrl => self.block_to(c),
-                _ => self.block_cancel(),
-            }
-            Effect::None
-        })
+    /// Shift+arrows leave the mode and start an ordinary selection
+    /// from the (unmoved) cursor.
+    fn block_keys(&mut self, key: Key, shift: bool, ctrl: bool) -> Option<Effect> {
+        self.block.as_ref()?;
+        if shift && matches!(key, Key::Left | Key::Right | Key::Up | Key::Down) {
+            self.block_cancel();
+            return None; // fall through to the normal selection keys
+        }
+        match key {
+            Key::Up | Key::Right if !ctrl => self.block_move(true),
+            Key::Down | Key::Left if !ctrl => self.block_move(false),
+            Key::Enter => self.block_commit(),
+            Key::Char('b') if ctrl => self.block_cancel(),
+            Key::Char(c) if !ctrl => self.block_to(c),
+            _ => self.block_cancel(),
+        }
+        Some(Effect::None)
     }
 
     /// Free-cursor mode: arrows move the cell cursor, Enter snaps.
@@ -162,7 +165,12 @@ impl Editor {
                 }
                 Key::Enter | Key::Char(' ') => {
                     let cmd = self.minibuffer.take().unwrap();
-                    self.execute(&cmd);
+                    if cmd.is_empty() && key == Key::Char(' ') {
+                        // \ followed by Space: the meaningful space ␣.
+                        self.execute("space");
+                    } else {
+                        self.execute(&cmd);
+                    }
                 }
                 // Graphic chars (not just alphanumerics): the extended
                 // symbol table has names like "->", "+-", "oo".
@@ -187,13 +195,28 @@ impl Editor {
         // the quotes. Space separates \op* pieces, is content in \rm
         // and \text, and commits a plain \op (one-word name).
         let name_char = |c: char| c.is_ascii_alphanumeric() || c == '.';
+        // Inside \text, a backslash escapes the next key (so a literal
+        // " or \ can be typed); a bare " closes the box. Brackets stay
+        // out entirely — quoted content is opaque to the delimiter
+        // depth scans, so ( ) [ ] { } inside would desync them.
+        let text_char = |c: char| !"()[]{}".contains(c);
+        if kind == BoxKind::Text && self.op_escape {
+            self.op_escape = false;
+            if let Key::Char(c) = key
+                && !ctrl
+                && text_char(c)
+            {
+                self.op_type(c);
+                return Some(Effect::None);
+            }
+        }
         match key {
             Key::Esc => self.op_entry = None,
             Key::Backspace => self.op_backspace(),
             Key::Char(' ') if kind != BoxKind::Op => self.op_type(' '),
-            Key::Char(c) if !ctrl && kind == BoxKind::Text && c != '"' && c != '\'' => {
-                self.op_type(c)
-            }
+            Key::Char('\\') if !ctrl && kind == BoxKind::Text => self.op_escape = true,
+            Key::Char('"') if !ctrl && kind == BoxKind::Text => self.op_commit(),
+            Key::Char(c) if !ctrl && kind == BoxKind::Text && text_char(c) => self.op_type(c),
             Key::Char(c) if !ctrl && kind != BoxKind::Text && name_char(c) => self.op_type(c),
             Key::Enter | Key::Tab | Key::Char(' ') => self.op_commit(),
             _ => {
@@ -214,7 +237,6 @@ impl Editor {
         if ctrl {
             match key {
                 Key::Char('q') => return Effect::Quit,
-                Key::Char('s') => return Effect::SaveTex,
                 Key::Char('y') => return Effect::CopyAa,
                 Key::Char('a') => self.document_start(),
                 Key::Char('f') => self.start_free(),
@@ -362,8 +384,13 @@ impl Editor {
                     self.insert_delim('[', ']', vec![]);
                 }
             }
+            // The quote glyphs are reserved for roman/text runs; the
+            // prime is its own atom (\prime, ′ U+2032).
+            Key::Char('\'') => self.insert_sym('′'),
             Key::Char('"') => {
-                self.message = "\" is reserved for text runs; use \\rm<text> or \\text<text>".into()
+                // Text mode: the box commits on the closing " (like
+                // typing the quoted run directly); \" escapes.
+                self.op_start(crate::editor::BoxKind::Text);
             }
             Key::Char(']') => self.close_bracket(),
             // `//` makes a fraction (a lone `/` stays the slash atom).

@@ -245,31 +245,6 @@ pub fn row_at_mut<'a>(root: &'a mut Row, path: &[(usize, Field)]) -> &'a mut Row
 
 /// Canonical form: merge adjacent same-kind scripts (x^{a}^{b} == x^{ab} in
 /// the picture, so the parser can only ever return the merged form).
-/// Replace every formatting Spacer with the explicit ␠ atom (U+2420),
-/// recursively. The session file round-trips through parse, which by
-/// contract eats blank columns — rendering spacers as ␠ preserves the
-/// user's formatting across a restart (parse maps ␠ back to Spacer).
-pub fn mark_spacers(row: &Row) -> Row {
-    row.iter()
-        .map(|n| match n {
-            Node::Spacer => Node::Sym('␠'),
-            Node::WideAccent { over, under, base } => Node::WideAccent {
-                over: *over,
-                under: *under,
-                base: mark_spacers(base),
-            },
-            n => {
-                let mut n = n.clone();
-                for f in n.fields() {
-                    let fr = mark_spacers(n.field(f));
-                    *n.field_mut(f) = fr;
-                }
-                n
-            }
-        })
-        .collect()
-}
-
 /// Word pieces of a BigOp base (each piece a Func or math-Text word),
 /// with `true` when a Text piece is present — that is an \op* name,
 /// which LaTeX/Typst join into one \operatorname* / op("…") group.

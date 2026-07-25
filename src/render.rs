@@ -11,7 +11,7 @@ pub const CURSOR_CHAR: char = '▌'; // U+258C LEFT HALF BLOCK (view-only)
 /// Placeholder for an empty mandatory slot, and explicit base of a script
 /// that starts a row (so `[Sup(x)]` is distinguishable from `[Sym(x)]`).
 pub const PLACEHOLDER: char = '⬚'; // U+2B1A DOTTED SQUARE
-/// Fraction bar. Distinct from '-' (rendered '−') and the big-op band.
+/// Fraction bar. Distinct from the '-' atom and the big-op band.
 pub const FRAC_BAR: char = '─'; // U+2500 BOX DRAWINGS LIGHT HORIZONTAL
 /// Big-operator band: marks the horizontal extent of over/under limits.
 pub const OP_BAND: char = '┈'; // U+2508 BOX DRAWINGS LIGHT QUADRUPLE DASH HORIZONTAL
@@ -290,7 +290,6 @@ pub fn italic_char(c: char) -> char {
 pub fn unstyle_char(c: char) -> char {
     match c {
         'ℎ' => 'h',
-        '−' => '-',
         '∗' => '*',
         c => {
             let u = c as u32;
@@ -312,7 +311,6 @@ pub fn unstyle_char(c: char) -> char {
 
 fn display_char(c: char, ctx: &RenderCtx) -> char {
     match c {
-        '-' => '−',
         '*' => '∗',
         c if ctx.italic => italic_char(c),
         c => c,
@@ -479,7 +477,18 @@ fn text_block(t: &str, math: bool, glue: bool) -> Block {
         // spaces stay visible ␣.
         let q = if math { '\'' } else { '"' };
         let mut chars = vec![q];
-        chars.extend(t.chars().map(|c| if math && c == ' ' { '␣' } else { c }));
+        for c in t.chars() {
+            match c {
+                ' ' if math => chars.push('␣'),
+                // Inside "…", a backslash escapes the next char, so a
+                // literal " (or \) is representable.
+                '"' | '\\' if !math => {
+                    chars.push('\\');
+                    chars.push(c);
+                }
+                c => chars.push(c),
+            }
+        }
         chars.push(q);
         Block::from_chars(chars)
     }
@@ -675,13 +684,6 @@ pub fn render_row(
                             // absorbed into the run (exp.i.i.d.); digits
                             // keep decimals tight (3.14).
                             || (a == '.' && b.is_ascii_alphabetic())
-                            // A prime next to quotable content (letters,
-                            // digits, ␣, dots, another prime) could read
-                            // as a 'mathrm quote'.
-                            || (a == '\''
-                                && (b == '\'' || b.is_ascii_alphanumeric() || b == '␣' || b == '.'))
-                            || (b == '\''
-                                && (a == '\'' || a.is_ascii_alphanumeric() || a == '␣' || a == '.'))
                             || (a == b && (a == FRAC_BAR || a == DOUBLE_BODY))
                             || (a == FRAC_BAR && (b == '>' || b == '→'))
                             || (a == DOUBLE_BODY && (b == '>' || b == '⇒'))
@@ -1264,6 +1266,17 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             // is always even, the baseline is the upper turn row.
             let angle = h >= 2 && (*left == '⟨' || *right == '⟩');
             let curly = *left == '{' || *right == '}';
+            // Norm-in-norm: both sides are the same ‖, so the outer
+            // pair must outsize the inner one — whenever the body holds
+            // a full-height ‖ column, grow the extent by a row on each
+            // side (the parser groups ‖ columns by vertical extent).
+            let norm = *left == '‖' || *right == '‖';
+            let inner_norm_full = norm
+                && (0..body.width()).any(|c| {
+                    body.lines
+                        .iter()
+                        .all(|line| line.get(c).copied() == Some('‖'))
+                });
             let (ext_h, ext_bl) = if angle {
                 let k = (bl + 1).max(h - 1 - bl);
                 (2 * k, k - 1)
@@ -1271,6 +1284,8 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 // A curly column needs hook + ⎨ vertex + hook: a 2-row
                 // body rides in a 3-row extent with the vertex centered.
                 (3, 1)
+            } else if inner_norm_full {
+                (h + 2, bl + 1)
             } else {
                 (h, bl)
             };

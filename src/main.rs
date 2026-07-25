@@ -53,100 +53,57 @@ fn help_line(ed: &Editor) -> &'static str {
     }
 }
 
-/// Session file for `--session` (canonical AA with formatting spacers
-/// written as explicit ␠ so the restore parse keeps them).
-const SESSION_FILE: &str = ".mascii-session";
+const USAGE: &str = "\
+usage: mascii                 interactive TUI editor
+       mascii aa2tex   [FILE] AA formula (file or stdin) -> LaTeX
+       mascii aa2typst [FILE] AA formula (file or stdin) -> Typst
+       mascii fmt      [FILE] AA formula -> canonical AA (normalize)";
 
-/// Load the session formula, if a valid one is on disk.
-fn load_session() -> Option<ast::Row> {
-    let text = fs::read_to_string(SESSION_FILE).ok()?;
-    if text.trim().is_empty() {
-        return None;
-    }
-    parse::parse(&text).ok()
-}
-
-/// Best-effort write of the current formula (empty formula = no file).
-fn save_session(ed: &Editor) {
-    let row = ast::normalize(&ed.root);
-    if row.is_empty() {
-        let _ = fs::remove_file(SESSION_FILE);
-    } else {
-        // Formatting spacers are written as explicit ␠ so they survive
-        // the parse on restore (a blank column would be eaten).
-        let aa = render_root(&ast::mark_spacers(&row), None, &RenderCtx::canonical()).to_text();
-        let _ = fs::write(SESSION_FILE, format!("{}\n", aa));
-    }
-}
-
-#[derive(clap::Parser)]
-#[command(
-    version,
-    about = "LyX-like TUI math editor + AA <-> LaTeX/Typst converter"
-)]
-struct Cli {
-    #[command(subcommand)]
-    cmd: Option<Convert>,
-    /// LaTeX save path for ^S in the TUI
-    #[arg(default_value = "formula.tex")]
-    save_path: String,
-    /// Persist the formula to .mascii-session after every edit and
-    /// restore it on startup (survives cargo-watch restarts)
-    #[arg(long)]
-    session: bool,
-}
-
-#[derive(clap::Subcommand)]
-enum Convert {
-    /// AA formula (file or stdin) -> LaTeX
-    Aa2tex { file: Option<String> },
-    /// AA formula (file or stdin) -> Typst
-    Aa2typst { file: Option<String> },
-    /// AA formula -> canonical AA (normalize)
-    Fmt { file: Option<String> },
+/// View state the editor itself does not own: the scroll offset of the
+/// canvas (a formula larger than the terminal does not fit).
+#[derive(Default)]
+struct View {
+    scroll_x: usize,
+    scroll_y: usize,
 }
 
 fn main() -> std::io::Result<()> {
-    let cli = <Cli as clap::Parser>::parse();
-    if let Some(cmd) = cli.cmd {
-        let (kind, file) = match &cmd {
-            Convert::Aa2tex { file } => ("aa2tex", file),
-            Convert::Aa2typst { file } => ("aa2typst", file),
-            Convert::Fmt { file } => ("fmt", file),
-        };
-        return convert(kind, file.as_deref());
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        Some(m @ ("aa2tex" | "aa2typst" | "fmt")) => {
+            return convert(m, args.get(1).map(String::as_str));
+        }
+        Some(_) => {
+            println!("{}", USAGE);
+            return Ok(());
+        }
+        None => {}
     }
-    let session = cli.session;
-    let save_path = cli.save_path;
     let mut terminal = ratatui::init();
     let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
     let mut ed = Editor::new();
-    ed.message = format!("mascii — LyX-like math editor (saves to {})", save_path);
-    if session && let Some(row) = load_session() {
-        ed.col = row.len();
-        ed.root = row;
-        ed.message = format!("session restored from {}", SESSION_FILE);
-    }
+    ed.message = "mascii — LyX-like math editor".into();
 
     let mut guard = RoundtripGuard::default();
     let mut origin = (0u16, 0u16);
+    let mut view = View::default();
     let result = loop {
-        if let Err(e) = terminal.draw(|f| origin = draw(f, &ed)) {
+        if let Err(e) = terminal.draw(|f| origin = draw(f, &ed, &mut view)) {
             break Err(e);
         }
         match event::read() {
             Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => {
-                if handle_key(&mut ed, key.code, key.modifiers, &save_path) {
+                if handle_key(&mut ed, key.code, key.modifiers) {
                     break Ok(());
                 }
                 guard.check(&mut ed);
-                if session {
-                    save_session(&ed);
-                }
             }
             Ok(Event::Mouse(m)) if m.kind == MouseEventKind::Down(MouseButton::Left) => {
                 if m.column >= origin.0 && m.row >= origin.1 {
-                    ed.click((m.column - origin.0) as usize, (m.row - origin.1) as usize);
+                    ed.click(
+                        (m.column - origin.0) as usize + view.scroll_x,
+                        (m.row - origin.1) as usize + view.scroll_y,
+                    );
                 }
             }
             Ok(_) => {}
@@ -183,66 +140,11 @@ fn convert(mode: &str, file: Option<&str>) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Pipe `text` into the first available system clipboard command.
-/// OSC 52: hand the text to the terminal's clipboard through an escape
-/// sequence — works in most modern terminals, including over ssh where
-/// no clipboard command exists.
-fn osc52_copy(text: &str) -> std::io::Result<()> {
-    use std::io::Write as _;
-    let mut out = std::io::stdout();
-    write!(out, "\x1b]52;c;{}\x07", base64(text.as_bytes()))?;
-    out.flush()
-}
-
-fn base64(data: &[u8]) -> String {
-    const ABC: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut s = String::with_capacity(data.len().div_ceil(3) * 4);
-    for chunk in data.chunks(3) {
-        let b = [
-            chunk[0],
-            *chunk.get(1).unwrap_or(&0),
-            *chunk.get(2).unwrap_or(&0),
-        ];
-        let n = u32::from_be_bytes([0, b[0], b[1], b[2]]);
-        for i in 0..4 {
-            if i <= chunk.len() {
-                s.push(ABC[(n >> (18 - 6 * i) & 0x3f) as usize] as char);
-            } else {
-                s.push('=');
-            }
-        }
-    }
-    s
-}
-
-fn copy_to_clipboard(text: &str) -> Result<&'static str, String> {
-    use std::io::Write as _;
-    use std::process::{Command, Stdio};
-    const CANDIDATES: &[(&str, &[&str])] = &[
-        ("pbcopy", &[]),
-        ("wl-copy", &[]),
-        ("xclip", &["-selection", "clipboard"]),
-        ("xsel", &["--clipboard", "--input"]),
-        ("clip.exe", &[]),
-    ];
-    for &(cmd, args) in CANDIDATES {
-        let child = Command::new(cmd)
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn();
-        let Ok(mut child) = child else { continue };
-        let ok = child
-            .stdin
-            .take()
-            .map(|mut i| i.write_all(text.as_bytes()).is_ok())
-            .unwrap_or(false);
-        if child.wait().map(|s| s.success()).unwrap_or(false) && ok {
-            return Ok(cmd);
-        }
-    }
-    Err("no clipboard command found (pbcopy / wl-copy / xclip / xsel)".into())
+/// The system clipboard via arboard (X11/Wayland/macOS/Windows).
+fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    arboard::Clipboard::new()
+        .and_then(|mut c| c.set_text(text.to_string()))
+        .map_err(|e| e.to_string())
 }
 
 /// Live roundtrip checker: after every edit, re-parse the canonical AA of
@@ -337,7 +239,7 @@ fn write_report(
 }
 
 /// Returns true when the app should quit.
-fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers, save_path: &str) -> bool {
+fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers) -> bool {
     // F-keys kept as terminal-specific aliases (^T/^B/^O are often
     // captured by the terminal or OS).
     let key = match code {
@@ -366,28 +268,14 @@ fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers, save_path: &st
     );
     match effect {
         Effect::Quit => return true,
-        Effect::SaveTex => {
-            let tex = latex::row_to_latex(&ed.root);
-            match fs::write(save_path, format!("{}\n", tex)) {
-                Ok(()) => ed.message = format!("saved LaTeX to {}", save_path),
-                Err(e) => ed.message = format!("save failed: {}", e),
-            }
-        }
         // Yank: canonical AA to the system clipboard.
         Effect::CopyAa => {
             let row = ast::normalize(&ed.root);
             let aa = render_root(&row, None, &RenderCtx::canonical()).to_text();
-            // A clipboard command gives a definite success signal;
-            // otherwise fall back to OSC 52 through the terminal.
-            match copy_to_clipboard(&aa) {
-                Ok(cmd) => ed.message = format!("copied AA to clipboard ({})", cmd),
-                Err(_) => {
-                    ed.message = match osc52_copy(&aa) {
-                        Ok(()) => "copied AA to clipboard (OSC 52)".into(),
-                        Err(e) => format!("copy failed: {}", e),
-                    }
-                }
-            }
+            ed.message = match copy_to_clipboard(&aa) {
+                Ok(()) => "copied AA to clipboard".into(),
+                Err(e) => format!("copy failed: {}", e),
+            };
         }
         Effect::None => {}
     }
@@ -396,11 +284,11 @@ fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers, save_path: &st
 
 /// Draw the whole UI; returns the screen coordinates of the formula's
 /// top-left cell (for mouse hit-testing).
-fn draw(f: &mut Frame, ed: &Editor) -> (u16, u16) {
+fn draw(f: &mut Frame, ed: &Editor, view: &mut View) -> (u16, u16) {
     let [canvas_area, help_area] =
         Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
 
-    let origin = draw_canvas(f, canvas_area, ed);
+    let origin = draw_canvas(f, canvas_area, ed, view);
 
     // One bottom line: messages overlay the usage line when present
     // (the minibuffer itself shows in-place at the cursor).
@@ -420,7 +308,7 @@ fn draw(f: &mut Frame, ed: &Editor) -> (u16, u16) {
 }
 
 /// Returns the screen position of the formula's top-left cell.
-fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
+fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16, u16) {
     let border = UiBlock::default()
         .borders(Borders::ALL)
         .title(" mascii ")
@@ -468,18 +356,56 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor) -> (u16, u16) {
 
     let width = (block.width() as u16).max(lines.iter().map(|l| l.len() as u16).max().unwrap_or(0));
     let height = lines.len() as u16;
-    let left = inner.width.saturating_sub(width) / 2;
-    let top = inner.height.saturating_sub(height) / 2;
+    // A formula larger than the canvas scrolls, following the cursor
+    // (the free cursor included) with a few cells of margin; one that
+    // fits is centered on that axis and its scroll resets. `scroll`
+    // returns the offset, `pad` the centering pad.
+    let scroll = |size: u16, avail: u16, cur: Option<usize>, off: &mut usize| -> u16 {
+        if size <= avail {
+            *off = 0;
+            return avail.saturating_sub(size) / 2;
+        }
+        let vis = avail as usize;
+        let margin = 4.min(vis / 4);
+        if let Some(c) = cur {
+            *off = (*off).min(c.saturating_sub(margin));
+            if c + margin >= *off + vis {
+                *off = c + margin + 1 - vis;
+            }
+        }
+        *off = (*off).min(size as usize - vis);
+        0
+    };
+    let left = scroll(
+        width,
+        inner.width,
+        cursor_cell.map(|(_, cx)| cx),
+        &mut view.scroll_x,
+    );
+    let top = scroll(
+        height,
+        inner.height,
+        cursor_cell.map(|(cy, _)| cy),
+        &mut view.scroll_y,
+    );
 
     let mut text: Vec<Line> = Vec::with_capacity(top as usize + lines.len());
     for _ in 0..top {
         text.push(Line::raw(""));
     }
     let pad = " ".repeat(left as usize);
-    for (y, (l, bgrow)) in lines.iter().zip(&bg).enumerate() {
+    for (y, (l, bgrow)) in lines.iter().zip(&bg).enumerate().skip(view.scroll_y) {
         let ccol = cursor_cell.and_then(|(cy, cx)| (cy == y).then_some(cx));
         let mut spans = vec![Span::raw(pad.clone())];
-        spans.extend(decorate_line(l, y, &struck, bgrow, ccol, ed.free.is_some()));
+        spans.extend(decorate_line(
+            l,
+            y,
+            &struck,
+            bgrow,
+            ccol,
+            ed.free.is_some(),
+            view.scroll_x,
+        ));
         text.push(Line::from(spans));
     }
     f.render_widget(Paragraph::new(text), inner);
@@ -658,9 +584,16 @@ fn overlay_minibuffer(
         lines[cy].resize(end + 1, ' ');
         bg[cy].resize(end + 1, None);
     }
+    // Live feedback: the overlay turns red as soon as the typed name
+    // is not something \execute knows (it goes back on completion).
+    let color = if ed.command_known(buf) {
+        theme::MINIBUF_BG
+    } else {
+        theme::MINIBUF_BAD_BG
+    };
     for (i, &ch) in text.iter().enumerate() {
         lines[cy][cx + i] = ch;
-        bg[cy][cx + i] = Some(theme::MINIBUF_BG);
+        bg[cy][cx + i] = Some(color);
     }
     *cursor_cell = Some((cy, end));
 }
@@ -677,6 +610,7 @@ fn decorate_line(
     bg: &[Option<Color>],
     cursor: Option<usize>,
     free_caret: bool,
+    scroll_x: usize,
 ) -> Vec<Span<'static>> {
     // The ordinary caret is terminal-style reverse video; the free
     // cursor is a solid colored block instead (reverse video would swap
@@ -707,7 +641,7 @@ fn decorate_line(
             });
         }
     };
-    for (i, &c) in line.iter().enumerate() {
+    for (i, &c) in line.iter().enumerate().skip(scroll_x) {
         let u = c as u32;
         let cell_bg = bg.get(i).copied().flatten();
         let cell = if struck.contains(&(y, i)) {
@@ -759,6 +693,45 @@ fn decorate_line(
 
 #[cfg(test)]
 mod tests {
+    /// A formula larger than the canvas scrolls on both axes so the
+    /// cursor stays visible; one that fits is centered (offsets 0).
+    #[test]
+    fn canvas_scrolls_to_follow_the_cursor() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let render = |ed: &Editor, w: u16, h: u16| -> View {
+            let mut view = View::default();
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            term.draw(|f| {
+                draw(f, ed, &mut view);
+            })
+            .unwrap();
+            view
+        };
+        // Fits: centered, no scrolling.
+        let mut ed = Editor::new();
+        type_script_keys(&mut ed, "x+1");
+        let v = render(&ed, 40, 12);
+        assert_eq!((v.scroll_x, v.scroll_y), (0, 0));
+        // Wide: the cursor sits at the right end, so the view scrolled.
+        let mut ed = Editor::new();
+        type_script_keys(&mut ed, &"a+".repeat(40));
+        let v = render(&ed, 24, 12);
+        assert!(v.scroll_x > 0, "no horizontal scroll: {}", v.scroll_x);
+        assert_eq!(v.scroll_y, 0);
+        // Tall: many display lines, cursor on the last one.
+        let mut ed = Editor::new();
+        for _ in 0..12 {
+            ed.input(Key::Char('x'), false, false);
+            ed.input(Key::Enter, false, false);
+        }
+        let v = render(&ed, 40, 8);
+        assert!(v.scroll_y > 0, "no vertical scroll: {}", v.scroll_y);
+        // …and moving back to the top scrolls back.
+        ed.input(Key::Char('a'), false, true); // ^A: document start
+        let v = render(&ed, 40, 8);
+        assert_eq!(v.scroll_y, 0, "did not scroll back to the top");
+    }
+
     #[test]
     fn block_mode_paints_the_ancestor_gradient() {
         // Cursor in a cell of a fused (matrix): ^B shows two ancestors
@@ -802,21 +775,6 @@ mod tests {
             "interior highlighted: {:?}",
             inner
         );
-    }
-
-    #[test]
-    fn base64_matches_the_rfc_vectors() {
-        for (raw, enc) in [
-            ("", ""),
-            ("f", "Zg=="),
-            ("fo", "Zm8="),
-            ("foo", "Zm9v"),
-            ("foob", "Zm9vYg=="),
-            ("fooba", "Zm9vYmE="),
-            ("foobar", "Zm9vYmFy"),
-        ] {
-            assert_eq!(super::base64(raw.as_bytes()), enc);
-        }
     }
 
     use super::*;
@@ -904,7 +862,7 @@ mod tests {
                 None,
             );
             let (y, x) = cursor_cell.expect("caret visible");
-            let spans = decorate_line(&lines[y], y, &struck, &bg[y], Some(x), false);
+            let spans = decorate_line(&lines[y], y, &struck, &bg[y], Some(x), false, 0);
             let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
             // Every struck glyph is still there, followed by its strike.
             for &(r, c) in &block.cancel {

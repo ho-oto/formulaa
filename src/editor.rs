@@ -13,6 +13,7 @@ use crate::symbols::{accent_by_name, bigop_by_char, bigop_by_name, is_func_name,
 /// One undo step: the formula with the cursor that belonged to it.
 type Snapshot = (Row, Vec<(usize, Field)>, usize);
 
+#[derive(Clone)]
 pub struct Editor {
     pub root: Row,
     pub path: Vec<(usize, Field)>,
@@ -22,6 +23,9 @@ pub struct Editor {
     /// Some((kind, content)) while an in-place name box (\op \op* \rm
     /// \text) is open.
     pub op_entry: Option<(BoxKind, String)>,
+    /// Pending backslash escape inside the \text box (the next key is
+    /// typed literally, so \" enters a quote).
+    pub op_escape: bool,
     /// Grid edit mode (^O inside a matrix): arrows move cells, r/R c/C
     /// add rows/columns, d/D delete them.
     pub grid_mode: bool,
@@ -301,6 +305,7 @@ impl Editor {
             col: 0,
             minibuffer: None,
             op_entry: None,
+            op_escape: false,
             grid_mode: false,
             undo: Vec::new(),
             redo: Vec::new(),
@@ -2049,6 +2054,20 @@ impl Editor {
         }
     }
 
+    /// Does `\cmd` name something the editor can execute? Answered by
+    /// running it on a throwaway copy and looking for the unknown-command
+    /// message, so the answer can never drift from `execute` itself.
+    /// (The TUI colors the in-place minibuffer by this while typing.)
+    pub fn command_known(&self, cmd: &str) -> bool {
+        if cmd.is_empty() {
+            return false;
+        }
+        let mut probe = self.clone();
+        probe.message.clear();
+        probe.execute(cmd);
+        !probe.message.starts_with("unknown command")
+    }
+
     /// Execute a `\command` from the minibuffer.
     pub fn execute(&mut self, cmd: &str) {
         if cmd.is_empty() {
@@ -2254,12 +2273,14 @@ impl Editor {
                         // '…', which only reads ASCII alphanumerics —
                         // anything else would break the roundtrip
                         // (\op* alone used to make a Text{"*"}). \text
-                        // ("…") reads any glyph except the quotes.
+                        // ("…") takes anything except brackets (opaque
+                        // quoted spans would desync the delimiter depth
+                        // scans; a literal " is escaped as \").
                         !t.is_empty()
                             && if *math {
                                 t.chars().all(|c| c.is_ascii_alphanumeric() || c == '.')
                             } else {
-                                !t.contains('"') && !t.contains('\'')
+                                !t.contains(['\'', '(', ')', '[', ']', '{', '}'])
                             }
                     })
                 {
@@ -2392,7 +2413,7 @@ mod tests {
         ed.execute("op");
         assert!(ed.op_entry.is_some());
         type_name(&mut ed, "vol");
-        assert_eq!(row_to_latex(&ed.root), "\\mathrm{vol}");
+        assert_eq!(row_to_latex(&ed.root), "\\operatorname{vol}");
         // A dictionary word falls back to the Func it names.
         let mut ed = Editor::new();
         ed.execute("op");
@@ -2456,10 +2477,14 @@ mod tests {
             );
             assert!(!ed.message.is_empty());
         }
-        // \text keeps the wider charset (only quotes are excluded).
+        // \text keeps a wide charset but rejects brackets (opaque
+        // quoted spans would desync the delimiter depth scans).
         let mut ed = Editor::new();
         ed.execute("text(a)");
-        assert_eq!(row_to_latex(&ed.root), "\\text{(a)}");
+        assert!(ed.root.is_empty(), "brackets rejected: {:?}", ed.root);
+        let mut ed = Editor::new();
+        ed.execute("texta+b");
+        assert_eq!(row_to_latex(&ed.root), "\\text{a+b}");
     }
 
     #[test]
@@ -2747,7 +2772,10 @@ mod tests {
         ed.exit_inset();
         ed.insert_sym('B');
         ed.execute("rmdx");
-        assert_eq!(row_to_latex(&ed.root), "A\\xrightarrow{f}B\\mathrm{dx}");
+        assert_eq!(
+            row_to_latex(&ed.root),
+            "A\\xrightarrow{f}B\\operatorname{dx}"
+        );
     }
 
     #[test]

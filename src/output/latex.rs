@@ -95,7 +95,13 @@ fn node_to_latex(node: &Node) -> String {
         }
         Node::Text { t, math } => {
             if *math {
-                format!("\\mathrm{{{}}}", t)
+                // A multi-letter upright run is an operator name; a
+                // lone upright letter (the differential d) is \mathrm.
+                if t.chars().count() == 1 {
+                    format!("\\mathrm{{{}}}", t)
+                } else {
+                    format!("\\operatorname{{{}}}", t)
+                }
             } else {
                 format!("\\text{{{}}}", t)
             }

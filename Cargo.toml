@@ -11,11 +11,11 @@ description = "LyX-like interactive TUI math editor rendering Unicode/ASCII-art 
 default = ["tui"]
 # The TUI binary; the library (AST/render/parse/editor) has no TUI deps,
 # so wasm builds use default-features = false.
-tui = ["dep:ratatui", "dep:clap"]
+tui = ["dep:ratatui", "dep:arboard"]
 
 [dependencies]
-ratatui = { version = "0.29", optional = true }
-clap = { version = "4", features = ["derive"], optional = true }
+ratatui = { version = "0.30", optional = true }
+arboard = { version = "3", optional = true }
 
 [[bin]]
 name = "mascii"

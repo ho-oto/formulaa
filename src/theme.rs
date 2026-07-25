@@ -27,6 +27,8 @@ pub const FREE_CURSOR_FG: Color = Color::White;
 pub const FREE_BG: Color = Color::Indexed(24);
 /// In-place minibuffer overlay (`\cmd` typed at the cursor).
 pub const MINIBUF_BG: Color = Color::Indexed(94);
+/// … the same overlay while the typed name is not a known command.
+pub const MINIBUF_BAD_BG: Color = Color::Indexed(88);
 
 // ----- jump / block markers -----
 

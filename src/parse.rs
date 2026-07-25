@@ -368,6 +368,20 @@ fn fused_junction(g: &Grid, row: usize, col: usize) -> bool {
     (top..=r).any(|rr| family.contains(g.at(rr, col)))
 }
 
+/// Vertical extent (top, bottom) of the contiguous ‖ run through
+/// (row, col) — nested norm pairs differ exactly here.
+fn norm_extent(g: &Grid, row: usize, col: usize) -> (usize, usize) {
+    let mut top = row;
+    while top > 0 && g.at(top - 1, col) == '‖' {
+        top -= 1;
+    }
+    let mut bot = row;
+    while bot + 1 < g.g.len() && g.at(bot + 1, col) == '‖' {
+        bot += 1;
+    }
+    (top, bot)
+}
+
 /// Which side of a delimiter pair the glyph at (row, col) belongs to:
 /// Some(true) = left/open, Some(false) = right/close, None = neither.
 /// The shared glyphs (brace extension ⎪, angle arms ╱ ╲) resolve their
@@ -496,7 +510,14 @@ fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
     // decides (full-height columns keep the parity consistent per row).
     // Direct norm-in-norm is therefore unsupported.
     if ch == '‖' {
-        let before = (0..col).filter(|&c2| g.at(row, c2) == '‖').count();
+        // Norm columns use the same ‖ on both sides: parity along the
+        // row decides, but only among columns with the same vertical
+        // extent — nested norms render the outer pair two rows taller,
+        // which is what tells the pairs apart.
+        let ext = norm_extent(g, row, col);
+        let before = (0..col)
+            .filter(|&c2| g.at(row, c2) == '‖' && norm_extent(g, row, c2) == ext)
+            .count();
         return Some(before % 2 == 0);
     }
     if OPEN_BRACKETS.contains(&ch) {
@@ -1037,34 +1058,51 @@ fn parse_region(
             }
             '"' => {
                 // "double-quoted" \text run: flat baseline chars up to
-                // the closing quote; ␣ maps back to a space.
+                // the closing quote. A backslash escapes the next char
+                // (so a literal " or \ can live inside); ␣ maps back
+                // to a space.
                 let mut close = None;
-                for c2 in col + 1..=rect.r {
-                    if g.at(bl, c2) == '"' {
-                        close = Some(c2);
-                        break;
+                let mut c2 = col + 1;
+                while c2 <= rect.r {
+                    match g.at(bl, c2) {
+                        '\\' => c2 += 2,
+                        '"' => {
+                            close = Some(c2);
+                            break;
+                        }
+                        _ => c2 += 1,
                     }
                 }
                 let Some(close) = close else {
                     return err("unclosed \"", bl, col);
                 };
                 check_flat_columns(g, rect, bl, col, close, 0, 0)?;
-                let t: String = (col + 1..close)
-                    .map(|c2| match g.at(bl, c2) {
-                        '␣' => ' ',
-                        c2 => c2,
-                    })
-                    .collect();
+                let mut t = String::new();
+                let mut c2 = col + 1;
+                while c2 < close {
+                    match g.at(bl, c2) {
+                        '\\' if c2 + 1 < close => {
+                            t.push(g.at(bl, c2 + 1));
+                            c2 += 2;
+                        }
+                        '␣' => {
+                            t.push(' ');
+                            c2 += 1;
+                        }
+                        ch => {
+                            t.push(ch);
+                            c2 += 1;
+                        }
+                    }
+                }
                 out.push(Node::Text { t, math: false });
                 col = close + 1;
             }
             '\'' => {
-                // 'single-quoted' \mathrm run — but only when a closing
-                // quote exists and the content is nonempty ASCII
-                // alphanumerics/␣; anything else keeps ' as the prime
-                // atom (canonical output spaces primes away from letter
-                // runs and quotes, so the two never collide).
-                let quoted = (col + 1..=rect.r)
+                // 'single-quoted' \mathrm run. The quote is reserved:
+                // the prime atom is ′ U+2032, so a ' is always a
+                // delimiter and an unclosed one is an error.
+                let close = (col + 1..=rect.r)
                     .take_while(|&c2| g.at(bl, c2) != ' ')
                     .find(|&c2| g.at(bl, c2) == '\'')
                     .filter(|&close| {
@@ -1074,36 +1112,18 @@ fn parse_region(
                                 ch2.is_ascii_alphanumeric() || ch2 == '␣' || ch2 == '.'
                             })
                     });
-                match quoted {
-                    Some(close) => {
-                        check_flat_columns(g, rect, bl, col, close, 0, 0)?;
-                        let t: String = (col + 1..close)
-                            .map(|c2| match g.at(bl, c2) {
-                                '␣' => ' ',
-                                c2 => c2,
-                            })
-                            .collect();
-                        out.push(Node::Text { t, math: true });
-                        col = close + 1;
-                    }
-                    None => {
-                        // A prime is an ordinary atom — including under
-                        // an accent stack (a wide accent collapsing onto
-                        // a one-char base can put marks on anything).
-                        let (overs, unders, extra) = accent_stacks(g, rect, bl, col);
-                        check_flat_columns(g, rect, bl, col, col, overs.len(), unders.len())?;
-                        if overs.is_empty() && unders.is_empty() {
-                            out.push(Node::Sym('\''));
-                        } else {
-                            out.push(Node::Accent {
-                                overs,
-                                unders,
-                                base: '\'',
-                            });
-                        }
-                        col += 1 + extra;
-                    }
-                }
+                let Some(close) = close else {
+                    return err("unclosed ' (the prime atom is ′)", bl, col);
+                };
+                check_flat_columns(g, rect, bl, col, close, 0, 0)?;
+                let t: String = (col + 1..close)
+                    .map(|c2| match g.at(bl, c2) {
+                        '␣' => ' ',
+                        c2 => c2,
+                    })
+                    .collect();
+                out.push(Node::Text { t, math: true });
+                col = close + 1;
             }
             ')' | ']' | '}' | '⟩' => {
                 // Closing delimiters are never atoms: a `)` atom inside
@@ -1232,13 +1252,6 @@ fn parse_region(
                 let (overs, unders, extra) = accent_stacks(g, rect, bl, col);
                 check_flat_columns(g, rect, bl, col, col, overs.len(), unders.len())?;
                 let base = unstyle_char(ch);
-                // ␠ is the explicit form of a formatting Spacer (the
-                // session file uses it; fmt turns it back into a blank).
-                if base == '␠' && overs.is_empty() && unders.is_empty() {
-                    out.push(Node::Spacer);
-                    col += 1;
-                    continue;
-                }
                 if !overs.is_empty() || !unders.is_empty() {
                     out.push(Node::Accent {
                         overs,
@@ -1477,11 +1490,12 @@ fn accent_band_run(
     // baseline dive relies on the over/under classification being
     // positionally unambiguous.
     let all = |m: char| piece.iter().all(|&c| c == m);
-    let mark = if over && all('￫') {
+    let single = |m: char| piece.len() == 1 && piece[0] == m;
+    let mark = if over && single('￫') {
         Some('⇀') // centered halfwidth arrow: \overrightarrow
-    } else if over && all('˰') {
+    } else if over && single('˰') {
         Some('^') // centered low arrowhead: \widehat
-    } else if over && all('˯') {
+    } else if over && single('˯') {
         Some('ˇ') // \widecheck
     } else if over && all('_') {
         Some('¯') // low fill hugging the base: \overline
@@ -1491,7 +1505,7 @@ fn accent_band_run(
         Some('˜') // low tilde fill: \widetilde
     } else if !over && all('˜') {
         Some('˷') // high tilde fill: \utilde
-    } else if over && all('˳') {
+    } else if over && single('˳') {
         Some('˚') // centered low ring: \mathring
     } else if over && all('․') {
         // Leader dots: one is \dot, two are \ddot.
@@ -2228,16 +2242,18 @@ mod tests {
         // …but letter *runs* are \mathrm unless they are dictionary words,
         // and a single letter glued to another letter is roman too (d𝑦).
         let row = parse("asiny").unwrap();
-        assert_eq!(row_to_latex(&row), "\\mathrm{asiny}");
+        assert_eq!(row_to_latex(&row), "\\operatorname{asiny}");
         let row = parse("E=mc²").unwrap();
-        assert_eq!(row_to_latex(&row), "E=\\mathrm{mc}^{2}");
+        assert_eq!(row_to_latex(&row), "E=\\operatorname{mc}^{2}");
         let row = parse("d𝑦").unwrap();
         assert_eq!(row_to_latex(&row), "\\mathrm{d}y");
-        // 'single quotes' force \mathrm; primes survive elsewhere.
+        // 'single quotes' force the one-letter \mathrm; the prime is
+        // its own atom ′ (a bare ' is always a quote delimiter).
         let row = parse("'d'x").unwrap();
         assert_eq!(row_to_latex(&row), "\\mathrm{d}x");
-        let row = parse("𝑥''").unwrap();
-        assert_eq!(row_to_latex(&row), "x''");
+        let row = parse("𝑥′′").unwrap();
+        assert_eq!(row_to_latex(&row), "x\\prime \\prime ");
+        assert!(parse("𝑥''").is_err(), "an unclosed quote is an error");
     }
 
     #[test]

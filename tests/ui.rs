@@ -99,7 +99,6 @@ fn selection_wraps_into_fraction() {
 fn ctrl_keys_return_host_effects() {
     let mut ed = Editor::new();
     assert_eq!(ed.input(Key::Char('q'), false, true), Effect::Quit);
-    assert_eq!(ed.input(Key::Char('s'), false, true), Effect::SaveTex);
     assert_eq!(ed.input(Key::Char('y'), false, true), Effect::CopyAa);
     // Plain typing never asks the host for anything.
     assert_eq!(ed.input(Key::Char('q'), false, false), Effect::None);
@@ -211,6 +210,24 @@ fn caret_underscore_commands_insert_scripts() {
 }
 
 #[test]
+fn command_known_tracks_execute() {
+    let ed = Editor::new();
+    for ok in [
+        "frac", "sqrt", "alpha", "sin", "lim", "argmax", "hat", "^z", "rmdx", "pmatrix",
+    ] {
+        assert!(ed.command_known(ok), "\\{} should be known", ok);
+    }
+    for bad in ["", "fra", "nosuchthing", "zzz"] {
+        assert!(!ed.command_known(bad), "\\{} should be unknown", bad);
+    }
+    // The probe never touches the real editor.
+    let mut ed = Editor::new();
+    type_script(&mut ed, "x");
+    assert!(ed.command_known("frac"));
+    assert_eq!(latex(&ed), "x");
+}
+
+#[test]
 fn cancel_wraps_the_selection() {
     // Shift-selection then \cancel.
     let mut ed = Editor::new();
@@ -283,7 +300,7 @@ fn rm_and_text_boxes() {
     // \rm opens the box; dots are part of the name (i.i.d.).
     let mut ed = Editor::new();
     type_script(&mut ed, r"\rm i.i.d. Enter x");
-    assert_eq!(latex(&ed), "\\mathrm{i.i.d.}x");
+    assert_eq!(latex(&ed), "\\operatorname{i.i.d.}x");
     // A dictionary word still falls back to its Func.
     let mut ed = Editor::new();
     type_script(&mut ed, r"\rm sin Enter");
@@ -337,7 +354,7 @@ fn op_box_via_keys() {
     // Arrow keys (anything not part of the name) commit the box too.
     let mut ed = Editor::new();
     type_script(&mut ed, r"\op vol Right +1");
-    assert_eq!(latex(&ed), "\\mathrm{vol}+1");
+    assert_eq!(latex(&ed), "\\operatorname{vol}+1");
     // Esc cancels.
     let mut ed = Editor::new();
     type_script(&mut ed, r"\op foo Esc");
@@ -380,9 +397,18 @@ fn brackets_insert_a_delimiter_pair() {
     let mut ed = Editor::new();
     type_script(&mut ed, "[ x ]");
     assert_eq!(latex(&ed), "\\left[x\\right]");
-    // `"` stays reserved (text runs).
-    type_script(&mut ed, "\"");
-    assert!(ed.message.contains("text"), "message: {}", ed.message);
+    // `"` opens the text box; typing through the closing quote makes
+    // a \text run, and \" escapes a literal quote inside.
+    let mut ed = Editor::new();
+    for k in ['"', 'i', 'f', ' ', 'x', '"'] {
+        ed.input(Key::Char(k), false, false);
+    }
+    assert_eq!(latex(&ed), "\\text{if x}");
+    let mut ed = Editor::new();
+    for k in ['"', 'a', '\\', '"', 'b', '"'] {
+        ed.input(Key::Char(k), false, false);
+    }
+    assert_eq!(latex(&ed), "\\text{a\"b}");
 }
 
 #[test]

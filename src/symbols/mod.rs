@@ -5,6 +5,7 @@
 //! - `ACCENTS`: accent marks (AST mark chars; drawn forms in render)
 //! - `is_reserved_glyph`: the atom exclusion list (docs/aa-spec.md §2)
 
+pub mod alphabets;
 pub mod ext;
 
 /// (command name, unicode char). The LaTeX command is `\name`.
@@ -161,17 +162,19 @@ pub fn is_reserved_glyph(c: char) -> bool {
         | '⬚'                   // U+2B1A DOTTED SQUARE: empty slot / script base
         | '▌'                   // U+258C LEFT HALF BLOCK: cursor (view layer only)
         | '"'                   // U+0022: \text quotes
-        | '␠'                   // U+2420 SYMBOL FOR SPACE: explicit Spacer
-        // Hugging drawn forms of the accent marks (the AST marks
-        // themselves are covered by is_over_mark/is_under_mark)
+        | '\''                  // U+0027: \mathrm quotes (the prime atom is ′ U+2032)
+        // Drawn accent glyphs (the only accent chars that appear in
+        // AA; the AST mark chars ^ ˇ ˜ ˙ ¨ ˚ ⇀ ‗ ˷ are internal
+        // identifiers and NOT reserved)
+        | '¯'                   // U+00AF MACRON: drawn under bar
+        | '˜'                   // U+02DC SMALL TILDE: drawn under tilde
+        | '˷'                   // U+02F7 LOW TILDE: drawn over tilde
         | '˰'                   // U+02F0 MODIFIER LETTER LOW UP ARROWHEAD: hat
         | '˯'                   // U+02EF MODIFIER LETTER LOW DOWN ARROWHEAD: check
         | '˳'                   // U+02F3 MODIFIER LETTER LOW RING: ring
         | '․'                   // U+2024 ONE DOT LEADER: dot / ddot (․․)
         | '￫'                   // U+FFEB HALFWIDTH RIGHTWARDS ARROW: vec
-    ) || is_over_mark(c)
-        || is_under_mark(c)
-        || crate::render::unsuperscript_char(c).is_some()
+    ) || crate::render::unsuperscript_char(c).is_some()
         || crate::render::unsubscript_char(c).is_some()
 }
 
@@ -421,18 +424,20 @@ pub fn func_prefix(s: &str) -> Option<&'static str> {
         .map(|f| f.name)
 }
 
-/// Lookup order: curated table first, then the large generated table
-/// (from https://github.com/ho-oto/mathematical-symbols).
+/// Lookup order: curated table, then the alphabet families (\bbR),
+/// then the large generated table (from ho-oto/mathematical-symbols,
+/// sorted so this is a binary search).
 pub fn symbol_by_name(name: &str) -> Option<char> {
     SYMBOLS
         .iter()
         .find(|(n, _)| *n == name)
         .map(|&(_, c)| c)
+        .or_else(|| alphabets::alphabet_char(name))
         .or_else(|| {
             ext::EXT_SYMBOLS
-                .iter()
-                .find(|(n, _)| *n == name)
-                .map(|&(_, c)| c)
+                .binary_search_by_key(&name, |&(n, _)| n)
+                .ok()
+                .map(|i| ext::EXT_SYMBOLS[i].1)
         })
         .filter(|&c| !is_reserved_glyph(c))
 }
@@ -452,4 +457,73 @@ pub fn latex_name(c: char) -> Option<&'static str> {
         .chain(BIG_OPS.iter())
         .find(|&&(_, ch)| ch == c)
         .map(|&(n, _)| n)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `symbol_by_name` binary-searches EXT_SYMBOLS, so a regeneration
+    /// must keep the table sorted (and free of duplicates).
+    #[test]
+    fn ext_table_is_sorted() {
+        for w in ext::EXT_SYMBOLS.windows(2) {
+            assert!(w[0].0 < w[1].0, "unsorted: {:?} then {:?}", w[0].0, w[1].0);
+        }
+    }
+
+    /// The alphabet families cover both cases, including the letterlike
+    /// exceptions that sit outside their block.
+    #[test]
+    fn alphabet_families_resolve() {
+        for (name, want) in [
+            ("bbR", 'ℝ'),
+            ("bbA", '𝔸'),
+            ("bbf", '𝕗'),
+            ("calL", 'ℒ'),
+            ("scrL", 'ℒ'),
+            ("frakg", '𝔤'),
+            ("frakH", 'ℌ'),
+            ("bfa", '𝐚'),
+            ("ttZ", '𝚉'),
+            ("sfbfitq", '𝙦'),
+            ("calbfA", '𝓐'),
+            ("scrbfA", '𝓐'),
+            ("bfsf3", '𝟯'),
+            ("tt7", '𝟽'),
+            ("frkZ", 'ℨ'),
+        ] {
+            assert_eq!(symbol_by_name(name), Some(want), "\\{}", name);
+        }
+        // Every family maps all 52 letters (and its digits) to a
+        // distinct char, under every alias spelling.
+        for fam in alphabets::ALPHABETS {
+            let mut seen = std::collections::HashSet::new();
+            let chars: Vec<char> = ('A'..='Z')
+                .chain('a'..='z')
+                .chain(fam.digits.iter().flat_map(|_| '0'..='9'))
+                .collect();
+            for &l in &chars {
+                let c = alphabets::alphabet_char(&format!("{}{}", fam.prefixes[0], l))
+                    .unwrap_or_else(|| panic!("{}{} missing", fam.prefixes[0], l));
+                assert!(
+                    seen.insert(c),
+                    "{}{} duplicates {:?}",
+                    fam.prefixes[0],
+                    l,
+                    c
+                );
+                for alias in fam.prefixes {
+                    assert_eq!(
+                        alphabets::alphabet_char(&format!("{}{}", alias, l)),
+                        Some(c),
+                        "alias {}{}",
+                        alias,
+                        l
+                    );
+                }
+            }
+        }
+        assert_eq!(symbol_by_name("nosuchfamilyX"), None);
+    }
 }

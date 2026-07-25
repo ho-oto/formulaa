@@ -141,14 +141,13 @@ fn node_to_typst(node: &Node) -> String {
         }
         Node::Text { t, math } => {
             if *math {
-                format!(
-                    "upright({})",
-                    if t.chars().count() == 1 {
-                        t.clone()
-                    } else {
-                        format!("\"{}\"", t)
-                    }
-                )
+                // A multi-letter upright run is an operator name; a
+                // lone upright letter (the differential d) is upright().
+                if t.chars().count() == 1 {
+                    format!("upright({})", t)
+                } else {
+                    format!("op(\"{}\")", t)
+                }
             } else {
                 format!("\"{}\"", t)
             }
