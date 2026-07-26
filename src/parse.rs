@@ -966,7 +966,7 @@ fn parse_region(
                         parse_region(g, r, None, depth + 1, trace, in_cancel)
                     })?;
                     out.push(Node::Arrow {
-                        op: '→',
+                        op: crate::symbols::Arrow::To,
                         over,
                         under,
                     });
@@ -1063,7 +1063,7 @@ fn parse_region(
                     parse_region(g, r, None, depth + 1, trace, in_cancel)
                 })?;
                 out.push(Node::Arrow {
-                    op: crate::symbols::arrow_by_body(DOUBLE_BODY, true).unwrap().op,
+                    op: crate::symbols::Arrow::of_body(DOUBLE_BODY, true).unwrap(),
                     over,
                     under,
                 });
@@ -1089,7 +1089,7 @@ fn parse_region(
                 let under = region_below(span, bl).map_or(Ok(vec![]), |r| {
                     parse_region(g, r, None, depth + 1, trace, in_cancel)
                 })?;
-                let op = crate::symbols::arrow_by_body(body, false).unwrap().op;
+                let op = crate::symbols::Arrow::of_body(body, false).unwrap();
                 out.push(Node::Arrow { op, over, under });
                 col = run_end + 1;
             }
@@ -1492,7 +1492,7 @@ fn accent_band_run(
     row: usize,
     col: usize,
     over: bool,
-) -> Option<(char, usize)> {
+) -> Option<(crate::symbols::Accent, usize)> {
     if g.at(row, col) != OP_BAND {
         return None;
     }
@@ -1533,31 +1533,19 @@ fn accent_band_run(
     // positionally unambiguous.
     let all = |m: char| piece.iter().all(|&c| c == m);
     let single = |m: char| piece.len() == 1 && piece[0] == m;
-    let mark = if over && single('￫') {
-        Some('⇀') // centered halfwidth arrow: \overrightarrow
-    } else if over && single('˰') {
-        Some('^') // centered low arrowhead: \widehat
-    } else if over && single('˯') {
-        Some('ˇ') // \widecheck
-    } else if over && all('_') {
-        Some('¯') // low fill hugging the base: \overline
-    } else if !over && all('¯') {
-        Some('‗') // high fill hugging from below: \underline
-    } else if over && all('˷') {
-        Some('˜') // low tilde fill: \widetilde
-    } else if !over && all('˜') {
-        Some('˷') // high tilde fill: \utilde
-    } else if over && single('˳') {
-        Some('˚') // centered low ring: \mathring
-    } else if over && all('․') {
-        // Leader dots: one is \dot, two are \ddot.
-        match piece.len() {
-            1 => Some('˙'),
-            2 => Some('¨'),
-            _ => None,
-        }
+    // The drawn-form table names each glyph's (mark, side); the dots
+    // are the one length-sensitive case (․ = dot, ․․ = ddot).
+    let mark = if over && all('․') && piece.len() == 2 {
+        Some(crate::symbols::Accent::Ddot)
     } else {
-        None
+        crate::symbols::Accent::ALL.into_iter().find(|a| {
+            a.under() != over
+                && match a.drawn() {
+                    crate::symbols::DrawnForm::Center(g) => single(g),
+                    crate::symbols::DrawnForm::Fill(g) => all(g),
+                    crate::symbols::DrawnForm::Dots => false,
+                }
+        })
     };
     mark.map(|m| (m, end))
 }
@@ -1767,47 +1755,38 @@ fn check_flat_columns(
     Ok(())
 }
 
-/// Compact accents draw marks with a low variant hugging the base —
-/// the over bar as '_' (low in its cell), tilde as '˷', hat as '˰',
-/// check as '˯', ring as '˳', dot as '․' U+2024 (a reserved leader dot,
-/// distinct from the '.' atom), the under bar as '¯' (high in its cell)
-/// — so the drawn glyph maps back to the AST mark here. The old
-/// floating glyphs (¯ ˜ ^ ˇ ˚ ˙ above, ‗ below) still read leniently.
-fn over_mark_at(c: char) -> Option<char> {
-    match c {
-        '_' => Some('¯'), // U+005F LOW LINE -> bar
-        '˷' => Some('˜'), // U+02F7 LOW TILDE -> tilde
-        '˰' => Some('^'), // U+02F0 LOW UP ARROWHEAD -> hat
-        '˯' => Some('ˇ'), // U+02EF LOW DOWN ARROWHEAD -> check
-        '˳' => Some('˚'), // U+02F3 LOW RING -> ring
-        '․' => Some('˙'), // U+2024 ONE DOT LEADER -> dot (.. -> ddot)
-        '￫' => Some('⇀'), // U+FFEB HALFWIDTH RIGHTWARDS ARROW -> vec
-        _ => None,
-    }
+/// Compact accents draw the same hugging glyphs as the wide bands
+/// (`Accent::drawn`), so the column readers are just that table read
+/// backwards.
+fn over_mark_at(c: char) -> Option<crate::symbols::Accent> {
+    crate::symbols::Accent::of_over_glyph(c)
 }
 
-fn under_mark_at(c: char) -> Option<char> {
-    match c {
-        '¯' => Some('‗'), // U+00AF MACRON -> underline
-        // The drawn under tilde is the high ˜ (hugging from below); the
-        // AST mark is ˷ — the tilde pair swaps between the two roles.
-        '˜' => Some('˷'), // U+02DC SMALL TILDE -> utilde
-        _ => None,
-    }
+fn under_mark_at(c: char) -> Option<crate::symbols::Accent> {
+    crate::symbols::Accent::of_under_glyph(c)
 }
 
 /// Returns (overs, unders, extra columns consumed). A ddot draws as
 /// `․․` overhanging one column to the right of its base; the pair is
 /// only taken when that spill column holds nothing else (otherwise the
 /// second ․ is the neighbour's own dot and this row stays a single ˙).
-fn accent_stacks(g: &Grid, rect: Rect, bl: usize, col: usize) -> (Vec<char>, Vec<char>, usize) {
+fn accent_stacks(
+    g: &Grid,
+    rect: Rect,
+    bl: usize,
+    col: usize,
+) -> (
+    Vec<crate::symbols::Accent>,
+    Vec<crate::symbols::Accent>,
+    usize,
+) {
     let mut overs = Vec::new();
     let mut pair_rows: Vec<usize> = Vec::new();
     let mut r = bl;
     while r > rect.t
         && let Some(m) = over_mark_at(g.at(r - 1, col))
     {
-        if m == '˙' && col < rect.r && g.at(r - 1, col + 1) == '․' {
+        if m == crate::symbols::Accent::Dot && col < rect.r && g.at(r - 1, col + 1) == '․' {
             pair_rows.push(r - 1);
         }
         overs.push(m);
@@ -1828,7 +1807,7 @@ fn accent_stacks(g: &Grid, rect: Rect, bl: usize, col: usize) -> (Vec<char>, Vec
     if spill {
         let top = bl - overs.len();
         for &pr in &pair_rows {
-            overs[bl - 1 - pr] = '¨';
+            overs[bl - 1 - pr] = crate::symbols::Accent::Ddot;
             debug_assert!(pr >= top);
         }
     }
@@ -2233,6 +2212,7 @@ mod tests {
     use crate::ast::normalize;
     use crate::latex::row_to_latex;
     use crate::render::{RenderCtx, render_row};
+    use crate::symbols::Accent;
 
     fn roundtrip(row: &Row) {
         // Canonical AA is defined on normal forms.
@@ -2272,13 +2252,13 @@ mod tests {
             index: crate::ast::Radical::Cbrt,
         }]);
         roundtrip(&vec![Node::Accent {
-            overs: vec!['^'],
+            overs: vec![Accent::Hat],
             unders: vec![],
             base: 'x',
         }]);
         roundtrip(&vec![Node::Accent {
             overs: vec![],
-            unders: vec!['‗'],
+            unders: vec![Accent::Underline],
             base: 'y',
         }]);
         roundtrip(&vec![Node::Func("sin".into()), Node::Sym('x')]);

@@ -906,6 +906,18 @@
       (apply の空スロット判定が先に踏んで発覚。回帰テスト追加)。
     キー側の Edit 合流(`(` や `^` を `apply(Edit)` 経由に)は次の一手。
 
+62. **Arrow / Accent の enum 化(ユーザー指示 2026-07)** — Radical と
+    同様に、矢印の `op: char`(→←⇒⇐)とアクセントの
+    `overs/unders: Vec<char>`(`^` `⇀` `¨` …)を enum に。アクセントの
+    AST マーク文字は絵にも出力にも現れない純粋な内部識別子で、
+    「enum の綴りを char で書いていた」だけだった。マーク文字と
+    描画グリフの**入れ替わりペア**(over の ˜ は ˷ と描き、under の ˷ は
+    ˜ と描く)という混乱の種も、`Accent::drawn()`(Center/Fill/Dots の
+    3形)に一本化されて消えた — render のバンド描画・コンパクト列・
+    parse のバンド分類・列読みの4箇所が同じ表を裏表から読む。
+    `accent_info`/`wide_accent_latex`/`is_over_mark`/`is_under_mark`/
+    `arrow_of`/`arrow_by_body` は enum のメソッドになり関数ごと消滅。
+
 ## テスト戦略
 
 - `tests/roundtrip.rs`: 実式コーパス(MDN「三つの有名な数式」= カルダノ・

@@ -5,7 +5,6 @@
 //! unicode-math toolchain (lualatex/xelatex).
 
 use crate::ast::{Node, Row};
-use crate::symbols::accent_info;
 
 pub fn row_to_latex(row: &Row) -> String {
     row.iter().map(node_to_latex).collect()
@@ -63,7 +62,7 @@ fn node_to_latex(node: &Node) -> String {
             // order the compact Accent uses.
             let mut s = row_to_latex(base);
             for &m in unders.iter().chain(overs.iter()) {
-                s = format!("\\{}{{{}}}", crate::symbols::wide_accent_latex(m), s);
+                s = format!("\\{}{{{}}}", m.wide_latex(), s);
             }
             s
         }
@@ -75,7 +74,7 @@ fn node_to_latex(node: &Node) -> String {
             // Canonical nesting: under-marks innermost, then over-marks.
             let mut s = sym_to_latex(*base).trim_end().to_string();
             for &m in unders.iter().chain(overs.iter()) {
-                let cmd = accent_info(m).map(|(_, l)| l).unwrap_or("hat");
+                let cmd = m.latex();
                 s = format!("\\{}{{{}}}", cmd, s);
             }
             s
@@ -124,7 +123,7 @@ fn node_to_latex(node: &Node) -> String {
         }
         Node::Arrow { op, over, under } => {
             // \xRightarrow / \xLeftarrow need mathtools.
-            let cmd = crate::symbols::arrow_of(*op).map_or("xrightarrow", |a| a.latex);
+            let cmd = op.latex();
             let mut s = format!("\\{}", cmd);
             if !under.is_empty() {
                 s.push_str(&format!("[{}]", row_to_latex(under)));
@@ -210,6 +209,7 @@ fn delim_latex(spec: char) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::symbols::Accent;
 
     #[test]
     fn serializes_basic_formula() {
@@ -242,7 +242,7 @@ mod tests {
         let root = vec![
             Node::Func("sin".into()),
             Node::Accent {
-                overs: vec!['⇀'],
+                overs: vec![Accent::Vec],
                 unders: vec![],
                 base: 'v',
             },

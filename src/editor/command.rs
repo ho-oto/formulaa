@@ -5,6 +5,8 @@
 
 use super::*;
 
+use crate::symbols::Arrow;
+
 impl Editor {
     /// Open the `\op` operator-name box at the cursor.
     pub fn op_start(&mut self, kind: BoxKind) {
@@ -197,7 +199,7 @@ pub enum Edit {
     Sym(char),
     /// Accent the atom before the cursor, or wrap the selection in a
     /// wide accent.
-    Accent(char),
+    Accent(crate::symbols::Accent),
     /// A delimiter pair with optional │ middles.
     Delim {
         left: char,
@@ -263,10 +265,10 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
         }),
         "xto" | "xfrom" | "xTo" | "xFrom" => ins(Node::Arrow {
             op: match cmd {
-                "xto" => '→',
-                "xfrom" => '←',
-                "xTo" => '⇒',
-                _ => '⇐',
+                "xto" => Arrow::To,
+                "xfrom" => Arrow::From,
+                "xTo" => Arrow::DoubleTo,
+                _ => Arrow::DoubleFrom,
             },
             over: vec![],
             under: vec![],
@@ -300,7 +302,7 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
                 })
             } else if is_func_name(cmd) {
                 ins(Node::Func(cmd.to_string()))
-            } else if let Some((mark, _)) = accent_by_name(cmd) {
+            } else if let Some(mark) = crate::symbols::Accent::of_name(cmd) {
                 Some(Edit::Accent(mark))
             } else if let Some((sup, arg)) = script_cmd(cmd) {
                 // \^z / \z^ / \^z^ (and the _ variants) insert a real

@@ -9,6 +9,7 @@ use crate::ast::{Field, Node, Row};
 pub use crate::symbols::scripts::{
     subscript_char, superscript_char, unsubscript_char, unsuperscript_char,
 };
+use crate::symbols::{Accent, DrawnForm};
 
 pub const CURSOR_CHAR: char = '▌'; // U+258C LEFT HALF BLOCK (view-only)
 /// Placeholder for an empty mandatory slot, and explicit base of a script
@@ -26,8 +27,8 @@ pub const OP_BAND: char = '┈'; // U+2508 BOX DRAWINGS LIGHT QUADRUPLE DASH HOR
 pub const DOUBLE_BODY: char = '═'; // U+2550 BOX DRAWINGS DOUBLE HORIZONTAL
 
 /// Body glyph for an arrow head.
-pub fn arrow_body(op: char) -> char {
-    crate::symbols::arrow_of(op).map_or(FRAC_BAR, |a| a.body)
+pub fn arrow_body(op: crate::symbols::Arrow) -> char {
+    op.body()
 }
 /// Grid lattice markers: a bare Array frames itself with box-drawing
 /// junctions at every crossing of its separator rows/columns including the
@@ -447,7 +448,7 @@ fn glue_alpha(n: &Node, right_edge: bool) -> bool {
     match n {
         Node::Sym(c) => c.is_alphabetic(),
         Node::Accent { overs, base, .. } => {
-            base.is_alphabetic() && !(right_edge && overs.contains(&'¨'))
+            base.is_alphabetic() && !(right_edge && overs.contains(&Accent::Ddot))
         }
         _ => false,
     }
@@ -817,7 +818,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             let b = render_row(base, None, true, ctx);
             // The ddot material ․․ needs two cells between the band
             // edges, so its band widens past a one-cell base.
-            let bw = if overs.contains(&'¨') {
+            let bw = if overs.contains(&Accent::Ddot) {
                 b.width().max(2)
             } else {
                 b.width().max(1)
@@ -827,53 +828,25 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             // body, line-like marks repeat; dot-like marks stay a
             // single centered glyph (low drawn forms, like the compact
             // accents).
-            let band_row = |m: char| {
+            let band_row = |m: Accent| {
                 let mut r = vec![OP_BAND; w];
-                match m {
-                    // Vec: the single centered halfwidth arrow, like
-                    // the other centered marks.
-                    '⇀' => r[w / 2] = '￫',
-                    // Hat / check: the single low arrowhead, centered
-                    // (the ╱╲ / ╲╱ slope pairs still read leniently).
-                    '^' => r[w / 2] = '˰',
-                    'ˇ' => r[w / 2] = '˯',
-                    // Both lines hug the base: the overline draws low
-                    // (_ sits at the bottom of its cell, like the √
-                    // overline), the underline draws high (¯ sits at
-                    // the top of its cell).
-                    '¯' => {
+                match m.drawn() {
+                    // Centered single glyphs (￫ ˰ ˯ ˳ ․).
+                    DrawnForm::Center(g) => r[w / 2] = g,
+                    // Fills hug the base across the width: the overline
+                    // draws low (_ like the √ overline), the underline
+                    // high (¯), the tildes with their hugging forms.
+                    DrawnForm::Fill(g) => {
                         for cell in r.iter_mut().take(w - 1).skip(1) {
-                            *cell = '_';
+                            *cell = g;
                         }
                     }
-                    '‗' => {
-                        for cell in r.iter_mut().take(w - 1).skip(1) {
-                            *cell = '¯';
-                        }
-                    }
-                    // The wide tildes fill with their hugging forms —
-                    // ˷ above, ˜ below — like the _ overline.
-                    '˜' => {
-                        for cell in r.iter_mut().take(w - 1).skip(1) {
-                            *cell = '˷';
-                        }
-                    }
-                    '˷' => {
-                        for cell in r.iter_mut().take(w - 1).skip(1) {
-                            *cell = '˜';
-                        }
-                    }
-                    // Single centered marks; ring and dot hug via their
-                    // low forms like the tilde fill, ddot is the two
-                    // leader dots side by side.
-                    '˚' => r[w / 2] = '˳',
-                    '˙' => r[w / 2] = '․',
-                    '¨' if bw >= 2 => {
+                    // The two leader dots side by side.
+                    DrawnForm::Dots => {
                         let s = (w - 2) / 2;
                         r[s] = '․';
                         r[s + 1] = '․';
                     }
-                    _ => r[w / 2] = m,
                 }
                 r
             };
@@ -909,24 +882,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             // as ․․ overhanging one column right of the base; the spill
             // column keeps a blank baseline so the pair reads back
             // uniquely.
-            let over_glyph = |m: char| match m {
-                '¯' => '_',
-                '˜' => '˷',
-                '^' => '˰',
-                'ˇ' => '˯',
-                '˚' => '˳',
-                '˙' => '․',
-                // The vec draws as a plain arrow (halfwidth ￫ U+FFEB,
-                // distinct from the → atom) to match the wide ┈──>┈.
-                '⇀' => '￫',
-                m => m,
-            };
-            let under_glyph = |m: char| match m {
-                '‗' => '¯',
-                '˷' => '˜',
-                m => m,
-            };
-            let w = if overs.contains(&'¨') { 2 } else { 1 };
+            let w = if overs.contains(&Accent::Ddot) { 2 } else { 1 };
             let cell = |c: char| {
                 let mut v = vec![c];
                 v.resize(w, ' ');
@@ -936,15 +892,15 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 .iter()
                 .rev()
                 .map(|&m| {
-                    if m == '¨' {
+                    if m == Accent::Ddot {
                         vec!['․', '․']
                     } else {
-                        cell(over_glyph(m))
+                        cell(m.glyph())
                     }
                 })
                 .collect();
             lines.push(cell(b));
-            lines.extend(unders.iter().map(|&m| cell(under_glyph(m))));
+            lines.extend(unders.iter().map(|&m| cell(m.glyph())));
             Block::new(lines, overs.len())
         }
 
@@ -1119,7 +1075,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             // Heads are ASCII < > (box-drawing bodies and Unicode arrow
             // glyphs rarely align in height across fonts).
             let mut body = vec![arrow_body(*op); w];
-            if *op == '←' || *op == '⇐' {
+            if !op.right() {
                 body[0] = '<';
             } else {
                 body[w - 1] = '>';

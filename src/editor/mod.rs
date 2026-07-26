@@ -8,7 +8,7 @@ use crate::ast::{Field, Node, Radical, Row, row_at, row_at_mut};
 pub type CursorPos = (Vec<(usize, Field)>, usize);
 /// A block-select target: (parent row path, node index).
 pub type BlockRef = (Vec<(usize, Field)>, usize);
-use crate::symbols::{accent_by_name, bigop_by_char, is_func_name, symbol_by_name};
+use crate::symbols::{Accent, bigop_by_char, is_func_name, symbol_by_name};
 
 mod command;
 mod modes;
@@ -955,12 +955,12 @@ impl Editor {
     }
 
     /// Wrap the atom just before the cursor with an accent mark.
-    fn apply_accent(&mut self, mark: char) {
+    fn apply_accent(&mut self, mark: Accent) {
         // A selection becomes the base of a stretchy accent (\widehat
         // over anything — the accent band rides above/below the block).
         if self.selection().is_some() {
             if let Some(content) = self.take_selection() {
-                let under = crate::symbols::is_under_mark(mark);
+                let under = mark.under();
                 let (overs, unders) = if under {
                     (vec![], vec![mark])
                 } else {
@@ -983,7 +983,7 @@ impl Editor {
         }
         let col = self.col;
         let row = self.cur_row_mut();
-        let under = crate::symbols::is_under_mark(mark);
+        let under = mark.under();
         match &mut row[col - 1] {
             Node::Sym(c) => {
                 let (mut overs, mut unders) = (vec![], vec![]);

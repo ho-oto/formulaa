@@ -6,6 +6,7 @@
 use mascii::ast::{Node, Radical, Row, normalize};
 use mascii::latex::row_to_latex;
 use mascii::render::{RenderCtx, render_row};
+use mascii::symbols::{Accent, Arrow};
 
 // ----- tiny DSL for building formulas -----
 
@@ -68,8 +69,8 @@ fn func(name: &str) -> Node {
     Node::Func(name.into())
 }
 
-fn acc(accent: char, base: char) -> Node {
-    if mascii::symbols::is_under_mark(accent) {
+fn acc(accent: Accent, base: char) -> Node {
+    if accent.under() {
         Node::Accent {
             overs: vec![],
             unders: vec![accent],
@@ -148,7 +149,7 @@ fn cauchy_schwarz_inequality() {
         n(paren(sum(cat(&[
             s("u"),
             n(sub(s("k"))),
-            n(acc('¯', 'v')),
+            n(acc(Accent::Bar, 'v')),
             n(sub(s("k"))),
         ])))),
         n(sup(s("2"))),
@@ -245,9 +246,9 @@ fn schroedinger_equation() {
 fn gauss_law() {
     let row = cat(&[
         n(bigop('∮', vec![], vec![])),
-        n(acc('⇀', 'E')),
+        n(acc(Accent::Vec, 'E')),
         s("⋅d"),
-        n(acc('⇀', 'A')),
+        n(acc(Accent::Vec, 'A')),
         s("="),
         n(frac(s("Q"), cat(&[s("ε"), n(sub(s("0")))]))),
     ]);
@@ -519,7 +520,7 @@ fn arrows_and_text() {
     let row = cat(&[
         s("A"),
         n(Node::Arrow {
-            op: '→',
+            op: Arrow::To,
             over: s("f"),
             under: s("n→∞"),
         }),

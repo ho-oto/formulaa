@@ -1,60 +1,165 @@
-//! Accent marks: the AST mark chars, their over/under side and their
-//! LaTeX commands. The drawn forms (¯ ˰ ￫ …) belong to render — this
-//! is the vocabulary, not the picture.
+//! Accent marks, as an enum: the AST stores `Accent`, and everything
+//! about a mark — its command name, LaTeX spelling, side, and the
+//! glyph its picture shows — is answered here. The old mark *chars*
+//! (`^` `⇀` `¨` …) are gone: they appeared in no picture and no
+//! output, so they were an untyped spelling of exactly this enum.
 
-/// Accent marks: (command name, mark char, is_under, latex command).
-/// Mark chars are RESERVED — they never occur as atoms, and over-marks are
-/// disjoint from under-marks; this is what makes a two-character column
-/// (mark stacked on base) unambiguous for the parser.
-/// AST mark chars; the hugging glyphs actually drawn are mapped in
-/// render (over_glyph/under_glyph) and parse (over_mark_at/under_mark_at).
-pub const ACCENTS: &[(&str, char, bool, &str)] = &[
-    ("hat", '^', false, "hat"),            // U+005E, drawn ˰ U+02F0
-    ("tilde", '˜', false, "tilde"),        // U+02DC (not the atom '~'), drawn ˷ U+02F7
-    ("bar", '¯', false, "bar"),            // U+00AF MACRON, drawn _ U+005F
-    ("vec", '⇀', false, "vec"),            // U+21C0 (not the atom '→'), drawn ￫ U+FFEB
-    ("dot", '˙', false, "dot"),            // U+02D9, drawn ․ U+2024
-    ("ddot", '¨', false, "ddot"),          // U+00A8, drawn ․․ (overhangs right)
-    ("check", 'ˇ', false, "check"),        // U+02C7 CARON, drawn ˯ U+02EF
-    ("ring", '˚', false, "mathring"),      // U+02DA, drawn ˳ U+02F3
-    ("underline", '‗', true, "underline"), // U+2017 DOUBLE LOW LINE, drawn ¯
-    // Under tilde: the AST marks form a swapped pair with the drawn
-    // glyphs — over tilde ˜ draws as the low ˷, under tilde ˷ draws as
-    // the high ˜ (both hug the base).
-    ("utilde", '˷', true, "utilde"), // U+02F7 LOW TILDE, drawn ˜
-];
-
-pub fn accent_by_name(name: &str) -> Option<(char, bool)> {
-    ACCENTS
-        .iter()
-        .find(|(n, ..)| *n == name)
-        .map(|&(_, c, under, _)| (c, under))
+/// An accent mark. Over-marks stack above the base, under-marks below;
+/// the two sets are disjoint, which is what makes a mark-on-base
+/// column unambiguous for the parser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Accent {
+    Hat,
+    Tilde,
+    Bar,
+    Vec,
+    Dot,
+    Ddot,
+    Check,
+    Ring,
+    Underline,
+    Utilde,
 }
 
-pub fn accent_info(mark: char) -> Option<(bool, &'static str)> {
-    ACCENTS
-        .iter()
-        .find(|&&(_, c, ..)| c == mark)
-        .map(|&(_, _, under, latex)| (under, latex))
+/// How a mark draws, both in the compact column and in the wide band.
+/// The same glyph serves both: a `Center` mark sits in one centered
+/// cell, a `Fill` repeats across the band's width (compact width = 1,
+/// so the two coincide), and the ddot pair `․․` overhangs one cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrawnForm {
+    Center(char),
+    Fill(char),
+    Dots,
 }
 
-/// LaTeX command for a stretchy (multi-char) accent; marks without a
-/// wide variant use their plain command (\dot etc. accept groups).
-pub fn wide_accent_latex(mark: char) -> &'static str {
-    match mark {
-        '^' => "widehat",
-        '˜' => "widetilde",
-        '¯' => "overline",
-        '⇀' => "overrightarrow",
-        'ˇ' => "widecheck",
-        m => accent_info(m).map(|(_, l)| l).unwrap_or("widehat"),
+impl Accent {
+    pub const ALL: [Accent; 10] = [
+        Accent::Hat,
+        Accent::Tilde,
+        Accent::Bar,
+        Accent::Vec,
+        Accent::Dot,
+        Accent::Ddot,
+        Accent::Check,
+        Accent::Ring,
+        Accent::Underline,
+        Accent::Utilde,
+    ];
+
+    /// The `\name` that applies this mark (also its LaTeX command,
+    /// except `\ring` -> `\mathring`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Accent::Hat => "hat",
+            Accent::Tilde => "tilde",
+            Accent::Bar => "bar",
+            Accent::Vec => "vec",
+            Accent::Dot => "dot",
+            Accent::Ddot => "ddot",
+            Accent::Check => "check",
+            Accent::Ring => "ring",
+            Accent::Underline => "underline",
+            Accent::Utilde => "utilde",
+        }
+    }
+
+    pub fn of_name(name: &str) -> Option<Accent> {
+        Accent::ALL.into_iter().find(|a| a.name() == name)
+    }
+
+    /// The LaTeX command for the single-char form.
+    pub fn latex(self) -> &'static str {
+        match self {
+            Accent::Ring => "mathring",
+            a => a.name(),
+        }
+    }
+
+    /// The LaTeX command for the stretchy (wide) form; marks without
+    /// one use their plain command (\dot etc. accept groups).
+    pub fn wide_latex(self) -> &'static str {
+        match self {
+            Accent::Hat => "widehat",
+            Accent::Tilde => "widetilde",
+            Accent::Bar => "overline",
+            Accent::Vec => "overrightarrow",
+            Accent::Check => "widecheck",
+            a => a.latex(),
+        }
+    }
+
+    /// Under-marks hug the base from below; everything else is over.
+    pub fn under(self) -> bool {
+        matches!(self, Accent::Underline | Accent::Utilde)
+    }
+
+    /// The glyph the picture shows. Every mark hugs its base: over
+    /// marks draw low in their cell (bar as `_` like the √ overline,
+    /// tilde as the low `˷`), under marks draw high (underline as `¯`,
+    /// utilde as the high `˜`) — so the tilde/bar pairs swap between
+    /// the over and under roles, and every drawn glyph names exactly
+    /// one (mark, side).
+    pub fn drawn(self) -> DrawnForm {
+        match self {
+            Accent::Hat => DrawnForm::Center('˰'), // U+02F0 LOW UP ARROWHEAD
+            Accent::Check => DrawnForm::Center('˯'), // U+02EF LOW DOWN ARROWHEAD
+            Accent::Ring => DrawnForm::Center('˳'), // U+02F3 LOW RING
+            Accent::Dot => DrawnForm::Center('․'), // U+2024 LEADER (not the '.' atom)
+            // Halfwidth ￫ U+FFEB, distinct from the → atom.
+            Accent::Vec => DrawnForm::Center('￫'),
+            Accent::Ddot => DrawnForm::Dots,
+            Accent::Bar => DrawnForm::Fill('_'),
+            Accent::Underline => DrawnForm::Fill('¯'),
+            Accent::Tilde => DrawnForm::Fill('˷'), // U+02F7 LOW TILDE
+            Accent::Utilde => DrawnForm::Fill('˜'), // U+02DC SMALL TILDE
+        }
+    }
+
+    /// The single glyph shown in a compact one-cell column (the ddot
+    /// is the one mark that is wider than its base — handled apart).
+    pub fn glyph(self) -> char {
+        match self.drawn() {
+            DrawnForm::Center(g) | DrawnForm::Fill(g) => g,
+            DrawnForm::Dots => '․',
+        }
+    }
+
+    /// Read a compact over-column glyph back to its mark (`․` is a
+    /// dot; the caller upgrades a `․․` pair to the ddot).
+    pub fn of_over_glyph(c: char) -> Option<Accent> {
+        Accent::ALL
+            .into_iter()
+            .find(|a| !a.under() && a.drawn() != DrawnForm::Dots && a.glyph() == c)
+    }
+
+    pub fn of_under_glyph(c: char) -> Option<Accent> {
+        Accent::ALL
+            .into_iter()
+            .find(|a| a.under() && a.glyph() == c)
     }
 }
 
-pub fn is_over_mark(c: char) -> bool {
-    ACCENTS.iter().any(|&(_, m, under, _)| m == c && !under)
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-pub fn is_under_mark(c: char) -> bool {
-    ACCENTS.iter().any(|&(_, m, under, _)| m == c && under)
+    /// Every drawn glyph names exactly one (mark, side) — the baseline
+    /// dive relies on the over/under classification being positionally
+    /// unambiguous — and the compact readers invert `drawn`.
+    #[test]
+    fn drawn_glyphs_are_unambiguous() {
+        for a in Accent::ALL {
+            assert_eq!(Accent::of_name(a.name()), Some(a));
+            match (a.under(), a.drawn()) {
+                (_, DrawnForm::Dots) => assert_eq!(a, Accent::Ddot),
+                (false, _) => assert_eq!(Accent::of_over_glyph(a.glyph()), Some(a)),
+                (true, _) => assert_eq!(Accent::of_under_glyph(a.glyph()), Some(a)),
+            }
+        }
+        // The tilde/bar pairs swap roles between the sides.
+        assert_eq!(Accent::of_over_glyph('˷'), Some(Accent::Tilde));
+        assert_eq!(Accent::of_under_glyph('˜'), Some(Accent::Utilde));
+        assert_eq!(Accent::of_over_glyph('_'), Some(Accent::Bar));
+        assert_eq!(Accent::of_under_glyph('¯'), Some(Accent::Underline));
+    }
 }

@@ -53,9 +53,9 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 | `src/symbols/` | **全テーブルの家**(1関心1ファイル、`symbols::X` でフラットに再輸出) |
 | ├ `atoms.rs` | 厳選原子表 `ATOMS`(**char キー**: LaTeX 出力綴り+`kind` Sym/BigOp)・統合 `ALIASES`(記号綴りもコマンド綴りもここ)・予約グリフ・`is_atom` |
 | ├ `funcs.rs` | 立体関数 `FUNCS`(limits/spaced)。∑系は `ATOMS` の kind に統合 |
-| ├ `accents.rs` | アクセントマーク表 |
+| ├ `accents.rs` | `Accent` enum(名前・LaTeX・側・描画形 `drawn()` を1箇所で) |
 | ├ `delims.rs` | **括弧表 `DELIMS`**(仕様文字・1行/縦グリフ・LaTeX を1行に。parse/render/latex がここを引く) |
-| ├ `arrows.rs` | 矢印表 `ARROWS`(op・向き・胴体・LaTeX の双射) |
+| ├ `arrows.rs` | `Arrow` enum(向き・胴体・LaTeX の双射) |
 | ├ `scripts.rs` | インライン上付き/下付きの双射表 |
 | └ `ext.rs` | **生成物**(ho-oto/mathematical-symbols 由来、480件)。phf マップ(順序不要・重複はビルドエラー)。手編集しない |
 | ├ `alphabets.rs` | スタイル族(12族28綴り×前置/後置)を規則+例外表で。LaTeX 逆引き(`𝔸`→`\mathbb{A}`)もここ |
@@ -91,7 +91,8 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
   画面だけ ▌ を上書き描画)。パース対象はカーソルなし描画のみ。
   render_node の新アームでは caret の伝搬を忘れない(cancel と同じ
   オフセットで写す。忘れると tests/ui.rs の caret 生存チェックが落ちる)。
-- `Sqrt` は `index: u8`(2/3/4 = √∛∜)を持つ。`Node::Accent` の base は
+- `Sqrt` の `index`・矢印の `op`・アクセントの `overs`/`unders` は
+  enum(`Radical`/`Arrow`/`Accent`)。`Node::Accent` の base は
   1 文字(Row ではない)。
 - 括弧は `Node::Delim{left,right,mids,segs}` に統一(旧 Paren/Matrix は廃止)。
   `Node::Array` はどこでも格子(裸なら ┌┬┐ フルフレーム、デリミタの単独 seg

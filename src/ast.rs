@@ -46,8 +46,8 @@ pub enum Node {
     /// picture cannot distinguish \hat{\underline{x}} from
     /// \underline{\hat{x}}, so the AST must not either.
     Accent {
-        overs: Vec<char>,
-        unders: Vec<char>,
+        overs: Vec<crate::symbols::Accent>,
+        unders: Vec<crate::symbols::Accent>,
         base: char,
     },
     /// Stretchy accent over/under a multi-character base: a ┈band┈
@@ -58,8 +58,8 @@ pub enum Node {
     /// cursor-editable (wrap a selection; re-edit by deleting).
     /// A one-char base with a single over mark normalizes to Accent.
     WideAccent {
-        overs: Vec<char>,
-        unders: Vec<char>,
+        overs: Vec<crate::symbols::Accent>,
+        unders: Vec<crate::symbols::Accent>,
         base: Row,
     },
     Frac {
@@ -115,7 +115,7 @@ pub enum Node {
     /// pointing end, labels over/under spanning its extent (same
     /// range-band idea as ┈). `op` is → ← ⇒ or ⇐.
     Arrow {
-        op: char,
+        op: crate::symbols::Arrow,
         over: Row,
         under: Row,
     },

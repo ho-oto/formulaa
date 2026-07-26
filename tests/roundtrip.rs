@@ -14,6 +14,7 @@ use mascii::ast::{Node, Radical, Row, normalize, strip_spacers};
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
 use mascii::render::{RenderCtx, render_root};
+use mascii::symbols::{Accent, Arrow};
 
 // ----- tiny DSL for building formulas -----
 
@@ -80,8 +81,8 @@ fn func(name: &str) -> Node {
     Node::Func(name.into())
 }
 
-fn acc(accent: char, base: char) -> Node {
-    if mascii::symbols::is_under_mark(accent) {
+fn acc(accent: Accent, base: char) -> Node {
+    if accent.under() {
         Node::Accent {
             overs: vec![],
             unders: vec![accent],
@@ -268,18 +269,18 @@ fn dotted_roman_runs() {
 /// Stretchy accents: a band whose limit region holds only the mark.
 #[test]
 fn wide_accents() {
-    let wa = |over: Option<char>, under: Option<char>, base: Row| Node::WideAccent {
+    let wa = |over: Option<Accent>, under: Option<Accent>, base: Row| Node::WideAccent {
         overs: over.into_iter().collect(),
         unders: under.into_iter().collect(),
         base,
     };
-    let row = n(wa(Some('^'), None, s("abc")));
+    let row = n(wa(Some(Accent::Hat), None, s("abc")));
     roundtrip("widehat", &row);
     let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
     assert_eq!(aa, "┈┈˰┈┈\n 𝑎𝑏𝑐");
     assert_eq!(row_to_latex(&normalize(&row)), "\\widehat{abc}");
     // Both sides at once.
-    let row = n(wa(Some('⇀'), Some('‗'), s("AB")));
+    let row = n(wa(Some(Accent::Vec), Some(Accent::Underline), s("AB")));
     roundtrip("vec-underline", &row);
     assert_eq!(
         row_to_latex(&normalize(&row)),
@@ -287,25 +288,25 @@ fn wide_accents() {
     );
     // Under tilde (\utilde): the ˜/˷ pair swaps between AST mark and
     // drawn glyph; the wide band fills with the high ˜ below.
-    let row = n(wa(None, Some('˷'), s("AB")));
+    let row = n(wa(None, Some(Accent::Utilde), s("AB")));
     roundtrip("wide-utilde", &row);
     let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
     assert_eq!(aa, " 𝐴𝐵\n┈˜˜┈");
     assert_eq!(row_to_latex(&normalize(&row)), "\\utilde{AB}");
-    let row = n(wa(Some('˜'), Some('˷'), s("xy")));
+    let row = n(wa(Some(Accent::Tilde), Some(Accent::Utilde), s("xy")));
     roundtrip("tilde-utilde", &row);
     // Stacked hats: the outer band's ╱ can sit directly above the inner
     // band's ╲, which must not read as an angle-delimiter turn (the
     // angle-turn guard checks the ╱'s right neighbor for its partner ╲).
-    let inner = wa(Some('^'), Some('‗'), s("Aβ"));
-    let row = n(wa(Some('^'), None, cat(&[n(inner), s("1")])));
+    let inner = wa(Some(Accent::Hat), Some(Accent::Underline), s("Aβ"));
+    let row = n(wa(Some(Accent::Hat), None, cat(&[n(inner), s("1")])));
     roundtrip("stacked-hats", &row);
     // A one-char base with one over mark is the compact Accent.
-    let row = n(wa(Some('^'), None, s("x")));
+    let row = n(wa(Some(Accent::Hat), None, s("x")));
     assert_eq!(
         normalize(&row),
         vec![Node::Accent {
-            overs: vec!['^'],
+            overs: vec![Accent::Hat],
             unders: vec![],
             base: 'x'
         }]
@@ -313,8 +314,8 @@ fn wide_accents() {
     // A struck accent still carries a band, so it needs the same
     // separation space as a bare one (the band has no closing glyph).
     let row = cat(&[
-        n(sup(n(wa(None, Some('‗'), s("px"))))),
-        n(cancel(n(wa(Some('˜'), None, s("bc"))))),
+        n(sup(n(wa(None, Some(Accent::Underline), s("px"))))),
+        n(cancel(n(wa(Some(Accent::Tilde), None, s("bc"))))),
     ]);
     roundtrip("band-next-to-struck-band", &row);
     // A markless wide accent is just its base (spliced).
@@ -427,7 +428,7 @@ fn sqrt_box_overline() {
     let row = cat(&[
         n(sqrt(s("2"))),
         n(sup(n(Node::Arrow {
-            op: '→',
+            op: Arrow::To,
             over: vec![],
             under: vec![],
         }))),
@@ -623,7 +624,7 @@ fn cauchy_schwarz_inequality() {
         n(paren(sum(cat(&[
             s("u"),
             n(sub(s("k"))),
-            n(acc('¯', 'v')),
+            n(acc(Accent::Bar, 'v')),
             n(sub(s("k"))),
         ])))),
         n(sup(s("2"))),
@@ -724,9 +725,9 @@ fn schroedinger_equation() {
 fn gauss_law() {
     let row = cat(&[
         n(bigop('∮', vec![], vec![])),
-        n(acc('⇀', 'E')),
+        n(acc(Accent::Vec, 'E')),
         s("⋅d"),
-        n(acc('⇀', 'A')),
+        n(acc(Accent::Vec, 'A')),
         s("="),
         n(frac(s("Q"), cat(&[s("ε"), n(sub(s("0")))]))),
     ]);
@@ -1044,26 +1045,29 @@ fn text_runs() {
 /// Labeled stretchy arrows (\xrightarrow / \xleftarrow).
 #[test]
 fn labeled_arrows() {
-    let arrow = |op: char, over: Row, under: Row| Node::Arrow { op, over, under };
+    let arrow = |op: Arrow, over: Row, under: Row| Node::Arrow { op, over, under };
     // A --f--> B, with an under label too, and a left arrow.
     roundtrip(
         "xrightarrow",
-        &cat(&[s("A"), n(arrow('→', s("f"), vec![])), s("B")]),
+        &cat(&[s("A"), n(arrow(Arrow::To, s("f"), vec![])), s("B")]),
     );
     roundtrip(
         "xarrow-both",
         &cat(&[
             s("X"),
-            n(arrow('→', cat(&[s("g"), n(sup(s("2")))]), s("n→∞"))),
+            n(arrow(Arrow::To, cat(&[s("g"), n(sup(s("2")))]), s("n→∞"))),
             s("Y"),
-            n(arrow('←', vec![], s("h"))),
+            n(arrow(Arrow::From, vec![], s("h"))),
             s("Z"),
         ]),
     );
     // Double arrows, and a fraction next to an arrow atom (space-separated).
     roundtrip(
         "double-arrows",
-        &cat(&[n(arrow('⇒', s("f"), vec![])), n(arrow('⇐', vec![], s("g")))]),
+        &cat(&[
+            n(arrow(Arrow::DoubleTo, s("f"), vec![])),
+            n(arrow(Arrow::DoubleFrom, vec![], s("g"))),
+        ]),
     );
     roundtrip(
         "frac-then-arrow-atom",
@@ -1072,7 +1076,10 @@ fn labeled_arrows() {
     // Adjacent arrows must not fuse their bodies.
     roundtrip(
         "adjacent-arrows",
-        &cat(&[n(arrow('←', s("a"), vec![])), n(arrow('→', s("b"), vec![]))]),
+        &cat(&[
+            n(arrow(Arrow::From, s("a"), vec![])),
+            n(arrow(Arrow::To, s("b"), vec![])),
+        ]),
     );
 }
 
@@ -1082,14 +1089,14 @@ fn stacked_accents() {
     // \hat{\vec{a}} and a bar over an underlined x.
     let row = cat(&[
         n(Node::Accent {
-            overs: vec!['⇀', '^'],
+            overs: vec![Accent::Vec, Accent::Hat],
             unders: vec![],
             base: 'a',
         }),
         s("+"),
         n(Node::Accent {
-            overs: vec!['¯'],
-            unders: vec!['‗'],
+            overs: vec![Accent::Bar],
+            unders: vec![Accent::Underline],
             base: 'x',
         }),
     ]);
@@ -1097,7 +1104,7 @@ fn stacked_accents() {
     // Triple stack next to a fraction (baseline stripping goes deep).
     let row = cat(&[
         n(Node::Accent {
-            overs: vec!['˙', '¯', '^'],
+            overs: vec![Accent::Dot, Accent::Bar, Accent::Hat],
             unders: vec![],
             base: 'v',
         }),
@@ -1110,48 +1117,48 @@ fn stacked_accents() {
     // draws as ․․ overhanging one blank-baseline column to the right.
     let row = cat(&[
         n(Node::Accent {
-            overs: vec!['¯'],
+            overs: vec![Accent::Bar],
             unders: vec![],
             base: 'x',
         }),
         n(Node::Accent {
-            overs: vec!['^'],
+            overs: vec![Accent::Hat],
             unders: vec![],
             base: 'v',
         }),
         n(Node::Accent {
-            overs: vec!['˜'],
+            overs: vec![Accent::Tilde],
             unders: vec![],
             base: 'w',
         }),
         n(Node::Accent {
-            overs: vec!['ˇ'],
+            overs: vec![Accent::Check],
             unders: vec![],
             base: 'c',
         }),
         n(Node::Accent {
-            overs: vec!['˚'],
+            overs: vec![Accent::Ring],
             unders: vec![],
             base: 'r',
         }),
         n(Node::Accent {
-            overs: vec!['˙'],
+            overs: vec![Accent::Dot],
             unders: vec![],
             base: 'd',
         }),
         n(Node::Accent {
-            overs: vec!['¨'],
+            overs: vec![Accent::Ddot],
             unders: vec![],
             base: 'e',
         }),
         n(Node::Accent {
-            overs: vec!['⇀'],
+            overs: vec![Accent::Vec],
             unders: vec![],
             base: 'u',
         }),
         n(Node::Accent {
             overs: vec![],
-            unders: vec!['‗'],
+            unders: vec![Accent::Underline],
             base: 'y',
         }),
     ]);
@@ -1163,7 +1170,7 @@ fn stacked_accents() {
     // edge), and adjacent dotted atoms keep their own dots apart.
     let row = cat(&[
         n(Node::Accent {
-            overs: vec!['¨', '⇀'],
+            overs: vec![Accent::Ddot, Accent::Vec],
             unders: vec![],
             base: 'E',
         }),
@@ -1172,12 +1179,12 @@ fn stacked_accents() {
     roundtrip("ddot-then-mathrm", &row);
     let row = cat(&[
         n(Node::Accent {
-            overs: vec!['¨'],
+            overs: vec![Accent::Ddot],
             unders: vec![],
             base: 'x',
         }),
         n(Node::Accent {
-            overs: vec!['¨'],
+            overs: vec![Accent::Ddot],
             unders: vec![],
             base: 'y',
         }),
@@ -1194,7 +1201,7 @@ fn stacked_accents() {
             index: Radical::Sqrt,
         }),
         n(Node::Accent {
-            overs: vec!['¯'],
+            overs: vec![Accent::Bar],
             unders: vec![],
             base: 'x',
         }),
@@ -1344,12 +1351,21 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             0 => Node::Func(["sin", "cos", "log", "exp"][rng.below(4)].into()),
             1 => {
                 // 1–2 marks, mixing over and under stacks.
-                let marks = ['^', '¯', '˙', '¨', '⇀', '˜', '‗', '˷'];
+                let marks = [
+                    Accent::Hat,
+                    Accent::Bar,
+                    Accent::Dot,
+                    Accent::Ddot,
+                    Accent::Vec,
+                    Accent::Tilde,
+                    Accent::Underline,
+                    Accent::Utilde,
+                ];
                 let base = ['x', 'v', 'a', 'E'][rng.below(4)];
                 let (mut overs, mut unders) = (vec![], vec![]);
                 for _ in 0..1 + rng.below(2) {
                     let m = marks[rng.below(marks.len())];
-                    if m == '‗' || m == '˷' {
+                    if m.under() {
                         unders.push(m)
                     } else {
                         overs.push(m)
@@ -1443,7 +1459,16 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
         },
         13 => {
             // Stretchy accent; the band rides over any base block.
-            let overs = ['^', '˜', '¯', '⇀', '˙', '¨', 'ˇ', '˚'];
+            let overs = [
+                Accent::Hat,
+                Accent::Tilde,
+                Accent::Bar,
+                Accent::Vec,
+                Accent::Dot,
+                Accent::Ddot,
+                Accent::Check,
+                Accent::Ring,
+            ];
             let base: Row = if rng.below(3) == 0 {
                 gen_row(rng, d, 3)
             } else {
@@ -1451,9 +1476,9 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
                     .map(|_| Node::Sym(ATOMS[rng.below(ATOMS.len())]))
                     .collect()
             };
-            let unders = ['‗', '˷'];
+            let unders = [Accent::Underline, Accent::Utilde];
             // Marks stack, so generate 0-2 per side.
-            let pick = |rng: &mut Rng, pool: &[char], n: usize| -> Vec<char> {
+            let pick = |rng: &mut Rng, pool: &[Accent], n: usize| -> Vec<Accent> {
                 let mut v = Vec::new();
                 for _ in 0..n {
                     v.push(pool[rng.below(pool.len())]);
@@ -1505,7 +1530,7 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             label: gen_row(rng, d, 2),
         },
         9 => Node::Arrow {
-            op: ['→', '←', '⇒', '⇐'][rng.below(4)],
+            op: Arrow::ALL[rng.below(4)],
             over: gen_row(rng, d, 3),
             under: gen_row(rng, d, 2),
         },
