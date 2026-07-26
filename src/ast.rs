@@ -185,9 +185,12 @@ impl Radical {
     }
 }
 
-pub const DELIM_SPECS: &[char] = &[
-    '(', ')', '[', ']', '{', '}', '⟨', '⟩', '|', '.', '⌈', '⌉', '⌊', '⌋',
-];
+/// Is `c` a valid delimiter spec for `Node::Delim` (`.` = the null
+/// delimiter, `|` = the vertical bar)? Everything but the angles comes
+/// from `symbols::DELIMS`, so a new pair is described in one place.
+pub fn is_delim_spec(c: char) -> bool {
+    c == '⟨' || c == '⟩' || crate::symbols::delim_of(c).is_some()
+}
 
 /// Identifies one editable slot inside a structure node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -254,6 +257,7 @@ impl Node {
             (Node::Brace { arg, .. }, Field::BraceArg) => arg,
             (Node::Brace { label, .. }, Field::BraceLabel) => label,
             (Node::Delim { segs, .. }, Field::Seg(i)) => &segs[i],
+            (Node::Norm { arg }, Field::Seg(0)) => arg,
             (Node::Cancel { arg }, Field::CancelArg) => arg,
             (Node::Array { cells, .. }, Field::Cell(i)) => &cells[i],
             _ => panic!("field {:?} does not belong to node {:?}", f, self),
@@ -274,6 +278,7 @@ impl Node {
             (Node::Brace { arg, .. }, Field::BraceArg) => arg,
             (Node::Brace { label, .. }, Field::BraceLabel) => label,
             (Node::Delim { segs, .. }, Field::Seg(i)) => &mut segs[i],
+            (Node::Norm { arg }, Field::Seg(0)) => arg,
             (Node::Cancel { arg }, Field::CancelArg) => arg,
             (Node::Array { cells, .. }, Field::Cell(i)) => &mut cells[i],
             (node, f) => panic!("field {:?} does not belong to node {:?}", f, node),

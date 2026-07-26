@@ -6,6 +6,9 @@
 //! change them in lockstep and keep the roundtrip tests green.
 
 use crate::ast::{Field, Node, Row};
+pub use crate::symbols::scripts::{
+    subscript_char, superscript_char, unsubscript_char, unsuperscript_char,
+};
 
 pub const CURSOR_CHAR: char = '▌'; // U+258C LEFT HALF BLOCK (view-only)
 /// Placeholder for an empty mandatory slot, and explicit base of a script
@@ -24,11 +27,7 @@ pub const DOUBLE_BODY: char = '═'; // U+2550 BOX DRAWINGS DOUBLE HORIZONTAL
 
 /// Body glyph for an arrow head.
 pub fn arrow_body(op: char) -> char {
-    if op == '⇒' || op == '⇐' {
-        DOUBLE_BODY
-    } else {
-        FRAC_BAR
-    }
+    crate::symbols::arrow_of(op).map_or(FRAC_BAR, |a| a.body)
 }
 /// Grid lattice markers: a bare Array frames itself with box-drawing
 /// junctions at every crossing of its separator rows/columns including the
@@ -315,81 +314,6 @@ fn display_char(c: char, ctx: &RenderCtx) -> char {
         c if ctx.italic => italic_char(c),
         c => c,
     }
-}
-
-pub fn superscript_char(c: char) -> Option<char> {
-    Some(match c {
-        '0' => '⁰',
-        '1' => '¹',
-        '2' => '²',
-        '3' => '³',
-        '4' => '⁴',
-        '5' => '⁵',
-        '6' => '⁶',
-        '7' => '⁷',
-        '8' => '⁸',
-        '9' => '⁹',
-        '+' => '⁺',
-        '-' => '⁻',
-        '=' => '⁼',
-        '(' => '⁽',
-        ')' => '⁾',
-        'n' => 'ⁿ',
-        'i' => 'ⁱ',
-        _ => return None,
-    })
-}
-
-pub fn subscript_char(c: char) -> Option<char> {
-    Some(match c {
-        '0' => '₀',
-        '1' => '₁',
-        '2' => '₂',
-        '3' => '₃',
-        '4' => '₄',
-        '5' => '₅',
-        '6' => '₆',
-        '7' => '₇',
-        '8' => '₈',
-        '9' => '₉',
-        '+' => '₊',
-        '-' => '₋',
-        '=' => '₌',
-        '(' => '₍',
-        ')' => '₎',
-        'a' => 'ₐ',
-        'e' => 'ₑ',
-        'h' => 'ₕ',
-        'i' => 'ᵢ',
-        'j' => 'ⱼ',
-        'k' => 'ₖ',
-        'l' => 'ₗ',
-        'm' => 'ₘ',
-        'n' => 'ₙ',
-        'o' => 'ₒ',
-        'p' => 'ₚ',
-        'r' => 'ᵣ',
-        's' => 'ₛ',
-        't' => 'ₜ',
-        'u' => 'ᵤ',
-        'v' => 'ᵥ',
-        'x' => 'ₓ',
-        _ => return None,
-    })
-}
-
-pub fn unsuperscript_char(c: char) -> Option<char> {
-    "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿⁱ"
-        .chars()
-        .position(|x| x == c)
-        .map(|i| "0123456789+-=()ni".chars().nth(i).unwrap())
-}
-
-pub fn unsubscript_char(c: char) -> Option<char> {
-    "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ"
-        .chars()
-        .position(|x| x == c)
-        .map(|i| "0123456789+-=()aehijklmnoprstuvx".chars().nth(i).unwrap())
 }
 
 /// If every node in `row` is a plain char with an inline script equivalent,
@@ -1658,122 +1582,56 @@ fn render_lattice(
 /// always sit on the baseline row — that is what lets the parser read the
 /// baseline straight off a brace/angle column.
 fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
-    if h == 1 {
-        return vec![match spec {
-            // Vertical bars reuse the bracket extension pieces ⎢ ⎥
-            // (U+23A2/23A5, like ceil/floor reuse the corners): the
-            // ⎸ ⎹ box lines sat oddly in most fonts.
-            '|' => {
-                if left {
-                    '⎢'
-                } else {
-                    '⎥'
-                }
-            }
-            // Null delimiters: dashed ghosts (┆ U+2506 TRIPLE DASH /
-            // ┊ U+250A QUADRUPLE DASH VERTICAL, matching the ┈ band).
-            '.' => {
-                if left {
-                    '┆'
-                } else {
-                    '┊'
-                }
-            }
-            c => c,
-        }];
+    // Angles are drawn from diagonal arms rather than stacked pieces,
+    // so they are the one family the table does not describe; a norm
+    // keeps the same ‖ at every height.
+    match spec {
+        '\u{27e8}' | '\u{27e9}' => {
+            let (up, down) = if spec == '\u{27e8}' {
+                ('\u{2571}', '\u{2572}')
+            } else {
+                ('\u{2572}', '\u{2571}')
+            };
+            return (0..h)
+                .map(|r| match r.cmp(&bl) {
+                    std::cmp::Ordering::Equal => spec,
+                    std::cmp::Ordering::Less => up,
+                    std::cmp::Ordering::Greater => down,
+                })
+                .collect();
+        }
+        '\u{2016}' => return vec!['\u{2016}'; h],
+        _ => {}
     }
+    let Some((d, spec_side)) = crate::symbols::delim_of(spec) else {
+        return vec![spec; h];
+    };
+    // A side-distinct spec names its own side, which is what makes a
+    // mismatched pair like `(0,1]` render correctly. `|` and `.` spell
+    // both sides the same, so there the caller's side decides.
+    let is_left = if d.spec.0 == d.spec.1 {
+        left
+    } else {
+        spec_side
+    };
+    if h == 1 {
+        return vec![if is_left { d.short.0 } else { d.short.1 }];
+    }
+    let (top, ext, bot) = d.tall[usize::from(!is_left)];
     (0..h)
-        .map(|r| match spec {
-            '(' | ')' | '[' | ']' => {
-                let (top, ext, bot) = match spec {
-                    '(' => ('⎛', '⎜', '⎝'),
-                    ')' => ('⎞', '⎟', '⎠'),
-                    '[' => ('⎡', '⎢', '⎣'),
-                    _ => ('⎤', '⎥', '⎦'),
-                };
-                if r == 0 {
-                    top
-                } else if r == h - 1 {
-                    bot
+        .map(|r| match d.vertex {
+            // A brace shows its vertex on the baseline row, ahead of
+            // the corners.
+            Some(vx) if r == bl => {
+                if is_left {
+                    vx.0
                 } else {
-                    ext
+                    vx.1
                 }
             }
-            '{' | '}' => {
-                let (top, mid, bot) = if spec == '{' {
-                    ('⎧', '⎨', '⎩')
-                } else {
-                    ('⎫', '⎬', '⎭')
-                };
-                if r == bl {
-                    mid
-                } else if r == 0 {
-                    top
-                } else if r == h - 1 {
-                    bot
-                } else {
-                    '⎪'
-                }
-            }
-            '⟨' => match r.cmp(&bl) {
-                std::cmp::Ordering::Equal => '⟨',
-                std::cmp::Ordering::Less => '╱',
-                std::cmp::Ordering::Greater => '╲',
-            },
-            '⟩' => match r.cmp(&bl) {
-                std::cmp::Ordering::Equal => '⟩',
-                std::cmp::Ordering::Less => '╲',
-                std::cmp::Ordering::Greater => '╱',
-            },
-            '|' => {
-                if left {
-                    '⎢'
-                } else {
-                    '⎥'
-                }
-            }
-            // Norm: the same ‖ (U+2016 DOUBLE VERTICAL LINE) stacked on
-            // both sides (sides resolve by per-row parity, so direct
-            // norm-in-norm is unsupported).
-            '‖' => '‖',
-            // Ceil/floor: the bracket pieces with one corner missing —
-            // ⎡+⎢ without the foot, ⎢+⎣ without the head. The corner
-            // set present in a column decides the family.
-            '⌈' => {
-                if r == 0 {
-                    '⎡'
-                } else {
-                    '⎢'
-                }
-            }
-            '⌉' => {
-                if r == 0 {
-                    '⎤'
-                } else {
-                    '⎥'
-                }
-            }
-            '⌊' => {
-                if r == h - 1 {
-                    '⎣'
-                } else {
-                    '⎢'
-                }
-            }
-            '⌋' => {
-                if r == h - 1 {
-                    '⎦'
-                } else {
-                    '⎥'
-                }
-            }
-            _ => {
-                if left {
-                    '┆'
-                } else {
-                    '┊'
-                }
-            }
+            _ if r == 0 => top,
+            _ if r == h - 1 => bot,
+            _ => ext,
         })
         .collect()
 }

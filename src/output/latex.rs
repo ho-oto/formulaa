@@ -124,12 +124,7 @@ fn node_to_latex(node: &Node) -> String {
         }
         Node::Arrow { op, over, under } => {
             // \xRightarrow / \xLeftarrow need mathtools.
-            let cmd = match op {
-                '←' => "xleftarrow",
-                '⇒' => "xRightarrow",
-                '⇐' => "xLeftarrow",
-                _ => "xrightarrow",
-            };
+            let cmd = crate::symbols::arrow_of(*op).map_or("xrightarrow", |a| a.latex);
             let mut s = format!("\\{}", cmd);
             if !under.is_empty() {
                 s.push_str(&format!("[{}]", row_to_latex(under)));
@@ -199,19 +194,16 @@ fn array_body(cols: usize, cells: &[Row]) -> String {
 }
 
 fn delim_latex(spec: char) -> String {
-    match spec {
-        '{' => "\\{".into(),
-        '}' => "\\}".into(),
-        '⟨' => "\\langle ".into(),
-        '⟩' => "\\rangle ".into(),
-        '⌈' => "\\lceil ".into(),
-        '⌉' => "\\rceil ".into(),
-        '⌊' => "\\lfloor ".into(),
-        '⌋' => "\\rfloor ".into(),
-        '‖' => "\\|".into(),
-        '|' => "|".into(),
-        '.' => ".".into(),
-        c => c.to_string(),
+    match crate::symbols::delim_of(spec) {
+        Some((d, true)) => d.latex.0.into(),
+        Some((d, false)) => d.latex.1.into(),
+        // The angles are not in the table (their geometry shares
+        // nothing with the stacked pairs).
+        None => match spec {
+            '⟨' => "\\langle ".into(),
+            '⟩' => "\\rangle ".into(),
+            c => c.to_string(),
+        },
     }
 }
 

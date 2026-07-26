@@ -45,14 +45,24 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 | `src/ast.rs` | 数式 AST(`Node`/`Row`/`Field`)、カーソルパス、`normalize` |
 | `src/render.rs` | AST → 2D ブロック(基線つき)。正準AAの生成側 |
 | `src/parse.rs` | AA → AST。領域+基線の再帰下降。正準AAの受理側+寛容入力 |
-| `src/editor.rs` | 構造エディタ(LyX 型カーソル、コマンド実行) |
+| `src/editor/mod.rs` | 構造エディタ(LyX 型カーソル、挿入・移動・削除・選択) |
+| `src/editor/modes.rs` | ^F フリーカーソル・^G ジャンプ・^B ブロック選択・表示装飾 |
+| `src/editor/command.rs` | **`Edit` enum + `resolve`/`apply`**(綴り→編集の純粋解決と適用の分離)、`\op` 名前ボックス |
 | `src/input.rs` | **共有キーマップ**(`Key`/`Effect`/`Editor::input`)。TUI と wasm は変換だけ |
 | `src/output/latex.rs` | AST → LaTeX(crate ルートの `mascii::latex` で再輸出) |
-| `src/symbols/mod.rs` | 厳選シンボル表・関数表 FUNCS(limits/LaTeX フラグ付き)・BIG_OPS・アクセント表・予約グリフ判定 |
-| `src/symbols/ext.rs` | **生成物**(ho-oto/mathematical-symbols 由来、480件)。phf マップ(順序不要・重複はビルドエラー)。手編集しない |
-| `src/symbols/alphabets.rs` | スタイル族(`\bbR` `\Afrk` `\bfsf3`、12族28綴り×前置/後置)を規則+例外表で。LaTeX 逆引き(`𝔸`→`\mathbb{A}`)もここ |
+| `src/symbols/` | **全テーブルの家**(1関心1ファイル、`symbols::X` でフラットに再輸出) |
+| ├ `atoms.rs` | 厳選原子表 `ATOMS`(**char キー**: LaTeX 出力綴り+`kind` Sym/BigOp)・統合 `ALIASES`(記号綴りもコマンド綴りもここ)・予約グリフ・`is_atom` |
+| ├ `funcs.rs` | 立体関数 `FUNCS`(limits/spaced)。∑系は `ATOMS` の kind に統合 |
+| ├ `accents.rs` | アクセントマーク表 |
+| ├ `delims.rs` | **括弧表 `DELIMS`**(仕様文字・1行/縦グリフ・LaTeX を1行に。parse/render/latex がここを引く) |
+| ├ `arrows.rs` | 矢印表 `ARROWS`(op・向き・胴体・LaTeX の双射) |
+| ├ `scripts.rs` | インライン上付き/下付きの双射表 |
+| └ `ext.rs` | **生成物**(ho-oto/mathematical-symbols 由来、480件)。phf マップ(順序不要・重複はビルドエラー)。手編集しない |
+| ├ `alphabets.rs` | スタイル族(12族28綴り×前置/後置)を規則+例外表で。LaTeX 逆引き(`𝔸`→`\mathbb{A}`)もここ |
 | `src/theme.rs` | TUI の配色定数(bin 専用) |
-| `src/main.rs` | TUI(ratatui)+ CLI サブコマンド |
+| `src/main.rs` | メインループ + CLI サブコマンド |
+| `src/tui.rs` | 描画(レイアウト・スクロール・マーカー/選択の塗り・セル装飾) |
+| `src/guard.rs` | 編集ごとのラウンドトリップ自動検査とレポート出力 |
 | `tests/roundtrip.rs` | 実式コーパス + ランダムプロパティテスト |
 | `tests/ui.rs` | キー駆動 UI テスト(キースクリプト DSL + ランダムキー列。`MASCII_UI_PROP_N`/`_SEED`) |
 | `tools/merge_math_font.py` | JuliaMono から不足数式グリフを補う合成フォント生成(fontTools) |

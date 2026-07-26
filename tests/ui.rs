@@ -258,6 +258,16 @@ fn aliases_resolve_to_the_same_command() {
 }
 
 #[test]
+fn typing_inside_a_norm_works() {
+    // Regression: Norm's field accessors were missing their Seg(0)
+    // arms, so entering the node and typing panicked.
+    let mut ed = Editor::new();
+    ed.execute("norm");
+    ed.input(Key::Char('x'), false, false);
+    assert_eq!(latex(&ed), "\\left\\|x\\right\\|");
+}
+
+#[test]
 fn cancel_wraps_the_selection() {
     // Shift-selection then \cancel.
     let mut ed = Editor::new();

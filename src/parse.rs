@@ -128,12 +128,34 @@ fn trim(g: &Grid, mut rect: Rect) -> Option<Rect> {
 /// the shared extension ⎪ and the angle arms ╱ ╲ are deliberately absent).
 /// Lattice edges (┌├└ / ┐┤┘) are included so a lattice interior is
 /// bracket-protected against cell/script splitting like any other pair.
-const OPEN_BRACKETS: &[char] = &[
-    '(', '⎛', '⎜', '⎝', '[', '⎡', '⎢', '⎣', '{', '⎧', '⎨', '⎩', '⟨', '┆', '┌', '├', '└', '⌈', '⌊',
-];
-const CLOSE_BRACKETS: &[char] = &[
-    ')', '⎞', '⎟', '⎠', ']', '⎤', '⎥', '⎦', '}', '⎫', '⎬', '⎭', '⟩', '┊', '┐', '┤', '┘', '⌉', '⌋',
-];
+/// The glyphs a delimiter side can show, plus the lattice edges (a
+/// lattice interior is bracket-protected against cell/script splitting
+/// like any other pair). Derived from `symbols::DELIMS`, so a new pair
+/// needs no edit here — only the angle arms and the shared brace
+/// extension stay out, since they name no side of their own.
+fn side_glyphs(left: bool) -> &'static [char] {
+    use std::sync::OnceLock;
+    static SIDES: OnceLock<[Vec<char>; 2]> = OnceLock::new();
+    let sides = SIDES.get_or_init(|| {
+        let build = |left: bool| {
+            let mut v: Vec<char> = crate::symbols::DELIMS
+                .iter()
+                .flat_map(|d| d.glyphs(left))
+                .filter(|&c| c != '⎪')
+                .chain(if left {
+                    ['⟨', '┌', '├', '└']
+                } else {
+                    ['⟩', '┐', '┤', '┘']
+                })
+                .collect();
+            v.sort_unstable();
+            v.dedup();
+            v
+        };
+        [build(true), build(false)]
+    });
+    &sides[usize::from(!left)]
+}
 
 /// Delimiter spec char for a glyph that can appear on the *baseline row*
 /// of a left delimiter column. Brace/angle columns always show their
@@ -329,17 +351,23 @@ fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
 
 /// Every glyph a left delimiter column of `spec` can contain (for the
 /// vertical-extent scan).
-fn left_family(spec: char) -> &'static [char] {
+fn left_family(spec: char) -> Vec<char> {
     match spec {
-        '(' => &['(', '⎛', '⎜', '⎝', '├'],
-        '[' => &['[', '⎡', '⎢', '⎣', '├'],
-        '⌈' => &['⌈', '⎡', '⎢', '├'],
-        '⌊' => &['⌊', '⎢', '⎣', '├'],
-        '‖' => &['‖'],
-        '{' => &['{', '⎧', '⎪', '⎨', '⎩'],
-        '⟨' => &['⟨'],
-        '|' => &['⎢', '⎥', '├'],
-        _ => &['┆', '├'],
+        '‖' => vec!['‖'],
+        '⟨' => vec!['⟨'],
+        _ => {
+            let mut v = crate::symbols::delim_of(spec)
+                .map(|(d, _)| d.glyphs(true))
+                .unwrap_or_default();
+            // A fused-grid junction can sit anywhere in the column…
+            v.push('├');
+            // …and the bar spells its two sides alike, so a column of
+            // either extension piece belongs to it.
+            if spec == '|' {
+                v.push('⎥');
+            }
+            v
+        }
     }
 }
 
@@ -518,10 +546,10 @@ fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
             .count();
         return Some(before % 2 == 0);
     }
-    if OPEN_BRACKETS.contains(&ch) {
+    if side_glyphs(true).contains(&ch) {
         return Some(true);
     }
-    if CLOSE_BRACKETS.contains(&ch) {
+    if side_glyphs(false).contains(&ch) {
         return Some(false);
     }
     if let s @ Some(_) = angle_arm_side(g, row, col) {
@@ -537,10 +565,10 @@ fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
     }
     while r < g.g.len() && family.contains(&g.at(r, col)) {
         let c2 = g.at(r, col);
-        if OPEN_BRACKETS.contains(&c2) {
+        if side_glyphs(true).contains(&c2) {
             return Some(true);
         }
-        if CLOSE_BRACKETS.contains(&c2) {
+        if side_glyphs(false).contains(&c2) {
             return Some(false);
         }
         r += 1;
@@ -1035,7 +1063,7 @@ fn parse_region(
                     parse_region(g, r, None, depth + 1, trace, in_cancel)
                 })?;
                 out.push(Node::Arrow {
-                    op: '⇒',
+                    op: crate::symbols::arrow_by_body(DOUBLE_BODY, true).unwrap().op,
                     over,
                     under,
                 });
@@ -1061,7 +1089,7 @@ fn parse_region(
                 let under = region_below(span, bl).map_or(Ok(vec![]), |r| {
                     parse_region(g, r, None, depth + 1, trace, in_cancel)
                 })?;
-                let op = if body == DOUBLE_BODY { '⇐' } else { '←' };
+                let op = crate::symbols::arrow_by_body(body, false).unwrap().op;
                 out.push(Node::Arrow { op, over, under });
                 col = run_end + 1;
             }
@@ -1935,7 +1963,7 @@ fn parse_delim(
         }
         (bl + 1 - k, (bl + k).min(rect.b), col + k)
     } else {
-        let (t, b) = vertical_extent(g, rect, col, bl, left_family(left));
+        let (t, b) = vertical_extent(g, rect, col, bl, &left_family(left));
         (t, b, col + 1)
     };
     let interior_r = if angle_close_turn(g, bl, close_col) {

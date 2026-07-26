@@ -215,3 +215,116 @@ pub fn styled_latex(c: char) -> Option<String> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::symbols::*;
+    /// The alphabet families cover both cases, including the letterlike
+    /// exceptions that sit outside their block.
+    #[test]
+    fn alphabet_families_resolve() {
+        for (name, want) in [
+            ("bbR", 'ℝ'),
+            ("bbA", '𝔸'),
+            ("bbf", '𝕗'),
+            ("calL", 'ℒ'),
+            ("scrL", 'ℒ'),
+            ("frakg", '𝔤'),
+            ("frakH", 'ℌ'),
+            ("bfa", '𝐚'),
+            ("ttZ", '𝚉'),
+            ("sfbfitq", '𝙦'),
+            ("calbfA", '𝓐'),
+            ("scrbfA", '𝓐'),
+            ("bfsf3", '𝟯'),
+            ("tt7", '𝟽'),
+            ("frkZ", 'ℨ'),
+        ] {
+            assert_eq!(symbol_by_name(name), Some(want), "\\{}", name);
+        }
+        // Every family maps all 52 letters (and its digits) to a
+        // distinct char, under every alias spelling.
+        for fam in alphabets::ALPHABETS {
+            let mut seen = std::collections::HashSet::new();
+            let chars: Vec<char> = ('A'..='Z')
+                .chain('a'..='z')
+                .chain(fam.digits.iter().flat_map(|_| '0'..='9'))
+                .collect();
+            for &l in &chars {
+                let c = alphabets::alphabet_char(&format!("{}{}", fam.prefixes[0], l))
+                    .unwrap_or_else(|| panic!("{}{} missing", fam.prefixes[0], l));
+                assert!(
+                    seen.insert(c),
+                    "{}{} duplicates {:?}",
+                    fam.prefixes[0],
+                    l,
+                    c
+                );
+                for alias in fam.prefixes {
+                    assert_eq!(
+                        alphabets::alphabet_char(&format!("{}{}", alias, l)),
+                        Some(c),
+                        "alias {}{}",
+                        alias,
+                        l
+                    );
+                }
+            }
+        }
+        assert_eq!(symbol_by_name("nosuchfamilyX"), None);
+        // Both spelling orders, letters and digits.
+        for (a, b) in [("frakA", "Afrk"), ("bfsf3", "3bfsf"), ("ttz", "ztt")] {
+            assert_eq!(symbol_by_name(a), symbol_by_name(b), "{} vs {}", a, b);
+            assert!(symbol_by_name(a).is_some(), "{}", a);
+        }
+    }
+    /// The style token may lead or trail, so a name like `\bbb` has two
+    /// readings. Exhaustively check that they agree (and that every
+    /// spelling resolves), so the lookup is well-defined.
+    #[test]
+    fn alphabet_spellings_agree() {
+        for fam in alphabets::ALPHABETS {
+            for style in fam.prefixes {
+                for ch in ('A'..='Z')
+                    .chain('a'..='z')
+                    .chain(fam.digits.iter().flat_map(|_| '0'..='9'))
+                {
+                    let pre = alphabets::alphabet_char(&format!("{}{}", style, ch));
+                    let suf = alphabets::alphabet_char(&format!("{}{}", ch, style));
+                    assert!(pre.is_some(), "\\{}{} missing", style, ch);
+                    // …the trailing spelling agrees, except for the one
+                    // collision pinned down below.
+                    if format!("{}{}", ch, style) != "bbf" {
+                        assert_eq!(pre, suf, "\\{}{} vs \\{}{}", style, ch, ch, style);
+                    }
+                }
+            }
+        }
+        // \bbf is the only spelling both readings claim (bb+f vs b+bf):
+        // the leading style wins, and both chars stay reachable.
+        for a in alphabets::ALPHABETS {
+            for lead in a.prefixes {
+                for b in alphabets::ALPHABETS {
+                    for trail in b.prefixes {
+                        if lead.len() != trail.len() || lead[1..] != trail[..trail.len() - 1] {
+                            continue;
+                        }
+                        let name = format!("{}{}", lead, &trail[trail.len() - 1..]);
+                        let x = name.chars().next().unwrap();
+                        let y = name.chars().next_back().unwrap();
+                        let (as_lead, as_trail) = (
+                            alphabets::alphabet_char(&format!("{}{}", lead, y)),
+                            alphabets::alphabet_char(&format!("{}{}", x, trail)),
+                        );
+                        if as_lead != as_trail {
+                            assert_eq!(name, "bbf", "new collision: \\{}", name);
+                            assert_eq!(alphabets::alphabet_char("bbf"), as_lead);
+                            assert_eq!(alphabets::alphabet_char("fbb"), as_lead);
+                            assert_eq!(alphabets::alphabet_char("bfb"), as_trail);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
