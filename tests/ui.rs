@@ -233,6 +233,31 @@ fn command_known_tracks_execute() {
 }
 
 #[test]
+fn aliases_resolve_to_the_same_command() {
+    // Every alias must do exactly what its target does — the dispatch
+    // names each command once and the table carries the spellings.
+    for &(from, to) in mascii::symbols::ALIASES {
+        // The box commands open a mode rather than insert; compare the
+        // mode instead of the formula.
+        let (mut a, mut b) = (Editor::new(), Editor::new());
+        a.execute(from);
+        b.execute(to);
+        assert_eq!(
+            (normalize(&a.root), a.op_entry.as_ref().map(|e| e.0)),
+            (normalize(&b.root), b.op_entry.as_ref().map(|e| e.0)),
+            "\\{} should be \\{}",
+            from,
+            to
+        );
+        assert!(
+            a.message.is_empty() || !a.message.starts_with("unknown"),
+            "\\{}",
+            from
+        );
+    }
+}
+
+#[test]
 fn cancel_wraps_the_selection() {
     // Shift-selection then \cancel.
     let mut ed = Editor::new();

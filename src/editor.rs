@@ -2072,6 +2072,12 @@ impl Editor {
         if cmd.is_empty() {
             return;
         }
+        // Spelling variants resolve here, so the dispatch below names
+        // each command exactly once.
+        let cmd = crate::symbols::ALIASES
+            .iter()
+            .find_map(|&(from, to)| (from == cmd).then_some(to))
+            .unwrap_or(cmd);
         // With an active selection, structure commands wrap it (LyX-like).
         match cmd {
             "frac" => {
@@ -2104,7 +2110,7 @@ impl Editor {
             {
                 return;
             }
-            "cbrt" | "sqrt3"
+            "cbrt"
                 if self.wrap_selection(|c| Node::Sqrt {
                     arg: c,
                     index: Radical::Cbrt,
@@ -2120,18 +2126,18 @@ impl Editor {
                 arg: vec![],
                 index: Radical::Sqrt,
             }),
-            "cbrt" | "sqrt3" => self.insert_and_enter(Node::Sqrt {
+            "cbrt" => self.insert_and_enter(Node::Sqrt {
                 arg: vec![],
                 index: Radical::Cbrt,
             }),
-            "qdrt" | "sqrt4" => self.insert_and_enter(Node::Sqrt {
+            "qdrt" => self.insert_and_enter(Node::Sqrt {
                 arg: vec![],
                 index: Radical::Qdrt,
             }),
             "cancel" => self.insert_and_enter(Node::Cancel { arg: vec![] }),
             "ceil" => self.insert_delim('⌈', '⌉', vec![]),
             "floor" => self.insert_delim('⌊', '⌋', vec![]),
-            "norm" | "Vert" => self.insert_and_enter(Node::Norm { arg: vec![] }),
+            "norm" => self.insert_and_enter(Node::Norm { arg: vec![] }),
             // Grid commands take an optional RxC digit suffix:
             // \matrix (2×2), \matrix34 (3 rows × 4 cols), \cases41 …
             _ if grid_command(cmd).is_some() => {
@@ -2180,22 +2186,22 @@ impl Editor {
                     });
                 }
             }
-            "xrightarrow" | "xto" => self.insert_and_enter(Node::Arrow {
+            "xto" => self.insert_and_enter(Node::Arrow {
                 op: '→',
                 over: vec![],
                 under: vec![],
             }),
-            "xleftarrow" | "xfrom" => self.insert_and_enter(Node::Arrow {
+            "xfrom" => self.insert_and_enter(Node::Arrow {
                 op: '←',
                 over: vec![],
                 under: vec![],
             }),
-            "xRightarrow" | "xTo" => self.insert_and_enter(Node::Arrow {
+            "xTo" => self.insert_and_enter(Node::Arrow {
                 op: '⇒',
                 over: vec![],
                 under: vec![],
             }),
-            "xLeftarrow" | "xFrom" => self.insert_and_enter(Node::Arrow {
+            "xFrom" => self.insert_and_enter(Node::Arrow {
                 op: '⇐',
                 over: vec![],
                 under: vec![],
@@ -2254,15 +2260,12 @@ impl Editor {
                     } else {
                         self.insert_sym(c);
                     }
-                } else if matches!(
-                    cmd,
-                    "op" | "op*" | "operatorname" | "operatorname*" | "limits" | "rm" | "text"
-                ) {
+                } else if matches!(cmd, "op" | "op*" | "rm" | "text") {
                     // Bare \op / \op* (alias \limits) / \rm / \text open
                     // the in-place box (see op_commit). The old attached
                     // \op<name> style is gone; \rm<x> / \text<x> remain.
                     self.op_start(match cmd {
-                        "op" | "operatorname" => BoxKind::Op,
+                        "op" => BoxKind::Op,
                         "rm" => BoxKind::Rm,
                         "text" => BoxKind::Text,
                         _ => BoxKind::OpStar,

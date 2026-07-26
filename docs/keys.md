@@ -146,7 +146,7 @@ Ctrl 系(`Ctrl+Z` undo など)はモード中もそのまま使えます。
 | `\lim` `\max` `\min` `\sup` `\inf` `\det` `\gcd` `\Pr` `\plim` `\injlim` `\projlim` | ┈バンド┈ を作り下極限へ |
 | `\argmax` `\argmin` `\limsup` `\liminf` | 複数語バンド(`┈arg┈max┈` `┈lim┈sup┈` — 語ごとに piece)。LaTeX にネイティブ名があれば(\limsup)それで出力 |
 | `\op` | **名前ボックス**を開く: 英数で名前を入力し `Enter`/`Tab`/`Space` で確定 → 立体ラン(2文字以上は \operatorname、辞書語は \sin 等の関数に) |
-| `\op*`(別名 `\limits`) | 同上、確定で ┈バンド┈ になり下極限へ。**スペースは piece 区切り**(`ess sup` → `┈ess┈sup┈`)。`Esc` 取消、名前以外のキーは確定してから通常動作 |
+| `\op*`(別名 `\limits` `\operatorname*`) | 同上、確定で ┈バンド┈ になり下極限へ。**スペースは piece 区切り**(`ess sup` → `┈ess┈sup┈`)。`Esc` 取消、名前以外のキーは確定してから通常動作 |
 
 ### テキスト・空白・アクセント
 

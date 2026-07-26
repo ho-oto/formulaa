@@ -8,7 +8,15 @@
 pub mod alphabets;
 pub mod ext;
 
-/// (command name, unicode char). The LaTeX command is `\name`.
+/// The curated table: `\name` -> char, and the only source for the
+/// reverse (char -> LaTeX command) direction.
+///
+/// Most entries also appear in the generated `ext` table. That overlap
+/// is deliberate, not redundancy: it **pins** the meaning of the names
+/// worth guaranteeing, so `ext` can be regenerated from upstream
+/// without `\to` quietly changing what it produces. Four entries
+/// disagree with upstream on purpose (`INTENTIONAL_OVERRIDES`), and a
+/// test fails if a new divergence appears silently.
 pub const SYMBOLS: &[(&str, char)] = &[
     // Greek lowercase
     ("alpha", 'α'),
@@ -128,8 +136,32 @@ pub const SYMBOLS: &[(&str, char)] = &[
 /// Accent marks, the √ overline `_`, and the inline super/subscript
 /// codepoints are reserved too — they read back as structure, not atoms.
 #[rustfmt::skip]
+/// Command spellings that mean another command. Keeping them in one
+/// table lets the dispatch name each command exactly once, and makes
+/// "what else is this called" answerable in one place.
+pub const ALIASES: &[(&str, &str)] = &[
+    // LaTeX names for what the editor calls something shorter.
+    ("sqrt3", "cbrt"),
+    ("sqrt4", "qdrt"),
+    ("Vert", "norm"),
+    ("xrightarrow", "xto"),
+    ("xleftarrow", "xfrom"),
+    ("xRightarrow", "xTo"),
+    ("xLeftarrow", "xFrom"),
+    ("operatorname", "op"),
+    ("operatorname*", "op*"),
+    ("limits", "op*"),
+    ("delim", "lr"),
+];
+
+/// Names where the curated table deliberately differs from the
+/// generated one: the TeX convention is not what upstream picked, and
+/// the curated spelling wins.
+pub const INTENTIONAL_OVERRIDES: &[&str] = &["epsilon", "phi", "varphi", "hbar"];
+
 pub fn is_reserved_glyph(c: char) -> bool {
-    matches!(c,
+    matches!(
+        c,
         // Rules and bands
         '─'                     // U+2500 BOX DRAWINGS LIGHT HORIZONTAL: fraction bar / arrow body
         | '┈'                   // U+2508 LIGHT QUADRUPLE DASH HORIZONTAL: op band / accent band / break row
@@ -173,7 +205,7 @@ pub fn is_reserved_glyph(c: char) -> bool {
         | '˯'                   // U+02EF MODIFIER LETTER LOW DOWN ARROWHEAD: check
         | '˳'                   // U+02F3 MODIFIER LETTER LOW RING: ring
         | '․'                   // U+2024 ONE DOT LEADER: dot / ddot (․․)
-        | '￫'                   // U+FFEB HALFWIDTH RIGHTWARDS ARROW: vec
+        | '￫' // U+FFEB HALFWIDTH RIGHTWARDS ARROW: vec
     ) || crate::render::unsuperscript_char(c).is_some()
         || crate::render::unsubscript_char(c).is_some()
 }
@@ -612,6 +644,28 @@ mod tests {
         assert!(!is_atom('￫'));
         for c in ['😀', '漢', '\u{0301}', '─', '┈'] {
             assert!(!is_atom(c), "{:?} must be rejected", c);
+        }
+    }
+
+    /// The curated table pins the names worth guaranteeing against the
+    /// generated one. Every disagreement must be a listed override —
+    /// otherwise a regeneration could change what `\to` means and
+    /// nothing would notice.
+    #[test]
+    fn curated_names_pin_the_generated_table() {
+        let mut diverged: Vec<&str> = SYMBOLS
+            .iter()
+            .filter(|(n, c)| ext::EXT_SYMBOLS.get(n).is_some_and(|e| e != c))
+            .map(|&(n, _)| n)
+            .collect();
+        diverged.sort_unstable();
+        let mut want = INTENTIONAL_OVERRIDES.to_vec();
+        want.sort_unstable();
+        assert_eq!(diverged, want, "undocumented divergence from ext");
+        // …and an override is a name the curated table actually wins.
+        for &n in INTENTIONAL_OVERRIDES {
+            let curated = SYMBOLS.iter().find(|(m, _)| *m == n).map(|&(_, c)| c);
+            assert_eq!(symbol_by_name(n), curated, "\\{}", n);
         }
     }
 

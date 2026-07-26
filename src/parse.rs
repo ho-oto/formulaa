@@ -2306,6 +2306,26 @@ mod tests {
         assert!(parse("𝑥''").is_err(), "an unclosed quote is an error");
     }
 
+    /// An accent's base is always a `Sym` atom. A `Roman` base is not
+    /// merely untyped — it has no picture: the canonical upright form
+    /// is quoted (`\'d\'`), and a bare `d` reads back as the italic
+    /// variable, so such a node could never round-trip.
+    #[test]
+    fn accent_bases_are_sym_atoms() {
+        let row = parse("˰\n𝑑").unwrap();
+        assert!(matches!(&row[0], Node::Accent { base: 'd', .. }));
+        for unrepresentable in ["˰\nd", " ˰\n'd'"] {
+            assert!(parse(unrepresentable).is_err(), "{:?}", unrepresentable);
+        }
+        // …and whatever base does get built is an accepted atom.
+        for aa in ["˰\n𝑑", "․\nα", "˷\n∞"] {
+            let Node::Accent { base, .. } = &parse(aa).unwrap()[0] else {
+                panic!("{} is not an accent", aa)
+            };
+            assert!(crate::symbols::is_atom(*base), "{:?}", base);
+        }
+    }
+
     #[test]
     fn latex_unsafe_ascii_is_rejected() {
         // `~ ^ ` \` have no atom meaning and would be LaTeX syntax; the
