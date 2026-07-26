@@ -3,14 +3,14 @@ name: mascii-math
 description: >
   Read and write mascii AA math — 2D plain-text formulas (Unicode-first
   ASCII art) that map one-to-one to a math AST and convert losslessly to
-  LaTeX / Typst. Use when asked to write, edit or interpret formulas in
+  LaTeX. Use when asked to write, edit or interpret formulas in
   mascii AA form, or to embed re-editable math in plain-text documents.
 ---
 
 # mascii AA 数式の読み書き
 
 mascii の AA 形式は「見た目が数式そのもの」でありながら、機械的に
-LaTeX / Typst へ変換できるプレーンテキスト表現である。この文書だけで
+LaTeX へ変換できるプレーンテキスト表現である。この文書だけで
 正しい AA を書けるように規則をまとめる。
 
 ## 検証コマンド(利用可能なら必ず使う)
@@ -71,7 +71,7 @@ echo '<AA>' | mascii aa2tex   # LaTeX に変換して意味を確認
 同じ記法)。バンドと隣は空白1で区切る。極限なしは裸の `∫` でよい。
 ```
   ∞
-┈┈∑┈┈ aₙ      ┈lim┈ f(x)      ┈arg┈max┈ f(x)   ← ピースは複数でもよい
+┈┈∑┈┈ aₙ      ┈lim┈ f(x)      ┈argmax┈ f(x)   ← 中身は1語(空白なし)
  n=1           x→0                x∈S
 ```
 
@@ -143,7 +143,7 @@ E ⋅ d A          ￫    ← 重ね掛けは縦に積む(内側が基底寄り)
 
 ### 空白 — 実スペースは自由、意味のある空白は `␣` (U+2423、`\space` か `\`+Space)
 実スペースは整形用で、パースで消える(区切りとして消費)。LaTeX に空白を
-出したいときだけ可視の `␣` を置く(LaTeX `\ ` / Typst `space`)。
+出したいときだけ可視の `␣` を置く(LaTeX `\ `)。
 
 ### ローマン体 — 裸のラン(2文字以上=\operatorname)、1文字は `'…'`、テキストは `"…"`
 `dx` `asiny` のような英字ラン(非辞書語)はそのまま \operatorname。

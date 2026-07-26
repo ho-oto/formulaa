@@ -14,7 +14,6 @@ use mascii::ast::{Node, Row, normalize, strip_spacers};
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
 use mascii::render::{RenderCtx, render_root};
-use mascii::typst::row_to_typst;
 
 // ----- tiny DSL for building formulas -----
 
@@ -60,8 +59,12 @@ fn paren(inner: Row) -> Node {
 }
 
 fn bigop(op: char, lower: Row, upper: Row) -> Node {
+    Node::BigOpSym { op, lower, upper }
+}
+
+fn opname(name: &str, lower: Row, upper: Row) -> Node {
     Node::BigOp {
-        base: vec![Node::Sym(op)],
+        name: name.into(),
         lower,
         upper,
     }
@@ -114,8 +117,12 @@ fn roundtrip(name: &str, row: &Row) {
     // Formatting spacers survive in the AA but are invisible to the
     // parser, so the roundtrip target is the spacer-free normal form.
     let expected = normalize(&strip_spacers(&row));
-    let parsed =
-        parse(&aa).unwrap_or_else(|e| panic!("[{}] parse failed: {}\n--- AA ---\n{}", name, e, aa));
+    let parsed = parse(&aa).unwrap_or_else(|e| {
+        panic!(
+            "[{}] parse failed: {}\n--- AA ---\n{}\n--- AST ---\n{:?}",
+            name, e, aa, row
+        )
+    });
     assert_eq!(
         parsed,
         expected,
@@ -133,7 +140,6 @@ fn roundtrip(name: &str, row: &Row) {
     // Exports must not panic and must be non-empty for non-empty input.
     if !expected.is_empty() {
         assert!(!row_to_latex(&expected).is_empty());
-        assert!(!row_to_typst(&expected).is_empty());
     }
 }
 
@@ -151,14 +157,7 @@ fn stray_stacked_content_is_an_error() {
 #[test]
 fn operatorname_star_band() {
     let row = cat(&[
-        n(Node::BigOp {
-            base: vec![Node::Text {
-                t: "esssup".into(),
-                math: true,
-            }],
-            lower: s("x"),
-            upper: vec![],
-        }),
+        n(opname("esssup", s("x"), vec![])),
         s("f"),
         n(paren(s("x"))),
     ]);
@@ -167,66 +166,34 @@ fn operatorname_star_band() {
         row_to_latex(&normalize(&row)),
         "\\operatorname*{esssup}_{x}f\\left(x\\right)"
     );
-    // Multi-word \op* name: each word is its own band piece, dictionary
-    // words as the Funcs they are (┈ess┈sup┈).
-    let row = cat(&[n(Node::BigOp {
-        base: vec![
-            Node::Text {
-                t: "ess".into(),
-                math: true,
-            },
-            Node::Func("sup".into()),
-        ],
-        lower: s("x"),
-        upper: vec![],
-    })]);
-    roundtrip("operatorname-star-words", &row);
-    assert_eq!(
-        row_to_latex(&normalize(&row)),
-        "\\operatorname*{ess sup}_{x}"
-    );
-    // Empty limits: an \op* name keeps its band (a bare ∑ / lim would
-    // collapse to the atom instead — promotable_base).
-    let row = cat(&[
-        n(Node::BigOp {
-            base: vec![
-                Node::Text {
-                    t: "ess".into(),
-                    math: true,
-                },
-                Node::Func("sup".into()),
-            ],
-            lower: vec![],
-            upper: vec![],
-        }),
-        s("f"),
-    ]);
+    // Empty limits bare the band, and the bare form is exactly one Func
+    // — the two spellings correspond one to one.
+    let row = cat(&[n(opname("esssup", vec![], vec![])), s("f")]);
     roundtrip("operatorname-star-bandless-limits", &row);
-    assert_eq!(row_to_latex(&normalize(&row)), "\\operatorname*{ess sup}f");
-    assert!(matches!(&normalize(&row)[0], Node::BigOp { .. }));
+    assert_eq!(normalize(&row)[0], func("esssup"));
+    assert_eq!(row_to_latex(&normalize(&row)), "\\operatorname{esssup}f");
 }
 
 /// Multi-word operators: one band piece per word, native joined names
 /// where the target format has them.
 #[test]
 fn word_operators() {
-    let row = n(Node::BigOp {
-        base: vec![Node::Func("lim".into()), Node::Func("sup".into())],
-        lower: s("n"),
-        upper: vec![],
-    });
+    // A band name is one piece; LaTeX spaces the ones that read as
+    // several words (\operatorname*{arg\,max}).
+    let row = n(opname("limsup", s("n"), vec![]));
     roundtrip("limsup", &row);
     let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
-    assert!(aa.contains("┈lim┈sup┈"), "{}", aa);
-    assert_eq!(row_to_latex(&normalize(&row)), "\\limsup_{n}");
-    assert_eq!(row_to_typst(&normalize(&row)), "limsup_n");
-    let row = n(Node::BigOp {
-        base: vec![Node::Func("arg".into()), Node::Func("max".into())],
-        lower: s("x"),
-        upper: vec![],
-    });
+    assert!(aa.contains("┈limsup┈"), "{}", aa);
+    assert_eq!(
+        row_to_latex(&normalize(&row)),
+        "\\operatorname*{lim\\,sup}_{n}"
+    );
+    let row = n(opname("argmax", s("x"), vec![]));
     roundtrip("argmax", &row);
-    assert_eq!(row_to_latex(&normalize(&row)), "\\mathop{\\arg \\max}_{x}");
+    assert_eq!(
+        row_to_latex(&normalize(&row)),
+        "\\operatorname*{arg\\,max}_{x}"
+    );
 }
 
 /// Roman differential: a lone upright letter drops its quotes exactly
@@ -234,10 +201,7 @@ fn word_operators() {
 /// otherwise (the picture stays unambiguous either way).
 #[test]
 fn roman_differential_quotes() {
-    let d = || Node::Text {
-        t: "d".into(),
-        math: true,
-    };
+    let d = || Node::Roman('d');
     // Glued to a variable: bare d𝑥.
     let row = cat(&[n(d()), s("x")]);
     roundtrip("dx", &row);
@@ -269,10 +233,7 @@ fn roman_differential_quotes() {
 /// when an interior dot exists) back into the same token.
 #[test]
 fn dotted_roman_runs() {
-    let t = |s: &str| Node::Text {
-        t: s.into(),
-        math: true,
-    };
+    let t = |s: &str| Node::Func(s.into());
     let aa = |row: &Row| render_root(&normalize(row), None, &RenderCtx::canonical()).to_text();
     let row = cat(&[n(t("i.i.d.")), s("x")]);
     roundtrip("iid", &row);
@@ -322,7 +283,6 @@ fn wide_accents() {
     let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
     assert_eq!(aa, " 𝐴𝐵\n┈˜˜┈");
     assert_eq!(row_to_latex(&normalize(&row)), "\\utilde{AB}");
-    assert_eq!(row_to_typst(&normalize(&row)), "attach(A B, b: sym.tilde)");
     let row = n(wa(Some('˜'), Some('˷'), s("xy")));
     roundtrip("tilde-utilde", &row);
     // Stacked hats: the outer band's ╱ can sit directly above the inner
@@ -341,6 +301,13 @@ fn wide_accents() {
             base: 'x'
         }]
     );
+    // A struck accent still carries a band, so it needs the same
+    // separation space as a bare one (the band has no closing glyph).
+    let row = cat(&[
+        n(sup(n(wa(None, Some('‗'), s("px"))))),
+        n(cancel(n(wa(Some('˜'), None, s("bc"))))),
+    ]);
+    roundtrip("band-next-to-struck-band", &row);
     // A markless wide accent is just its base (spliced).
     let row = n(wa(None, None, s("ab")));
     assert_eq!(normalize(&row), s("ab"));
@@ -484,7 +451,6 @@ fn ceil_floor_norm() {
         row_to_latex(&normalize(&row)),
         "\\left\\|v\\frac{a}{b}\\right\\|"
     );
-    assert!(mascii::typst::row_to_typst(&normalize(&row)).starts_with("norm("));
     // Two sibling norms stay siblings (parity per row).
     let row = cat(&[
         n(delim('‖', '‖', vec![], vec![s("v")])),
@@ -498,10 +464,7 @@ fn ceil_floor_norm() {
 /// declared operators serialize correctly.
 #[test]
 fn text_spaces_and_operator_names() {
-    let row = cat(&[n(Node::Text {
-        t: "if x holds".into(),
-        math: false,
-    })]);
+    let row = cat(&[n(Node::Text("if x holds".into()))]);
     roundtrip("text-spaces", &row);
     assert_eq!(
         render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text(),
@@ -509,28 +472,28 @@ fn text_spaces_and_operator_names() {
     );
     assert_eq!(row_to_latex(&normalize(&row)), "\\text{if x holds}");
     // A literal quote (or backslash) inside \text is escaped in the AA.
-    let row = cat(&[n(Node::Text {
-        t: "a\"b\\c".into(),
-        math: false,
-    })]);
+    let row = cat(&[n(Node::Text("a\"b\\c".into()))]);
     roundtrip("text-escapes", &row);
     assert_eq!(
         render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text(),
         "\"a\\\"b\\\\c\""
     );
     // KaTeX-known names emit \name; declared operators \operatorname.
-    assert_eq!(row_to_latex(&vec![func("arcctg")]), "\\arcctg ");
+    assert_eq!(
+        row_to_latex(&vec![func("arcctg")]),
+        "\\operatorname{arcctg}"
+    );
     assert_eq!(row_to_latex(&vec![func("Tr")]), "\\operatorname{Tr}");
     assert_eq!(row_to_latex(&vec![func("Re")]), "\\operatorname{Re}");
     roundtrip("tr-run", &cat(&[n(func("Tr")), n(paren(s("A")))]));
     // plim & friends band like lim.
     let row = cat(&[n(Node::BigOp {
-        base: vec![func("plim")],
+        name: "plim".into(),
         lower: s("n"),
         upper: vec![],
     })]);
     roundtrip("plim", &row);
-    assert_eq!(row_to_latex(&normalize(&row)), "\\plim _{n}");
+    assert_eq!(row_to_latex(&normalize(&row)), "\\operatorname*{plim}_{n}");
 }
 
 /// rcases: the mirror of cases (null left, brace right).
@@ -1047,10 +1010,7 @@ fn text_runs() {
             n(bigop('∫', vec![], vec![])),
             s("f"),
             n(paren(s("x"))),
-            n(Node::Text {
-                t: "dx".into(),
-                math: true,
-            }),
+            n(Node::Func("dx".into())),
         ]),
     );
     roundtrip(
@@ -1066,10 +1026,7 @@ fn text_runs() {
                     s("x"),
                     s("x≥0"),
                     s("-x"),
-                    n(Node::Text {
-                        t: "other wise".into(),
-                        math: false,
-                    }),
+                    n(Node::Text("other wise".into())),
                 ],
             ))],
         )),
@@ -1202,10 +1159,7 @@ fn stacked_accents() {
             unders: vec![],
             base: 'E',
         }),
-        n(Node::Text {
-            t: "e".into(),
-            math: true,
-        }),
+        n(Node::Roman('e')),
     ]);
     roundtrip("ddot-then-mathrm", &row);
     let row = cat(&[
@@ -1282,7 +1236,7 @@ fn continued_fraction() {
 fn limit_functions() {
     let row = cat(&[
         n(Node::BigOp {
-            base: vec![func("lim")],
+            name: "lim".into(),
             lower: cat(&[s("x"), s("→"), s("0")]),
             upper: vec![],
         }),
@@ -1292,7 +1246,7 @@ fn limit_functions() {
     roundtrip("lim", &row);
     let row = cat(&[
         n(Node::BigOp {
-            base: vec![func("arg"), func("max")],
+            name: "argmax".into(),
             lower: s("x∈S"),
             upper: vec![],
         }),
@@ -1301,8 +1255,8 @@ fn limit_functions() {
     ]);
     roundtrip("argmax", &row);
     // Empty-limit bands normalize away: base splices into the row.
-    let row = vec![Node::BigOp {
-        base: vec![Node::Sym('∮')],
+    let row = vec![Node::BigOpSym {
+        op: '∮',
         lower: vec![],
         upper: vec![],
     }];
@@ -1400,11 +1354,15 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
                 }
             }
             2 => Node::Spacer,
-            // Single-letter \mathrm (the roman differential): quoted or
-            // bare depending on the rendered neighbours.
-            3 => Node::Text {
-                t: ["d", "e", "D", "i.i.d.", "w.r.t", "a.e"][rng.below(6)].into(),
-                math: true,
+            // The roman differential (quoted or bare depending on the
+            // rendered neighbours) and upright runs.
+            3 => match rng.below(6) {
+                0 => Node::Roman('d'),
+                1 => Node::Roman('e'),
+                2 => Node::Roman('D'),
+                3 => Node::Func("i.i.d.".into()),
+                4 => Node::Func("w.r.t".into()),
+                _ => Node::Func("a.e".into()),
             },
             _ => Node::Sym(ATOMS[rng.below(ATOMS.len())]),
         };
@@ -1426,30 +1384,18 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             arg: gen_row(rng, d, 2),
         },
         4 => {
-            let base: Row = match rng.below(5) {
-                0 => vec![Node::Func("lim".into())],
-                1 => vec![Node::Func("max".into())],
-                2 => vec![Node::Func("arg".into()), Node::Func("max".into())],
-                // \op* names: arbitrary upright operator words.
-                3 => match rng.below(2) {
-                    0 => vec![Node::Text {
-                        t: "esssup".into(),
-                        math: true,
-                    }],
-                    _ => vec![
-                        Node::Text {
-                            t: "ess".into(),
-                            math: true,
-                        },
-                        Node::Func("sup".into()),
-                    ],
+            let (lower, upper) = (gen_row(rng, d, 3), gen_row(rng, d, 2));
+            match rng.below(5) {
+                // Named bands, including ad-hoc \op* names.
+                0 => opname("lim", lower, upper),
+                1 => opname("max", lower, upper),
+                2 => opname("argmax", lower, upper),
+                3 => opname("esssup", lower, upper),
+                _ => Node::BigOpSym {
+                    op: ['∑', '∏', '∫', '⋃'][rng.below(4)],
+                    lower,
+                    upper,
                 },
-                _ => vec![Node::Sym(['∑', '∏', '∫', '⋃'][rng.below(4)])],
-            };
-            Node::BigOp {
-                base,
-                lower: gen_row(rng, d, 3),
-                upper: gen_row(rng, d, 2),
             }
         }
         5 => {
@@ -1523,14 +1469,12 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             Node::Array { rows, cols, cells }
         }
         10 => {
-            let math = rng.below(2) == 0;
-            let t = if math {
-                ["dx", "abc", "T", "sin", "d"][rng.below(5)]
+            if rng.below(2) == 0 {
+                Node::Func(["dx", "abc", "T", "sin"][rng.below(4)].into())
             } else {
                 // \text content may need the \" \\ escapes.
-                ["if", "if x", "a\"b", "x\\y"][rng.below(4)]
-            };
-            Node::Text { t: t.into(), math }
+                Node::Text(["if", "if x", "a\"b", "x\\y"][rng.below(4)].into())
+            }
         }
         11 => Node::Brace {
             over: rng.below(2) == 0,

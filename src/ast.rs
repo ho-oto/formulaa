@@ -11,7 +11,7 @@ pub enum Node {
     /// math-italic letters is applied only at render time.
     Sym(char),
     /// Formatting space (the Space key): renders as one blank column in
-    /// the AA, produces no LaTeX/Typst output, and vanishes on reparse —
+    /// the AA, produces no LaTeX output, and vanishes on reparse —
     /// the roundtrip contract is parse∘render == strip_spacers∘normalize.
     /// (Use the ␣ atom, \space, for a *semantic* space.)
     Spacer,
@@ -22,7 +22,9 @@ pub enum Node {
     /// Typst: `\ `.
     Break,
     /// Named function/operator rendered upright (sin, cos, log, ...).
-    /// Only names from `symbols::FUNCS` are valid (parse relies on this).
+    /// Any upright multi-letter name — a dictionary word (`sin`) or an
+    /// ad-hoc one (`vol`); the dictionary only decides whether the name
+    /// takes limits and how the ASCII run lexer splits it.
     Func(String),
     /// Upright run. `math: true` is \mathrm — drawn bare when the
     /// picture reads back unambiguously: >= 2 ASCII letters and not a
@@ -31,10 +33,13 @@ pub enum Node {
     /// 'single-quoted'. The quotes appear/disappear automatically as
     /// the context changes. `math: false` is \text, always
     /// "double-quoted". Interior spaces are drawn as ␣ inside quotes.
-    Text {
-        t: String,
-        math: bool,
-    },
+    /// `\text{…}`: prose inside a formula, drawn in "double quotes"
+    /// (a literal `"` or `\` inside is escaped with a backslash).
+    Text(String),
+    /// A single upright letter — the differential `d` of `d𝑥`
+    /// (`\mathrm{d}`). Longer upright runs are `Func` instead, so the
+    /// two never overlap.
+    Roman(char),
     /// Accented base character (x̂ ẋ v̄ a⃗ …): over-marks stack upward and
     /// under-marks downward in the cells directly above/below the base,
     /// innermost first. Flat lists (not nesting) are deliberate: the
@@ -72,14 +77,20 @@ pub enum Node {
     Sub {
         arg: Row,
     },
-    /// Band with under/over limits: anything sandwiched in ┈ without
-    /// spaces (`┈∑┈`, `┈lim┈`, `┈arg┈max┈` …). The base is a flat one-line
-    /// row; blank columns inside it are drawn as ┈. With both limits
-    /// empty the node normalizes away *only* for promotable bases (a
-    /// bare ∑ / lim is just an atom, ↑/↓ lifts it back); an \op* name
-    /// keeps its band (`promotable_base`).
+    /// A ∑-class symbol with under/over limits: the atom sandwiched in
+    /// ┈ (`┈∑┈`). With both limits empty it normalizes to the bare atom
+    /// — the picture `∑` reads back as `Sym`, and ↑/↓ lifts it again.
+    BigOpSym {
+        op: char,
+        lower: Row,
+        upper: Row,
+    },
+    /// A named operator with under/over limits (`┈lim┈`, `┈argmax┈`).
+    /// The name is one piece: no blanks, so the bare picture reads back
+    /// as exactly one `Func` and the two forms correspond one to one.
+    /// With both limits empty it normalizes to that `Func`.
     BigOp {
-        base: Row,
+        name: String,
         lower: Row,
         upper: Row,
     },
@@ -162,7 +173,8 @@ impl Node {
             | Node::Spacer
             | Node::Break
             | Node::Func(_)
-            | Node::Text { .. }
+            | Node::Text(_)
+            | Node::Roman(_)
             | Node::Accent { .. }
             | Node::WideAccent { .. } => {
                 vec![]
@@ -171,7 +183,9 @@ impl Node {
             Node::Sqrt { .. } => vec![Field::SqrtArg],
             Node::Sup { .. } => vec![Field::SupArg],
             Node::Sub { .. } => vec![Field::SubArg],
-            Node::BigOp { .. } => vec![Field::OpLower, Field::OpUpper],
+            Node::BigOp { .. } | Node::BigOpSym { .. } => {
+                vec![Field::OpLower, Field::OpUpper]
+            }
             Node::Arrow { .. } => vec![Field::ArrowOver, Field::ArrowUnder],
             Node::Brace { .. } => vec![Field::BraceArg, Field::BraceLabel],
             Node::Delim { segs, .. } => (0..segs.len()).map(Field::Seg).collect(),
@@ -187,8 +201,8 @@ impl Node {
             (Node::Sqrt { arg, .. }, Field::SqrtArg) => arg,
             (Node::Sup { arg }, Field::SupArg) => arg,
             (Node::Sub { arg }, Field::SubArg) => arg,
-            (Node::BigOp { lower, .. }, Field::OpLower) => lower,
-            (Node::BigOp { upper, .. }, Field::OpUpper) => upper,
+            (Node::BigOp { lower, .. } | Node::BigOpSym { lower, .. }, Field::OpLower) => lower,
+            (Node::BigOp { upper, .. } | Node::BigOpSym { upper, .. }, Field::OpUpper) => upper,
             (Node::Arrow { over, .. }, Field::ArrowOver) => over,
             (Node::Arrow { under, .. }, Field::ArrowUnder) => under,
             (Node::Brace { arg, .. }, Field::BraceArg) => arg,
@@ -207,8 +221,8 @@ impl Node {
             (Node::Sqrt { arg, .. }, Field::SqrtArg) => arg,
             (Node::Sup { arg }, Field::SupArg) => arg,
             (Node::Sub { arg }, Field::SubArg) => arg,
-            (Node::BigOp { lower, .. }, Field::OpLower) => lower,
-            (Node::BigOp { upper, .. }, Field::OpUpper) => upper,
+            (Node::BigOp { lower, .. } | Node::BigOpSym { lower, .. }, Field::OpLower) => lower,
+            (Node::BigOp { upper, .. } | Node::BigOpSym { upper, .. }, Field::OpUpper) => upper,
             (Node::Arrow { over, .. }, Field::ArrowOver) => over,
             (Node::Arrow { under, .. }, Field::ArrowUnder) => under,
             (Node::Brace { arg, .. }, Field::BraceArg) => arg,
@@ -245,33 +259,6 @@ pub fn row_at_mut<'a>(root: &'a mut Row, path: &[(usize, Field)]) -> &'a mut Row
 
 /// Canonical form: merge adjacent same-kind scripts (x^{a}^{b} == x^{ab} in
 /// the picture, so the parser can only ever return the merged form).
-/// Word pieces of a BigOp base (each piece a Func or math-Text word),
-/// with `true` when a Text piece is present — that is an \op* name,
-/// which LaTeX/Typst join into one \operatorname* / op("…") group.
-pub fn op_words(base: &Row) -> Option<(Vec<&str>, bool)> {
-    let words: Option<Vec<&str>> = base
-        .iter()
-        .map(|n| match n {
-            Node::Text { t, math: true } => Some(t.as_str()),
-            Node::Func(f) => Some(f.as_str()),
-            _ => None,
-        })
-        .collect();
-    let has_text = base.iter().any(|n| matches!(n, Node::Text { .. }));
-    words.map(|ws| (ws, has_text))
-}
-
-/// A band base the editor can re-promote from its bare form with ↑/↓:
-/// a single ∑-class symbol or lim-class function. Only these lose their
-/// band when both limits are empty.
-pub fn promotable_base(base: &Row) -> bool {
-    match &base[..] {
-        [Node::Sym(c)] => crate::symbols::bigop_by_char(*c),
-        [Node::Func(f)] => crate::symbols::func_takes_limits(f),
-        _ => false,
-    }
-}
-
 /// `parse(render(x)) == normalize(x)` is the roundtrip invariant.
 pub fn normalize(row: &Row) -> Row {
     // A band with no limits collapses to its bare base — but only when
@@ -282,10 +269,15 @@ pub fn normalize(row: &Row) -> Row {
     let mut pre: Row = Vec::with_capacity(row.len());
     for node in row {
         match normalize_node(node) {
-            Node::BigOp { base, lower, upper }
-                if lower.is_empty() && upper.is_empty() && promotable_base(&base) =>
-            {
-                pre.extend(base)
+            // An empty-limit band is its bare form: ┈∑┈ -> ∑ and
+            // ┈lim┈ -> lim, one to one in both directions (↑/↓ lifts
+            // them back, and the editor keeps the band in its own tree
+            // while the cursor is inside).
+            Node::BigOpSym { op, lower, upper } if lower.is_empty() && upper.is_empty() => {
+                pre.push(Node::Sym(op))
+            }
+            Node::BigOp { name, lower, upper } if lower.is_empty() && upper.is_empty() => {
+                pre.push(Node::Func(name))
             }
             // A markless wide accent is just its base.
             Node::WideAccent {
@@ -293,6 +285,11 @@ pub fn normalize(row: &Row) -> Row {
                 under: None,
                 base,
             } => pre.extend(base),
+            // A one-letter upright run is Roman: its picture ('d' or a
+            // glued d𝑥) reads back that way, so Func stays 2+ letters.
+            Node::Func(t) if t.chars().count() == 1 => {
+                pre.push(Node::Roman(t.chars().next().unwrap()))
+            }
             n => pre.push(n),
         }
     }
@@ -325,7 +322,7 @@ pub fn normalize(row: &Row) -> Row {
                 continue;
             }
             // An empty text run has no picture of its own worth keeping.
-            Node::Text { t, .. } if t.is_empty() => continue,
+            Node::Text(t) | Node::Func(t) if t.is_empty() => continue,
             _ => {}
         }
         // Scripts and cancels merge *across* spacers: the blank column a
@@ -402,7 +399,8 @@ fn strip_cancels(row: &Row) -> Row {
             | Node::Spacer
             | Node::Break
             | Node::Func(_)
-            | Node::Text { .. }
+            | Node::Text(_)
+            | Node::Roman(_)
             | Node::Accent { .. } => out.push(n.clone()),
             Node::WideAccent { over, under, base } => out.push(Node::WideAccent {
                 over: *over,
@@ -423,8 +421,13 @@ fn strip_cancels(row: &Row) -> Row {
             Node::Sub { arg } => out.push(Node::Sub {
                 arg: strip_cancels(arg),
             }),
-            Node::BigOp { base, lower, upper } => out.push(Node::BigOp {
-                base: strip_cancels(base),
+            Node::BigOp { name, lower, upper } => out.push(Node::BigOp {
+                name: name.clone(),
+                lower: strip_cancels(lower),
+                upper: strip_cancels(upper),
+            }),
+            Node::BigOpSym { op, lower, upper } => out.push(Node::BigOpSym {
+                op: *op,
                 lower: strip_cancels(lower),
                 upper: strip_cancels(upper),
             }),
@@ -470,7 +473,8 @@ pub fn strip_spacers(row: &Row) -> Row {
             Node::Sym(_)
             | Node::Break
             | Node::Func(_)
-            | Node::Text { .. }
+            | Node::Text(_)
+            | Node::Roman(_)
             | Node::Accent { .. } => out.push(n.clone()),
             Node::WideAccent { over, under, base } => out.push(Node::WideAccent {
                 over: *over,
@@ -491,8 +495,13 @@ pub fn strip_spacers(row: &Row) -> Row {
             Node::Sub { arg } => out.push(Node::Sub {
                 arg: strip_spacers(arg),
             }),
-            Node::BigOp { base, lower, upper } => out.push(Node::BigOp {
-                base: strip_spacers(base),
+            Node::BigOp { name, lower, upper } => out.push(Node::BigOp {
+                name: name.clone(),
+                lower: strip_spacers(lower),
+                upper: strip_spacers(upper),
+            }),
+            Node::BigOpSym { op, lower, upper } => out.push(Node::BigOpSym {
+                op: *op,
                 lower: strip_spacers(lower),
                 upper: strip_spacers(upper),
             }),
@@ -545,7 +554,8 @@ fn normalize_node(node: &Node) -> Node {
         | Node::Spacer
         | Node::Break
         | Node::Func(_)
-        | Node::Text { .. }
+        | Node::Text(_)
+        | Node::Roman(_)
         | Node::Accent { .. } => node.clone(),
         Node::WideAccent { over, under, base } => {
             let base = normalize(base);
@@ -587,8 +597,13 @@ fn normalize_node(node: &Node) -> Node {
         Node::Sub { arg } => Node::Sub {
             arg: normalize(arg),
         },
-        Node::BigOp { base, lower, upper } => Node::BigOp {
-            base: normalize(base),
+        Node::BigOp { name, lower, upper } => Node::BigOp {
+            name: name.clone(),
+            lower: normalize(lower),
+            upper: normalize(upper),
+        },
+        Node::BigOpSym { op, lower, upper } => Node::BigOpSym {
+            op: *op,
             lower: normalize(lower),
             upper: normalize(upper),
         },

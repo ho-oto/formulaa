@@ -304,7 +304,7 @@ fn rm_and_text_boxes() {
     // A dictionary word still falls back to its Func.
     let mut ed = Editor::new();
     type_script(&mut ed, r"\rm sin Enter");
-    assert_eq!(latex(&ed), "\\sin ");
+    assert_eq!(latex(&ed), "\\operatorname{sin}");
     // \text takes free content incl. spaces, committed as "…".
     let mut ed = Editor::new();
     type_script(&mut ed, r"\text if Space x Enter");
@@ -350,7 +350,7 @@ fn op_box_via_keys() {
     // Enter commits into the lower limit.
     let mut ed = Editor::new();
     type_script(&mut ed, r"\op* ess Space sup Enter n Tab");
-    assert_eq!(latex(&ed), "\\operatorname*{ess sup}_{n}");
+    assert_eq!(latex(&ed), "\\operatorname*{esssup}_{n}");
     // Arrow keys (anything not part of the name) commit the box too.
     let mut ed = Editor::new();
     type_script(&mut ed, r"\op vol Right +1");

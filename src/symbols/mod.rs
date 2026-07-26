@@ -235,54 +235,6 @@ pub fn is_under_mark(c: char) -> bool {
     ACCENTS.iter().any(|&(_, m, under, _)| m == c && under)
 }
 
-/// Multi-word operator names: the command inserts a band with one piece
-/// per word (`\argmax` -> ┈arg┈max┈, `\limsup` -> ┈lim┈sup┈), so the
-/// spacing matches the words. `latex`/`typst` flag whether the joined
-/// name is native there (\limsup); otherwise the serializers group the
-/// pieces (\mathop{\arg\max} / op("arg max")).
-pub struct WordOp {
-    pub name: &'static str,
-    pub words: [&'static str; 2],
-    pub latex: bool,
-    pub typst: bool,
-}
-
-pub const WORD_OPS: &[WordOp] = &[
-    WordOp {
-        name: "argmax",
-        words: ["arg", "max"],
-        latex: false,
-        typst: false,
-    },
-    WordOp {
-        name: "argmin",
-        words: ["arg", "min"],
-        latex: false,
-        typst: false,
-    },
-    WordOp {
-        name: "limsup",
-        words: ["lim", "sup"],
-        latex: true,
-        typst: true,
-    },
-    WordOp {
-        name: "liminf",
-        words: ["lim", "inf"],
-        latex: true,
-        typst: true,
-    },
-];
-
-pub fn word_op(name: &str) -> Option<&'static WordOp> {
-    WORD_OPS.iter().find(|w| w.name == name)
-}
-
-/// The word op a run of band pieces spells, if any.
-pub fn word_op_of(words: &[&str]) -> Option<&'static WordOp> {
-    WORD_OPS.iter().find(|w| w.words == words)
-}
-
 /// Big operators available as `\name` (typeset with under/over limits).
 pub const BIG_OPS: &[(&str, char)] = &[
     ("sum", '∑'),
@@ -304,92 +256,103 @@ pub const BIG_OPS: &[(&str, char)] = &[
 /// - `limits`: the \lim class — the minibuffer command opens a ┈band┈
 ///   with an under-limit, and ↑/↓ re-promotes a bare one
 ///   (ast::promotable_base)
-/// - `latex`: LaTeX/KaTeX define \name natively; otherwise the
-///   serializer emits \operatorname{name} (\div is ÷ in LaTeX, \Re is
+/// - `spaced`: inner text for \operatorname when the name reads as
+///   several words (`argmax` -> `arg\,max`); None = the name verbatim (\div is ÷ in LaTeX, \Re is
 ///   ℜ — the upright-operator reading needs \operatorname)
-/// - `typst`: Typst's math mode predefines it; otherwise op("name")
 ///
 /// ∑-class *symbol* operators live in `BIG_OPS`; multi-word \op* bases
 /// are assembled in `ast::op_words`.
 pub struct FuncSpec {
     pub name: &'static str,
     pub limits: bool,
-    pub latex: bool,
-    pub typst: bool,
+    pub spaced: Option<&'static str>,
 }
 
-const fn fun(name: &'static str, limits: bool, latex: bool, typst: bool) -> FuncSpec {
+const fn fun(name: &'static str, limits: bool) -> FuncSpec {
     FuncSpec {
         name,
         limits,
-        latex,
-        typst,
+        spaced: None,
+    }
+}
+
+/// A name that reads as several words in LaTeX (`arg\,max`).
+const fn words(name: &'static str, spaced: &'static str) -> FuncSpec {
+    FuncSpec {
+        name,
+        limits: true,
+        spaced: Some(spaced),
     }
 }
 
 pub const FUNCS: &[FuncSpec] = &[
-    fun("arccos", false, true, true),
-    fun("arcsin", false, true, true),
-    fun("arctan", false, true, true),
-    fun("arctg", false, true, false),
-    fun("arcctg", false, true, false),
-    fun("arg", false, true, true),
-    fun("ch", false, true, false),
-    fun("cos", false, true, true),
-    fun("cosec", false, true, false),
-    fun("cosh", false, true, true),
-    fun("cot", false, true, true),
-    fun("cotg", false, true, false),
-    fun("coth", false, true, true),
-    fun("csc", false, true, true),
-    fun("ctg", false, true, true),
-    fun("cth", false, true, false),
-    fun("deg", false, true, true),
-    fun("det", true, true, true),
-    fun("dim", false, true, true),
-    fun("exp", false, true, true),
-    fun("gcd", true, true, true),
-    fun("hom", false, true, true),
-    fun("inf", true, true, true),
-    fun("ker", false, true, true),
-    fun("lg", false, true, true),
-    fun("lim", true, true, true),
-    fun("ln", false, true, true),
-    fun("log", false, true, true),
-    fun("max", true, true, true),
-    fun("min", true, true, true),
-    fun("mod", false, true, true),
-    fun("sec", false, true, true),
-    fun("sh", false, true, false),
-    fun("sin", false, true, true),
-    fun("sinh", false, true, true),
-    fun("sup", true, true, true),
-    fun("tan", false, true, true),
-    fun("tanh", false, true, true),
-    fun("tg", false, true, true),
-    fun("th", false, true, false),
-    fun("Pr", true, true, true),
-    fun("plim", true, true, false),
-    fun("injlim", true, true, false),
-    fun("projlim", true, true, false),
-    fun("asin", false, false, false),
-    fun("acos", false, false, false),
-    fun("atan", false, false, false),
-    fun("acsc", false, false, false),
-    fun("asec", false, false, false),
-    fun("acot", false, false, false),
-    fun("Tr", false, false, false),
-    fun("tr", false, false, true),
-    fun("rank", false, false, false),
-    fun("erf", false, false, false),
-    fun("Res", false, false, false),
-    fun("res", false, false, false),
-    fun("PV", false, false, false),
-    fun("pv", false, false, false),
-    fun("Re", false, false, false),
-    fun("Im", false, false, false),
-    fun("grad", false, false, false),
-    fun("curl", false, false, false),
+    fun("arccos", false),
+    fun("arcsin", false),
+    fun("arctan", false),
+    fun("arctg", false),
+    fun("arcctg", false),
+    fun("arg", false),
+    fun("ch", false),
+    fun("cos", false),
+    fun("cosec", false),
+    fun("cosh", false),
+    fun("cot", false),
+    fun("cotg", false),
+    fun("coth", false),
+    fun("csc", false),
+    fun("ctg", false),
+    fun("cth", false),
+    fun("deg", false),
+    fun("det", true),
+    fun("dim", false),
+    fun("exp", false),
+    fun("gcd", true),
+    fun("hom", false),
+    fun("inf", true),
+    fun("ker", false),
+    fun("lg", false),
+    fun("lim", true),
+    fun("ln", false),
+    fun("log", false),
+    fun("max", true),
+    fun("min", true),
+    fun("mod", false),
+    fun("sec", false),
+    fun("sh", false),
+    fun("sin", false),
+    fun("sinh", false),
+    fun("sup", true),
+    fun("tan", false),
+    fun("tanh", false),
+    fun("tg", false),
+    fun("th", false),
+    fun("Pr", true),
+    fun("plim", true),
+    fun("injlim", true),
+    fun("projlim", true),
+    // Names that read as several words in LaTeX.
+    words("argmax", "arg\\,max"),
+    words("argmin", "arg\\,min"),
+    words("limsup", "lim\\,sup"),
+    words("liminf", "lim\\,inf"),
+    fun("asin", false),
+    fun("acos", false),
+    fun("atan", false),
+    fun("acsc", false),
+    fun("asec", false),
+    fun("acot", false),
+    fun("Tr", false),
+    fun("tr", false),
+    fun("rank", false),
+    fun("erf", false),
+    fun("Res", false),
+    fun("res", false),
+    fun("PV", false),
+    fun("pv", false),
+    fun("Re", false),
+    fun("Im", false),
+    fun("grad", false),
+    fun("curl", false),
 ];
 
 fn func_spec(name: &str) -> Option<&'static FuncSpec> {
@@ -401,14 +364,9 @@ pub fn func_takes_limits(name: &str) -> bool {
     func_spec(name).is_some_and(|f| f.limits)
 }
 
-/// LaTeX/KaTeX know \name natively (else \operatorname{name}).
-pub fn latex_knows_func(name: &str) -> bool {
-    func_spec(name).is_some_and(|f| f.latex)
-}
-
-/// Typst predefines the name in math mode (else op("name")).
-pub fn typst_knows_func(name: &str) -> bool {
-    func_spec(name).is_some_and(|f| f.typst)
+/// Inner text for \operatorname: the name, or its spaced reading.
+pub fn func_latex_text(name: &str) -> &str {
+    func_spec(name).and_then(|f| f.spaced).unwrap_or(name)
 }
 
 pub fn is_func_name(name: &str) -> bool {

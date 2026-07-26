@@ -1,7 +1,7 @@
 //! WASM bindings for mascii.
 //!
 //! Two layers:
-//! - stateless converters (`aa_to_latex`, `aa_to_typst`, `aa_format`)
+//! - stateless converters (`aa_to_latex`, `aa_format`)
 //! - `MasciiEditor`: the structural editor driven by a key API, for
 //!   embedding the TUI-equivalent editing experience in VSCode/Obsidian
 //!   webviews (see editors/ in the repository).
@@ -13,7 +13,6 @@ use mascii::editor::{
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
 use mascii::render::{render_root, RenderCtx, CURSOR_CHAR};
-use mascii::typst::row_to_typst;
 use wasm_bindgen::prelude::*;
 
 fn parse_or_err(text: &str) -> Result<mascii::ast::Row, JsError> {
@@ -24,12 +23,6 @@ fn parse_or_err(text: &str) -> Result<mascii::ast::Row, JsError> {
 #[wasm_bindgen]
 pub fn aa_to_latex(text: &str) -> Result<String, JsError> {
     Ok(row_to_latex(&parse_or_err(text)?))
-}
-
-/// AA text -> Typst.
-#[wasm_bindgen]
-pub fn aa_to_typst(text: &str) -> Result<String, JsError> {
-    Ok(row_to_typst(&parse_or_err(text)?))
 }
 
 /// AA text -> canonical AA.
@@ -50,7 +43,7 @@ pub fn aa_check(text: &str) -> String {
 
 /// The structural editor. Feed keys with `key()`, display `screen()`
 /// (the cursor is the ▌ character; selection is wrapped in ⟦ ⟧), and read
-/// the result back with `aa()` / `latex()` / `typst()`.
+/// the result back with `aa()` / `latex()`.
 #[wasm_bindgen]
 pub struct MasciiEditor {
     ed: Editor,
@@ -166,10 +159,6 @@ impl MasciiEditor {
 
     pub fn latex(&self) -> String {
         row_to_latex(&normalize(&self.ed.root))
-    }
-
-    pub fn typst(&self) -> String {
-        row_to_typst(&normalize(&self.ed.root))
     }
 
     pub fn message(&self) -> String {

@@ -1,5 +1,4 @@
 //! Generates docs/examples.md: the roundtrip corpus rendered as AA with
-//! its LaTeX and Typst translations.
 //! Regenerate with: cargo run --example catalog > docs/examples.md
 //! (Formula definitions mirror tests/roundtrip.rs.)
 
@@ -7,7 +6,6 @@
 use mascii::ast::{Node, Row, normalize};
 use mascii::latex::row_to_latex;
 use mascii::render::{RenderCtx, render_row};
-use mascii::typst::row_to_typst;
 
 // ----- tiny DSL for building formulas -----
 
@@ -49,8 +47,12 @@ fn paren(inner: Row) -> Node {
 }
 
 fn bigop(op: char, lower: Row, upper: Row) -> Node {
+    Node::BigOpSym { op, lower, upper }
+}
+
+fn opname(name: &str, lower: Row, upper: Row) -> Node {
     Node::BigOp {
-        base: vec![Node::Sym(op)],
+        name: name.into(),
         lower,
         upper,
     }
@@ -103,7 +105,6 @@ fn roundtrip(name: &str, row: &Row) {
     println!("### {}\n", name);
     println!("```\n{}\n```\n", aa);
     println!("LaTeX:\n\n```latex\n{}\n```\n", row_to_latex(&row));
-    println!("Typst:\n\n```typst\n{}\n```\n", row_to_typst(&row));
 }
 
 // ----- MDN: three famous mathematical formulas -----
@@ -487,7 +488,7 @@ fn braces_over_under() {
 fn limit_funcs() {
     let row = cat(&[
         n(Node::BigOp {
-            base: vec![func("lim")],
+            name: "lim".into(),
             lower: cat(&[s("x"), s("→"), s("0")]),
             upper: vec![],
         }),
@@ -497,7 +498,7 @@ fn limit_funcs() {
     roundtrip("lim", &row);
     let row = cat(&[
         n(Node::BigOp {
-            base: vec![func("arg"), func("max")],
+            name: "argmax".into(),
             lower: s("x∈S"),
             upper: vec![],
         }),
@@ -523,10 +524,7 @@ fn arrows_and_text() {
         n(bigop('∫', vec![], vec![])),
         s("f"),
         n(paren(s("x"))),
-        n(Node::Text {
-            t: "dx".into(),
-            math: true,
-        }),
+        n(Node::Func("dx".into())),
     ]);
     roundtrip("mathrm-dx", &row);
 }

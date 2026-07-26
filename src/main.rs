@@ -18,7 +18,7 @@ use mascii::editor::{
 };
 use mascii::input::{Effect, Key};
 use mascii::render::{RenderCtx, render_root};
-use mascii::{ast, latex, parse, typst};
+use mascii::{ast, latex, parse};
 
 const HELP: &str = "^G jump  ^F free move  ^B select block  \\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ⇧←→/⇧↑ select  ^Z/^R undo/redo  ^T italic  ^Y copy AA  ^S save  Esc/^Q quit";
 
@@ -56,7 +56,6 @@ fn help_line(ed: &Editor) -> &'static str {
 const USAGE: &str = "\
 usage: mascii                 interactive TUI editor
        mascii aa2tex   [FILE] AA formula (file or stdin) -> LaTeX
-       mascii aa2typst [FILE] AA formula (file or stdin) -> Typst
        mascii fmt      [FILE] AA formula -> canonical AA (normalize)";
 
 /// View state the editor itself does not own: the scroll offset of the
@@ -70,7 +69,7 @@ struct View {
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        Some(m @ ("aa2tex" | "aa2typst" | "fmt")) => {
+        Some(m @ ("aa2tex" | "fmt")) => {
             return convert(m, args.get(1).map(String::as_str));
         }
         Some(_) => {
@@ -116,7 +115,7 @@ fn main() -> std::io::Result<()> {
     result
 }
 
-/// aa2tex / aa2typst / fmt: read AA text (file or stdin), write to stdout.
+/// aa2tex / fmt: read AA text (file or stdin), write to stdout.
 fn convert(mode: &str, file: Option<&str>) -> std::io::Result<()> {
     let text = match file {
         Some(path) => fs::read_to_string(path)?,
@@ -131,7 +130,6 @@ fn convert(mode: &str, file: Option<&str>) -> std::io::Result<()> {
     };
     match mode {
         "aa2tex" => println!("{}", latex::row_to_latex(&row)),
-        "aa2typst" => println!("{}", typst::row_to_typst(&row)),
         _ => {
             let block = render_root(&row, None, &RenderCtx::canonical());
             println!("{}", block.to_text());

@@ -340,7 +340,7 @@ impl Editor {
     }
 
     /// Formatting space (Space key): blank column in the AA, nothing in
-    /// LaTeX/Typst, vanishes on reparse.
+    /// LaTeX, vanishes on reparse.
     pub fn insert_spacer(&mut self) {
         let col = self.col;
         self.cur_row_mut().insert(col, Node::Spacer);
@@ -826,11 +826,18 @@ impl Editor {
             };
             if promotable {
                 let row = self.cur_row_mut();
-                let base = vec![row[col].clone()];
-                row[col] = Node::BigOp {
-                    base,
-                    lower: vec![],
-                    upper: vec![],
+                row[col] = match &row[col] {
+                    Node::Sym(c) => Node::BigOpSym {
+                        op: *c,
+                        lower: vec![],
+                        upper: vec![],
+                    },
+                    Node::Func(name) => Node::BigOp {
+                        name: name.clone(),
+                        lower: vec![],
+                        upper: vec![],
+                    },
+                    _ => unreachable!(),
                 };
                 let f = if up { Field::OpUpper } else { Field::OpLower };
                 self.path.push((col, f));
@@ -1994,21 +2001,16 @@ impl Editor {
         let Some((kind, text)) = self.op_entry.take() else {
             return;
         };
-        let piece = |w: &str| {
-            if !w.contains('.') && crate::symbols::is_func_name(w) {
-                Node::Func(w.to_string())
-            } else {
-                Node::Text {
-                    t: w.to_string(),
-                    math: true,
-                }
-            }
+        // Any upright run is a Func; a lone letter is Roman.
+        let upright = |w: &str| match w.chars().count() {
+            1 => Node::Roman(w.chars().next().unwrap()),
+            _ => Node::Func(w.to_string()),
         };
         match kind {
             BoxKind::Rm => {
                 let t = text.trim();
                 if !t.is_empty() {
-                    let node = piece(t);
+                    let node = upright(t);
                     let col = self.col;
                     self.cur_row_mut().insert(col, node);
                     self.col += 1;
@@ -2016,10 +2018,7 @@ impl Editor {
             }
             BoxKind::Text => {
                 if !text.is_empty() {
-                    let node = Node::Text {
-                        t: text,
-                        math: false,
-                    };
+                    let node = Node::Text(text);
                     let col = self.col;
                     self.cur_row_mut().insert(col, node);
                     self.col += 1;
@@ -2031,9 +2030,10 @@ impl Editor {
                     return;
                 }
                 if kind == BoxKind::OpStar {
-                    let base: Vec<Node> = words.iter().map(|w| piece(w)).collect();
+                    // A band name is one piece: the words are joined so
+                    // the bare form reads back as exactly one Func.
                     self.insert_and_enter(Node::BigOp {
-                        base,
+                        name: words.concat(),
                         lower: vec![],
                         upper: vec![],
                     });
@@ -2043,7 +2043,7 @@ impl Editor {
                         if i > 0 {
                             nodes.push(Node::Sym('␣'));
                         }
-                        nodes.push(piece(w));
+                        nodes.push(upright(w));
                     }
                     let col = self.col;
                     let n = nodes.len();
@@ -2189,16 +2189,6 @@ impl Editor {
             }),
             // Multi-piece limit operators (┈arg┈max┈). Hardcoded for now;
             // arbitrary bases need OpBase editing (roadmap).
-            _ if crate::symbols::word_op(cmd).is_some() => {
-                // Multi-word operators (\argmax, \limsup, …): one band
-                // piece per word, entering the lower limit.
-                let w = crate::symbols::word_op(cmd).unwrap();
-                self.insert_and_enter(Node::BigOp {
-                    base: w.words.iter().map(|&f| Node::Func(f.into())).collect(),
-                    lower: vec![],
-                    upper: vec![],
-                });
-            }
             "addrow" => self.add_row(),
             "addcol" => self.add_col(),
             "delrow" => self.del_row(),
@@ -2209,15 +2199,15 @@ impl Editor {
             }
             _ => {
                 if let Some(op) = bigop_by_name(cmd) {
-                    self.insert_and_enter(Node::BigOp {
-                        base: vec![Node::Sym(op)],
+                    self.insert_and_enter(Node::BigOpSym {
+                        op,
                         lower: vec![],
                         upper: vec![],
                     });
                 } else if crate::symbols::func_takes_limits(cmd) {
                     // Limit-taking operators enter the lower limit (┈lim┈).
                     self.insert_and_enter(Node::BigOp {
-                        base: vec![Node::Func(cmd.to_string())],
+                        name: cmd.to_string(),
                         lower: vec![],
                         upper: vec![],
                     });
@@ -2243,8 +2233,8 @@ impl Editor {
                     self.col += 1;
                 } else if let Some(c) = symbol_by_name(cmd) {
                     if bigop_by_char(c) {
-                        self.insert_and_enter(Node::BigOp {
-                            base: vec![Node::Sym(c)],
+                        self.insert_and_enter(Node::BigOpSym {
+                            op: c,
                             lower: vec![],
                             upper: vec![],
                         });
@@ -2288,13 +2278,10 @@ impl Editor {
                     // upright dictionary word IS the function (the letter
                     // -run rule reads it back as Func anyway), so \rmsin
                     // falls back to \sin instead of a quoted 'sin'.
-                    let node = if math && is_func_name(t) {
-                        Node::Func(t.to_string())
-                    } else {
-                        Node::Text {
-                            t: t.to_string(),
-                            math,
-                        }
+                    let node = match (math, t.chars().count()) {
+                        (false, _) => Node::Text(t.to_string()),
+                        (true, 1) => Node::Roman(t.chars().next().unwrap()),
+                        (true, _) => Node::Func(t.to_string()),
                     };
                     let col = self.col;
                     self.cur_row_mut().insert(col, node);
@@ -2428,25 +2415,20 @@ mod tests {
             vec![
                 Node::Func("arg".into()),
                 Node::Sym('␣'),
-                Node::Text {
-                    t: "blah".into(),
-                    math: true
-                }
+                Node::Func("blah".into())
             ]
         );
-        // \op*: an operator band; space-separated words become the band
-        // pieces (┈ess┈sup┈), dictionary words as Funcs.
+        // \op*: an operator band. A band name is one piece, so the
+        // typed words are joined (the bare form must read back as one
+        // Func); LaTeX still spaces the known ones.
         let mut ed = Editor::new();
         ed.execute("op*");
         type_name(&mut ed, "ess sup");
         assert_eq!(ed.path.last().unwrap().1, Field::OpLower);
         ed.insert_sym('x');
         ed.exit_inset();
-        assert!(matches!(&ed.root[0],
-            Node::BigOp { base, .. } if base.len() == 2
-                && matches!(&base[0], Node::Text { t, .. } if t == "ess")
-                && base[1] == Node::Func("sup".into())));
-        assert_eq!(row_to_latex(&ed.root), "\\operatorname*{ess sup}_{x}");
+        assert!(matches!(&ed.root[0], Node::BigOp { name, .. } if name == "esssup"));
+        assert_eq!(row_to_latex(&ed.root), "\\operatorname*{esssup}_{x}");
         // Empty box commits to nothing; Esc-like cancel via backspace.
         let mut ed = Editor::new();
         ed.execute("op");
@@ -2488,14 +2470,14 @@ mod tests {
     }
 
     #[test]
-    fn argmax_makes_a_two_piece_bigop() {
+    fn argmax_makes_a_named_band() {
         let mut ed = Editor::new();
         ed.execute("argmax");
         // Cursor lands in the lower limit.
         assert_eq!(ed.path.last().unwrap().1, Field::OpLower);
         ed.insert_sym('x');
         ed.exit_inset();
-        assert_eq!(row_to_latex(&ed.root), "\\mathop{\\arg \\max}_{x}");
+        assert_eq!(row_to_latex(&ed.root), "\\operatorname*{arg\\,max}_{x}");
     }
 
     #[test]
@@ -2736,7 +2718,7 @@ mod tests {
         assert_eq!(ed.path.last().unwrap().1, Field::OpLower);
         ed.insert_sym('n');
         ed.exit_inset();
-        assert_eq!(row_to_latex(&ed.root), "\\sum _{n}");
+        assert_eq!(row_to_latex(&ed.root), "\\sum_{n}");
         // Same for limit-taking functions (┈lim┈).
         let mut ed = Editor::new();
         ed.root = vec![Node::Func("lim".into())];
@@ -2760,7 +2742,7 @@ mod tests {
         }
         ed.exit_inset();
         ed.insert_sym('f');
-        assert_eq!(row_to_latex(&ed.root), "\\lim _{x\\to 0}f");
+        assert_eq!(row_to_latex(&ed.root), "\\operatorname*{lim}_{x\\to 0}f");
     }
 
     #[test]

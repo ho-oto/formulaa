@@ -12,7 +12,7 @@ cargo fmt                      # コミット前に必ず整形(リポジトリ�
 cargo run                      # TUI エディタ
 cargo run --example demo       # レンダリングのサンプル出力(TUI なし)
 cargo run --example ambig      # バンド記法が解決した曖昧性の回帰デモ
-echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
+echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 ```
 
 ## 最重要ルール
@@ -47,8 +47,8 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(aa2typst / fmt も同様)
 | `src/parse.rs` | AA → AST。領域+基線の再帰下降。正準AAの受理側+寛容入力 |
 | `src/editor.rs` | 構造エディタ(LyX 型カーソル、コマンド実行) |
 | `src/input.rs` | **共有キーマップ**(`Key`/`Effect`/`Editor::input`)。TUI と wasm は変換だけ |
-| `src/output/latex.rs` / `src/output/typst.rs` | AST → LaTeX / Typst(crate ルートの `mascii::latex`/`typst` で再輸出) |
-| `src/symbols/mod.rs` | 厳選シンボル表・関数表 FUNCS(limits/LaTeX/Typst フラグ付き)・BIG_OPS・アクセント表・予約グリフ判定 |
+| `src/output/latex.rs` | AST → LaTeX(crate ルートの `mascii::latex` で再輸出) |
+| `src/symbols/mod.rs` | 厳選シンボル表・関数表 FUNCS(limits/LaTeX フラグ付き)・BIG_OPS・アクセント表・予約グリフ判定 |
 | `src/symbols/ext.rs` | **生成物**(ho-oto/mathematical-symbols 由来、480件)。phf マップ(順序不要・重複はビルドエラー)。手編集しない |
 | `src/symbols/alphabets.rs` | スタイル族: アルファベット(`\bbR` `\Afrk` `\bfsf3`、12族28綴り×前置/後置)を規則+例外表、上下付き(`\supA` `\Asup`)を明示表で |
 | `src/theme.rs` | TUI の配色定数(bin 専用) |

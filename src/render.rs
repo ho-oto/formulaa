@@ -5,7 +5,7 @@
 //! the AST. Every layout rule here has a matching rule in the parser —
 //! change them in lockstep and keep the roundtrip tests green.
 
-use crate::ast::{Field, Node, Row, promotable_base};
+use crate::ast::{Field, Node, Row};
 
 pub const CURSOR_CHAR: char = '▌'; // U+258C LEFT HALF BLOCK (view-only)
 /// Placeholder for an empty mandatory slot, and explicit base of a script
@@ -444,13 +444,10 @@ type CursorRef<'a> = (&'a [(usize, Field)], usize);
 
 /// `placeholder`: render an empty row as ⬚ (used for mandatory slots like
 /// fraction numerators; big-operator limits pass false so empty limits vanish).
-/// Upright run. \mathrm draws bare when the picture reads back as the
-/// same Text: >= 2 ASCII letters and not a dictionary word — or a
-/// *single* letter glued to an alphabetic neighbour (`glue`), which the
-/// parser reads as the roman-differential form (d𝑦). Everything else is
-/// 'single-quoted'; \text always "double-quotes". Interior spaces are ␣
-/// so quotes never contain structurally meaningful blank columns.
-fn text_block(t: &str, math: bool, glue: bool) -> Block {
+/// Upright run (`Func`). It draws bare when the picture reads back as
+/// the same run: >= 2 ASCII letters, dots only where the run lexer
+/// keeps them (i.i.d.). Anything else is 'single-quoted'.
+fn func_block(t: &str) -> Block {
     // A dotted run (i.i.d.) is bare exactly when the run lexer reads it
     // back as one token: starts with a letter, every interior dot is
     // followed by a letter, and a trailing dot only with an interior
@@ -465,32 +462,54 @@ fn text_block(t: &str, math: bool, glue: bool) -> Block {
                     None => chars[..i].contains(&'.'),
                 }
         });
-    let bare = math
-        && dotted_ok
-        && (t.contains('.') || !crate::symbols::is_func_name(t))
-        && (chars.len() >= 2 || (chars.len() == 1 && glue));
-    if bare {
-        Block::from_chars(t.chars().collect())
-    } else {
-        // "…" quotes delimit their content themselves, so \text keeps
-        // real spaces; '…' scans stop at a space, so \mathrm interior
-        // spaces stay visible ␣.
-        let q = if math { '\'' } else { '"' };
-        let mut chars = vec![q];
-        for c in t.chars() {
-            match c {
-                ' ' if math => chars.push('␣'),
-                // Inside "…", a backslash escapes the next char, so a
-                // literal " (or \) is representable.
-                '"' | '\\' if !math => {
-                    chars.push('\\');
-                    chars.push(c);
-                }
-                c => chars.push(c),
-            }
-        }
-        chars.push(q);
+    if dotted_ok && chars.len() >= 2 {
         Block::from_chars(chars)
+    } else {
+        quoted(t, '\'')
+    }
+}
+
+/// A lone upright letter (`Roman`). It can drop its quotes only when a
+/// neighbour glues it into the roman reading (`d𝑦`); standalone it
+/// would read as an italic variable, so it keeps them.
+fn roman_block(c: char, glue: bool) -> Block {
+    if glue {
+        Block::from_chars(vec![c])
+    } else {
+        quoted(&c.to_string(), '\'')
+    }
+}
+
+/// `'…'` (\mathrm) or `"…"` (\text). The double-quoted form delimits
+/// its own content so real spaces survive; the single-quoted scan stops
+/// at a blank, so interior spaces show as ␣.
+fn quoted(t: &str, q: char) -> Block {
+    let mut chars = vec![q];
+    for c in t.chars() {
+        match c {
+            ' ' if q == '\'' => chars.push('␣'),
+            // Inside "…", a backslash escapes the next char, so a
+            // literal " (or \) is representable.
+            '"' | '\\' if q == '"' => {
+                chars.push('\\');
+                chars.push(c);
+            }
+            c => chars.push(c),
+        }
+    }
+    chars.push(q);
+    Block::from_chars(chars)
+}
+
+/// Does this node's picture put an accent band next to its neighbours?
+/// A band has no closing glyph, so the scan would run into whatever
+/// touches it — struck (`Cancel`) accents count too, which is why this
+/// looks through the wrappers that keep their argument's outline.
+fn has_wide_accent(n: &Node) -> bool {
+    match n {
+        Node::WideAccent { .. } => true,
+        Node::Cancel { arg } => arg.iter().any(has_wide_accent),
+        _ => false,
     }
 }
 
@@ -570,8 +589,8 @@ pub fn render_row(
             None => None,
         };
         let info = Info {
-            wide_accent: matches!(node, Node::WideAccent { .. }),
-            dot_run: matches!(node, Node::Text { t, math: true } if t.contains('.')),
+            wide_accent: has_wide_accent(node),
+            dot_run: matches!(node, Node::Func(t) if t.contains('.')),
             marker: is_marker_node(node),
             script: matches!(node, Node::Sup { .. } | Node::Sub { .. }),
             script_2d: match node {
@@ -589,7 +608,7 @@ pub fn render_row(
             // Single upright letters drop their quotes when a neighbour
             // makes the bare reading unambiguous (d𝑦); the quotes come
             // back automatically when the context changes.
-            Node::Text { t, math } => {
+            Node::Roman(c) => {
                 let glue = row[..i]
                     .iter()
                     .rev()
@@ -599,7 +618,7 @@ pub fn render_row(
                         .iter()
                         .find(|n| !is_marker_node(n))
                         .is_some_and(|n| glue_alpha(n, false));
-                text_block(t, *math, glue)
+                roman_block(*c, glue)
             }
             _ => render_node(node, child_cursor, ctx),
         };
@@ -852,7 +871,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
 
         // Upright letters are reserved for function names (plain letters
         // render math-italic), which is what makes them parseable.
-        Node::Func(name) => Block::from_chars(name.chars().collect()),
+        Node::Func(name) => func_block(name),
 
         // Upright run. \mathrm draws bare when self-identifying (>= 2
         // ASCII letters, not a dictionary word), else 'single-quoted';
@@ -860,7 +879,8 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
         // never contain structurally meaningful blank columns.
         // Reached only for rows not built by render_row (which decides
         // glue from the neighbours); standalone = never glued.
-        Node::Text { t, math } => text_block(t, *math, false),
+        Node::Text(t) => quoted(t, '"'),
+        Node::Roman(c) => roman_block(*c, false),
 
         // Stretchy accent: the base stays bare on the baseline; an
         // accent band — a ┈ run whose only piece is the mark — rides
@@ -1090,18 +1110,27 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             }
         }
 
-        Node::BigOp { base, lower, upper } => {
-            // Empty limits vanish in canonical output (normalize splices
-            // the base), but while the cursor is inside both slots must
+        Node::BigOp { .. } | Node::BigOpSym { .. } => {
+            let (lower, upper) = match node {
+                Node::BigOp { lower, upper, .. } | Node::BigOpSym { lower, upper, .. } => {
+                    (lower, upper)
+                }
+                _ => unreachable!(),
+            };
+            // Empty limits vanish in canonical output (normalize bares
+            // the band), but while the cursor is inside both slots must
             // stay visible (⬚) so they can be navigated to.
             let editing = cursor.is_some();
             let u = render_row(upper, cur(Field::OpUpper), editing, ctx);
             let l = render_row(lower, cur(Field::OpLower), editing, ctx);
-            let b = render_row(base, None, true, ctx);
-            if u.is_empty() && l.is_empty() && cursor.is_none() && promotable_base(base) {
-                // Transient un-normalized state (a bare-able ∑ / lim):
-                // just the base. Non-promotable bases (\op* names) keep
-                // their band even without limits.
+            let b = match node {
+                Node::BigOpSym { op, .. } => Block::from_chars(vec![display_char(*op, ctx)]),
+                Node::BigOp { name, .. } => Block::from_chars(name.chars().collect()),
+                _ => unreachable!(),
+            };
+            if u.is_empty() && l.is_empty() && cursor.is_none() {
+                // Transient un-normalized state: the bare form, which is
+                // what normalize would have produced.
                 return b;
             }
             // Band marks the horizontal extent of the limits; the base is
@@ -1111,12 +1140,8 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             let w = u.width().max(l.width()).max(bw) + 2;
             let mut band = vec![OP_BAND; w];
             let left = (w - bw) / 2;
-            if !b.is_empty() {
-                for (i, &c0) in b.lines[b.baseline.min(b.height() - 1)].iter().enumerate() {
-                    if c0 != ' ' {
-                        band[left + i] = c0;
-                    }
-                }
+            for (i, &c0) in b.lines[0].iter().enumerate() {
+                band[left + i] = c0;
             }
             let mut lines = center_pad(&u, w);
             let baseline = lines.len();
@@ -1780,8 +1805,8 @@ mod tests {
 
     #[test]
     fn bigop_band_marks_limit_extent() {
-        let root = vec![Node::BigOp {
-            base: vec![Node::Sym('∑')],
+        let root = vec![Node::BigOpSym {
+            op: '∑',
             lower: sym_row("i=0"),
             upper: sym_row("n"),
         }];
@@ -1790,8 +1815,8 @@ mod tests {
 
     #[test]
     fn bigop_without_limits_is_bare() {
-        let root = vec![Node::BigOp {
-            base: vec![Node::Sym('∫')],
+        let root = vec![Node::BigOpSym {
+            op: '∫',
             lower: vec![],
             upper: vec![],
         }];
@@ -1872,8 +1897,8 @@ mod tests {
     #[test]
     fn bigop_shows_placeholders_while_editing() {
         // Cursor in the (empty) lower limit: both slots must be visible.
-        let root = vec![Node::BigOp {
-            base: vec![Node::Sym('∑')],
+        let root = vec![Node::BigOpSym {
+            op: '∑',
             lower: vec![],
             upper: vec![],
         }];

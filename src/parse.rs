@@ -963,30 +963,23 @@ fn parse_region(
                 col = run_end + 1;
             }
             _ if ch == OP_BAND => {
-                // General band: ┈+ (piece ┈+)+ — anything sandwiched in ┈
-                // without spaces takes over/under limits (∑, lim, arg┈max
-                // …). Pieces are flat one-line rows joined into the base.
+                // General band: ┈+ piece ┈+ — whatever is sandwiched in
+                // ┈ without spaces takes over/under limits (`┈∑┈`,
+                // `┈lim┈`, `┈argmax┈`). The piece is exactly one run, so
+                // the bare picture reads back as exactly one node.
                 let (pieces, end) = scan_band(g, rect, bl, col, OP_BAND)?;
-                if pieces.is_empty() {
-                    return err("band without content", bl, col);
-                }
-                let mut base: Row = Vec::new();
-                for (l0, r0) in pieces {
-                    let prect = Rect {
-                        t: bl,
-                        b: bl,
-                        l: l0,
-                        r: r0,
-                    };
-                    base.extend(parse_region(
-                        g,
-                        prect,
-                        Some(bl),
-                        depth + 1,
-                        trace,
-                        in_cancel,
-                    )?);
-                }
+                let [(l0, r0)] = pieces[..] else {
+                    return err(
+                        if pieces.is_empty() {
+                            "band without content"
+                        } else {
+                            "a band holds one piece (an operator name has no blanks)"
+                        },
+                        bl,
+                        col,
+                    );
+                };
+                let base: String = (l0..=r0).map(|c| unstyle_char(g.at(bl, c))).collect();
                 let span = Rect {
                     t: rect.t,
                     b: rect.b,
@@ -1004,7 +997,25 @@ fn parse_region(
                 let lower = region_below(span, bl).map_or(Ok(vec![]), |r| {
                     parse_region(g, r, None, depth + 1, trace, in_cancel)
                 })?;
-                out.push(Node::BigOp { base, lower, upper });
+                // One char that names a ∑-class operator is the symbol
+                // band; anything else is a named one.
+                let one = base.chars().count() == 1;
+                let c0 = base.chars().next().unwrap_or(' ');
+                out.push(if one && crate::symbols::bigop_by_char(c0) {
+                    Node::BigOpSym {
+                        op: c0,
+                        lower,
+                        upper,
+                    }
+                } else if one {
+                    return err("a one-character band must be a ∑-class operator", bl, col);
+                } else {
+                    Node::BigOp {
+                        name: base,
+                        lower,
+                        upper,
+                    }
+                });
                 col = end + 1;
             }
             _ if ch == DOUBLE_BODY => {
@@ -1095,7 +1106,7 @@ fn parse_region(
                         }
                     }
                 }
-                out.push(Node::Text { t, math: false });
+                out.push(Node::Text(t));
                 col = close + 1;
             }
             '\'' => {
@@ -1122,7 +1133,11 @@ fn parse_region(
                         c2 => c2,
                     })
                     .collect();
-                out.push(Node::Text { t, math: true });
+                out.push(if t.chars().count() == 1 {
+                    Node::Roman(t.chars().next().unwrap())
+                } else {
+                    Node::Func(t)
+                });
                 col = close + 1;
             }
             ')' | ']' | '}' | '⟩' => {
@@ -1229,20 +1244,14 @@ fn parse_region(
                     let prev_letter = col > rect.l && g.at(bl, col - 1).is_alphabetic();
                     let next_letter = run_end < rect.r && g.at(bl, run_end + 1).is_alphabetic();
                     if prev_letter || next_letter {
-                        out.push(Node::Text {
-                            t: word,
-                            math: true,
-                        });
+                        out.push(Node::Roman(word.chars().next().unwrap()));
                     } else {
                         out.push(Node::Sym(ch));
                     }
-                } else if !word.contains('.') && crate::symbols::is_func_name(&word) {
-                    out.push(Node::Func(word));
                 } else {
-                    out.push(Node::Text {
-                        t: word,
-                        math: true,
-                    });
+                    // Any upright multi-letter run is a Func; the
+                    // dictionary only decides limits and lexing.
+                    out.push(Node::Func(word));
                 }
                 col = run_end + 1;
             }
@@ -2220,13 +2229,13 @@ mod tests {
             mids: vec![],
             segs: vec![syms("a+b")],
         }]);
-        roundtrip(&vec![Node::BigOp {
-            base: vec![Node::Sym('∑')],
+        roundtrip(&vec![Node::BigOpSym {
+            op: '∑',
             lower: syms("i=0"),
             upper: syms("n"),
         }]);
-        roundtrip(&vec![Node::BigOp {
-            base: vec![Node::Sym('∫')],
+        roundtrip(&vec![Node::BigOpSym {
+            op: '∫',
             lower: vec![],
             upper: vec![],
         }]);
@@ -2238,7 +2247,7 @@ mod tests {
         let row = parse("x+1").unwrap();
         assert_eq!(row_to_latex(&row), "x+1");
         let row = parse("a sin y").unwrap();
-        assert_eq!(row_to_latex(&row), "a\\sin y");
+        assert_eq!(row_to_latex(&row), "a\\operatorname{sin}y");
         // …but letter *runs* are \mathrm unless they are dictionary words,
         // and a single letter glued to another letter is roman too (d𝑦).
         let row = parse("asiny").unwrap();
@@ -2275,19 +2284,19 @@ mod tests {
     #[test]
     fn ambiguity_counterexample_is_now_distinguishable() {
         // The two ASTs that rendered identically before the band notation.
-        let ast1 = vec![Node::BigOp {
-            base: vec![Node::Sym('∑')],
+        let ast1 = vec![Node::BigOpSym {
+            op: '∑',
             lower: syms("n=1"),
-            upper: vec![Node::BigOp {
-                base: vec![Node::Sym('∫')],
+            upper: vec![Node::BigOpSym {
+                op: '∫',
                 lower: vec![],
                 upper: vec![],
             }],
         }];
-        let ast2 = vec![Node::BigOp {
-            base: vec![Node::Sym('∫')],
-            lower: vec![Node::BigOp {
-                base: vec![Node::Sym('∑')],
+        let ast2 = vec![Node::BigOpSym {
+            op: '∫',
+            lower: vec![Node::BigOpSym {
+                op: '∑',
                 lower: syms("n=1"),
                 upper: vec![],
             }],

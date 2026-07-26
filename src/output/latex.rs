@@ -2,7 +2,7 @@
 //!
 //! Symbols with a curated LaTeX name become `\name`; other Unicode symbols
 //! (from the large generated table) are emitted verbatim, which assumes a
-//! unicode-math toolchain (lualatex/xelatex or Typst-side conversion).
+//! unicode-math toolchain (lualatex/xelatex).
 
 use crate::ast::{Node, Row};
 use crate::symbols::{accent_info, latex_name};
@@ -25,19 +25,31 @@ fn sym_to_latex(c: char) -> String {
     }
 }
 
+/// `base_{lower}^{upper}`, skipping empty limits.
+fn limited(base: &str, lower: &Row, upper: &Row) -> String {
+    let mut s = base.to_string();
+    if !lower.is_empty() {
+        s.push_str(&format!("_{}", braced(lower)));
+    }
+    if !upper.is_empty() {
+        s.push_str(&format!("^{}", braced(upper)));
+    }
+    s
+}
+
 fn node_to_latex(node: &Node) -> String {
     match node {
         Node::Spacer => String::new(),
         // Line break of a multi-line formula (gather/aligned-style).
         Node::Break => " \\\\ ".into(),
         Node::Sym(c) => sym_to_latex(*c),
-        Node::Func(name) => {
-            if crate::symbols::latex_knows_func(name) {
-                format!("\\{} ", name)
-            } else {
-                format!("\\operatorname{{{}}}", name)
-            }
-        }
+        // Every upright run is \operatorname: one spelling for
+        // dictionary and ad-hoc names alike (\sin and \operatorname{sin}
+        // typeset identically, and this keeps the mapping total).
+        Node::Func(name) => format!(
+            "\\operatorname{{{}}}",
+            crate::symbols::func_latex_text(name)
+        ),
         Node::WideAccent { over, under, base } => {
             let mut s = row_to_latex(base);
             for m in over.iter().chain(under.iter()) {
@@ -65,47 +77,19 @@ fn node_to_latex(node: &Node) -> String {
         },
         Node::Sup { arg } => format!("^{}", braced(arg)),
         Node::Sub { arg } => format!("_{}", braced(arg)),
-        Node::BigOp { base, lower, upper } => {
-            // \sum_{..}^{..}, \lim_{..}, \arg\max_{..} — the base row's
-            // own serialization already yields the operator commands.
-            // Word pieces with a Text among them are an \op* name
-            // (┈ess┈sup┈): \operatorname* keeps the limits underneath
-            // (plain \mathrm would set them aside).
-            let mut s = match crate::ast::op_words(base) {
-                Some((ws, true)) => {
-                    format!("\\operatorname*{{{}}}", ws.join(" "))
-                }
-                // ┈lim┈sup┈ is \limsup where LaTeX knows the joined
-                // name; other multi-piece bases (┈arg┈min┈) group under
-                // \mathop so the limits center under the whole thing —
-                // \arg \min_{θ} would hang θ under \min alone.
-                Some((ws, false)) if crate::symbols::word_op_of(&ws).is_some_and(|w| w.latex) => {
-                    format!("\\{}", crate::symbols::word_op_of(&ws).unwrap().name)
-                }
-                _ if base.len() > 1 => format!("\\mathop{{{}}}", row_to_latex(base).trim_end()),
-                _ => row_to_latex(base),
-            };
-            if !lower.is_empty() {
-                s.push_str(&format!("_{}", braced(lower)));
-            }
-            if !upper.is_empty() {
-                s.push_str(&format!("^{}", braced(upper)));
-            }
-            s
-        }
-        Node::Text { t, math } => {
-            if *math {
-                // A multi-letter upright run is an operator name; a
-                // lone upright letter (the differential d) is \mathrm.
-                if t.chars().count() == 1 {
-                    format!("\\mathrm{{{}}}", t)
-                } else {
-                    format!("\\operatorname{{{}}}", t)
-                }
-            } else {
-                format!("\\text{{{}}}", t)
-            }
-        }
+        Node::BigOpSym { op, lower, upper } => limited(sym_to_latex(*op).trim_end(), lower, upper),
+        // \operatorname* keeps the limits underneath, which is what the
+        // band means (\operatorname{lim}_{x} would set them aside).
+        Node::BigOp { name, lower, upper } => limited(
+            &format!(
+                "\\operatorname*{{{}}}",
+                crate::symbols::func_latex_text(name)
+            ),
+            lower,
+            upper,
+        ),
+        Node::Roman(c) => format!("\\mathrm{{{}}}", c),
+        Node::Text(t) => format!("\\text{{{}}}", t),
         Node::Brace { over, arg, label } => {
             let (cmd, att) = if *over {
                 ("overbrace", '^')
@@ -233,12 +217,12 @@ mod tests {
 
     #[test]
     fn serializes_bigop_limits() {
-        let root = vec![Node::BigOp {
-            base: vec![Node::Sym('∑')],
+        let root = vec![Node::BigOpSym {
+            op: '∑',
             lower: vec![Node::Sym('i')],
             upper: vec![Node::Sym('n')],
         }];
-        assert_eq!(row_to_latex(&root), "\\sum _{i}^{n}");
+        assert_eq!(row_to_latex(&root), "\\sum_{i}^{n}");
     }
 
     #[test]
@@ -267,7 +251,7 @@ mod tests {
         ];
         assert_eq!(
             row_to_latex(&root),
-            "\\sin \\vec{v}\\begin{bmatrix} a & b \\end{bmatrix}\\sqrt[3]{x}"
+            "\\operatorname{sin}\\vec{v}\\begin{bmatrix} a & b \\end{bmatrix}\\sqrt[3]{x}"
         );
     }
 }

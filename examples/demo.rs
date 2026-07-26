@@ -22,8 +22,8 @@ fn show(title: &str, row: &Row) {
 fn main() {
     // Gaussian integral: ∫_{-∞}^{∞} e^{-x²} dx = √π
     let gaussian = vec![
-        Node::BigOp {
-            base: vec![Node::Sym('∫')],
+        Node::BigOpSym {
+            op: '∫',
             lower: vec![Node::Sym('-'), Node::Sym('∞')],
             upper: vec![Node::Sym('∞')],
         },
@@ -69,8 +69,8 @@ fn main() {
 
     // Basel problem: ∑_{n=1}^{∞} 1/n² = π²/6
     let basel = vec![
-        Node::BigOp {
-            base: vec![Node::Sym('∑')],
+        Node::BigOpSym {
+            op: '∑',
             lower: syms("n=1"),
             upper: vec![Node::Sym('∞')],
         },

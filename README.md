@@ -4,7 +4,7 @@ LyX 風の操作感で数式をインタラクティブに編集する TUI エ�
 アスキーアート数式(Unicode 数式記号優先)と数式 AST の**双方向変換器**。
 
 数式は AST と一対一対応する「正準AA形式」として描画され、そのまま
-パースして LaTeX / Typst に機械変換できます。プレーンテキストの世界で
+パースして LaTeX に機械変換できます。プレーンテキストの世界で
 数式を考え、必要になったら組版系に持っていく、を成立させるツールです。
 
 ```
@@ -21,7 +21,6 @@ cargo run                       # TUI エディタ(^Y で AA をクリップボ�
 
 # 変換 CLI(ファイルまたは標準入力)
 mascii aa2tex   formula.txt     # AA → LaTeX
-mascii aa2typst formula.txt     # AA → Typst
 mascii fmt      formula.txt     # AA → 正準AA(手書きAAの正規化・整形)
 
 cargo run --example demo        # レンダリングのサンプルを表示
@@ -48,7 +47,6 @@ TUI は毎編集後に AA→AST の逆変換を自動検査し、ラウンドト
 | `(` `[` `{` / `)` `]` `}` | 自動サイズ括弧に入る / 抜ける(`]` は行列からの脱出も) |
 | `//` | 分数(`/` 2連打。リテラル `//` は `/ /` と打って間の空白を消す) |
 | `Tab` | 現在のインセット(分数・根号・極限など)から抜ける |
-| `Space` | 整形用の空白(AAにだけ現れ、LaTeX/Typst には出ない。意味のある空白は `\space`→␣) |
 | `←` `→` | 構造の中を通り抜けながら移動(選択中は選択の左端/右端に集約) |
 | `Ctrl+A` | 数式全体の先頭へ(`Home`/`End` は現在行の先頭/末尾) |
 | `Ctrl+Z` / `Ctrl+R` | undo / redo(数式が変わった操作ごとに1ステップ。カーソルも一緒に戻る) |
@@ -76,18 +74,16 @@ TUI は毎編集後に AA→AST の逆変換を自動検査し、ラウンドト
   各 *matrix/cases/array 共通。Enter/\addcol などで後から増減も可)
 - デリミタ: `\pmatrix` `\Bmatrix` `\vmatrix` `\array`(裸グリッド)`\cases` `\rcases`、`\ceil` `\floor` `\norm`
   `\abs` `\langle` `\braket`(⟨·|·⟩)`\set`({·|·})`\mid`(セグメント分割)
-  `\lr<spec>`(=`\delim`、Typst 風・**視覚順**: 例 `\lr(]`、`\lr{|}` = {·|·}、
   `\lr\langle||\rangle` = ⟨·|·|·⟩。1文字スペック `()[]{}<>|.` と
   `\langle` 等の名前を混在可、`.` は片側なし)
 - 大型演算子: `\sum` `\prod` `\int` `\oint` `\bigcup` …(挿入直後は下極限、
   `↑` で上極限へ)。`\lim` `\max` `\inf` `\det` `\Pr` なども同じバンドで
-  下極限に入る(`┈lim┈`)。`\argmax` `\argmin` は複数ピースの
-  `┈arg┈max┈`
+  下極限に入る(`┈lim┈`)。`\argmax` `\argmin` `\limsup` `\liminf` も
+  同じ1語のバンド(`┈argmax┈` — LaTeX では `\operatorname*{arg\,max}`)
 - 関数名: `\sin` `\cos` `\log` `\lim` …(立体で表示)。任意名は
   `\op` / `\op*`(別名 `\limits`)— その場に名前入力ボックスが開き、確定でそのまま
   立体ラン(2文字以上は \operatorname)/ 演算子バンド(=\operatorname*、下極限へ)に
-  なる。スペース区切りは `┈ess┈sup┈` のような複数ピースに
-  (`ess sup` → \operatorname*{ess sup})。Esc で取消、
+  なる(バンド名は1語 — `ess sup` は `┈esssup┈` に連結される)。Esc で取消、
   名前以外のキーはそのまま確定して通常動作
 - アクセント: `\hat` `\vec` `\bar` `\dot` `\tilde` `\underline` `\utilde`
   (直前の1文字に付く。続けて実行すると縦に重ね掛け。**選択を包むと
@@ -124,16 +120,16 @@ Rust コアを WASM 化(`wasm/`)し、Markdown の ```math フェンス内の
 AA 数式を構造エディタで編集する拡張のプロトタイプを `editors/` に用意:
 
 - **VSCode**: `Ctrl+Alt+M` でカーソル位置の数式を webview エディタで開き、
-  `Ctrl+Enter` で書き戻し。選択 AA の LaTeX/Typst 変換コマンドも。
+  `Ctrl+Enter` で書き戻し。選択 AA の LaTeX 変換コマンドも。
 - **Obsidian**: コマンド「Edit mascii formula at cursor」でモーダル編集。
-- **Zed**: 拡張 UI API 未提供のため CLI タスク連携(選択→aa2tex 等)。
+- **Zed**: 拡張 UI API 未提供のため CLI タスク連携(選択→aa2tex)。
 
 ビルド手順と「数式部分だけその場で構造編集」への段階的ロードマップは
 `docs/editors.md` 参照。
 
 ## 設計
 
-内部表現は TeX 文字列ではなく**数式 AST**。構造編集・AA 描画・LaTeX/Typst
+内部表現は TeX 文字列ではなく**数式 AST**。構造編集・AA 描画・LaTeX
 出力のすべてが AST から導出されます。AA はソースコードで、正準形の
 ラウンドトリップ契約(`parse(render(normalize(x))) ==
 normalize(strip_spacers(normalize(x)))`)を実式コーパスとランダム生成
@@ -151,7 +147,7 @@ src/render.rs   AST → 2D 文字ブロック(正準AA)
 src/parse.rs    AA → AST(逆変換)
 src/editor.rs   構造エディタ(LyX 型)
 src/input.rs    共有キーマップ(TUI/wasm 共通)
-src/output/     AST → LaTeX / Typst
+src/output/     AST → LaTeX
 src/symbols/    記号・関数・アクセント表(ext.rs は生成物)
 src/main.rs     ratatui TUI + CLI
 ```

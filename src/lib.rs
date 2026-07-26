@@ -6,6 +6,5 @@ pub mod parse;
 pub mod render;
 pub mod symbols;
 
-// The serializer modules keep their historical crate-root paths
-// (mascii::latex / mascii::typst).
-pub use output::{latex, typst};
+// The serializer keeps its historical crate-root path (mascii::latex).
+pub use output::latex;
