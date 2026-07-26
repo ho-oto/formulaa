@@ -19,6 +19,11 @@ fn sym_to_latex(c: char) -> String {
     if c == '␣' {
         return "\\ ".into();
     }
+    // Ordinary characters that LaTeX reads as syntax (a raw % would
+    // comment out the rest of the document).
+    if matches!(c, '#' | '$' | '%' | '&') {
+        return format!("\\{}", c);
+    }
     match latex_name(c) {
         Some(name) => format!("\\{} ", name),
         None => c.to_string(),

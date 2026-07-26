@@ -411,7 +411,10 @@ impl Editor {
                 self.select_anchor = None;
                 self.insert_spacer();
             }
-            Key::Char(c) if c.is_ascii_graphic() => {
+            // The same allow-list the parser uses: a key that is not a
+            // valid atom (`~` `^` `\`, or anything non-ASCII) would build
+            // a formula that cannot be read back.
+            Key::Char(c) if crate::symbols::is_atom(c) => {
                 self.select_anchor = None;
                 self.insert_sym(c);
             }

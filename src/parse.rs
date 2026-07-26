@@ -1259,6 +1259,13 @@ fn parse_region(
                 let (overs, unders, extra) = accent_stacks(g, rect, bl, col);
                 check_flat_columns(g, rect, bl, col, col, overs.len(), unders.len())?;
                 let base = unstyle_char(ch);
+                // Atoms are an allow-list (symbols::is_atom): the layout
+                // is a grid of one-cell chars, so anything wider would
+                // shift every column, and a char no `\name` produces has
+                // no LaTeX spelling either.
+                if !crate::symbols::is_atom(base) {
+                    return err(format!("{:?} is not a valid atom", base), bl, col);
+                }
                 if !overs.is_empty() || !unders.is_empty() {
                     out.push(Node::Accent {
                         overs,
@@ -2275,19 +2282,18 @@ mod tests {
     }
 
     #[test]
-    fn tilde_is_a_plain_atom() {
-        assert_eq!(parse("a~b").unwrap(), syms("a~b"));
-        assert_eq!(parse("a ~ b").unwrap(), syms("a~b"));
-        // A literal ~ still takes accents (drawn low-hat form).
-        let row = parse("˰\n~").unwrap();
-        assert_eq!(
-            row,
-            vec![Node::Accent {
-                overs: vec!['^'],
-                unders: vec![],
-                base: '~'
-            }]
-        );
+    fn latex_unsafe_ascii_is_rejected() {
+        // `~ ^ ` \` have no atom meaning and would be LaTeX syntax; the
+        // symbols are \sim \backslash … `# $ % &` stay atoms and get
+        // escaped on the way out.
+        for bad in ["a~b", "a^b", "a`b", "a\\b"] {
+            assert!(parse(bad).is_err(), "{} must be rejected", bad);
+        }
+        assert_eq!(row_to_latex(&parse("50%").unwrap()), "50\\%");
+        assert_eq!(row_to_latex(&parse("a&b").unwrap()), "a\\&b");
+        // The ∼ operator is the atom one actually wants.
+        let row = parse("a∼b").unwrap();
+        assert_eq!(row_to_latex(&row), "a\\sim b");
     }
 
     #[test]

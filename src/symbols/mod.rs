@@ -178,6 +178,55 @@ pub fn is_reserved_glyph(c: char) -> bool {
         || crate::render::unsubscript_char(c).is_some()
 }
 
+/// Every character the format accepts as an atom. Derived from the
+/// tables themselves — a char is an atom exactly when some `\name`
+/// produces it (or it is plain ASCII, which the keyboard types
+/// directly), never a hand-kept list.
+///
+/// This is an allow-list on purpose. The layout model is a grid of
+/// one-cell characters, so a full-width or combining char pasted into
+/// a formula would silently shift every column; and a char outside the
+/// tables has no LaTeX spelling to convert to. Both failures are
+/// invisible until much later, so they are rejected at the door.
+pub fn is_atom(c: char) -> bool {
+    use std::sync::OnceLock;
+    static ATOMS: OnceLock<std::collections::HashSet<char>> = OnceLock::new();
+    if c.is_ascii() {
+        // ASCII the keyboard types directly, minus the reserved glyphs
+        // and the four that LaTeX would misread as syntax with no
+        // sensible atom meaning (`^` `~` `` ` `` `\` — the symbols are
+        // \sim, \backslash …). `# $ % &` stay: they are ordinary
+        // characters that the serializer escapes.
+        return c.is_ascii_graphic()
+            && !is_reserved_glyph(c)
+            && !matches!(c, '^' | '~' | '`' | '\\');
+    }
+    ATOMS
+        .get_or_init(|| {
+            SYMBOLS
+                .iter()
+                .map(|&(_, c)| c)
+                .chain(BIG_OPS.iter().map(|&(_, c)| c))
+                .chain(ext::EXT_SYMBOLS.values().copied())
+                .chain(alphabets::ALPHABETS.iter().flat_map(|a| {
+                    ('A'..='Z')
+                        .chain('a'..='z')
+                        .chain('0'..='9')
+                        .filter_map(|l| {
+                            alphabets::alphabet_char(&format!("{}{}", a.prefixes[0], l))
+                        })
+                }))
+                .chain(
+                    alphabets::SCRIPTS
+                        .iter()
+                        .flat_map(|s| s.chars.iter().map(|&(_, c)| c)),
+                )
+                .filter(|&c| !is_reserved_glyph(c))
+                .collect()
+        })
+        .contains(&c)
+}
+
 /// Accent marks: (command name, mark char, is_under, latex command).
 /// Mark chars are RESERVED — they never occur as atoms, and over-marks are
 /// disjoint from under-marks; this is what makes a two-character column
@@ -523,6 +572,43 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// Every atom is exactly one cell wide and stands alone — that is
+    /// what the whole grid layout rests on, so it is checked over the
+    /// entire accepted set rather than trusted.
+    #[test]
+    fn every_atom_is_one_narrow_char() {
+        let wide = |c: char| {
+            // The East Asian Wide/Fullwidth blocks, plus emoji.
+            matches!(c as u32,
+                0x1100..=0x115F | 0x2E80..=0xA4CF | 0xA960..=0xA97F
+                | 0xAC00..=0xD7A3 | 0xF900..=0xFAFF | 0xFE10..=0xFE19
+                | 0xFE30..=0xFE6F | 0xFF00..=0xFF60 | 0xFFE0..=0xFFE6
+                | 0x1F300..=0x1FAFF | 0x20000..=0x3FFFD)
+        };
+        let mut n = 0;
+        for c in char::from_u32(0)
+            .into_iter()
+            .chain((1..=0x2FFFFu32).filter_map(char::from_u32))
+        {
+            if !is_atom(c) {
+                continue;
+            }
+            n += 1;
+            assert!(!wide(c), "{:?} (U+{:04X}) is not narrow", c, c as u32);
+            assert!(
+                !matches!(c as u32, 0x300..=0x36F) && c != '\u{200B}',
+                "{:?} is a combining/zero-width char",
+                c
+            );
+        }
+        assert!(n > 500, "the atom set looks too small: {}", n);
+        // The halfwidth arrow is a *drawn* accent glyph, not an atom.
+        assert!(!is_atom('￫'));
+        for c in ['😀', '漢', '\u{0301}', '─', '┈'] {
+            assert!(!is_atom(c), "{:?} must be rejected", c);
         }
     }
 
