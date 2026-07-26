@@ -171,7 +171,7 @@ fn accent_wraps_selection_as_wide_accent() {
     // Stacking the other side: no selection needed, the accent command
     // right after the node fills its free slot.
     type_script(&mut ed, r"\underline");
-    assert_eq!(latex(&ed), "\\underline{\\widehat{abc}}");
+    assert_eq!(latex(&ed), "\\widehat{\\underline{abc}}");
     // A one-char selection is the ordinary compact accent.
     let mut ed = Editor::new();
     type_script(&mut ed, r"x S-Left \vec");
@@ -180,6 +180,11 @@ fn accent_wraps_selection_as_wide_accent() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"\frac 1 Down 2 Tab S-Left \bar");
     assert_eq!(latex(&ed), "\\overline{\\frac{1}{2}}");
+    // Two marks on the same side stack, like a compact accent's.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"abc S-Left S-Left S-Left \hat");
+    type_script(&mut ed, r"\vec");
+    assert_eq!(latex(&ed), "\\overrightarrow{\\widehat{abc}}");
     // The under tilde wraps a selection like any under mark.
     let mut ed = Editor::new();
     type_script(&mut ed, r"AB S-Left S-Left \utilde");

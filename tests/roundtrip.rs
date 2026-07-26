@@ -268,8 +268,11 @@ fn dotted_roman_runs() {
 /// Stretchy accents: a band whose limit region holds only the mark.
 #[test]
 fn wide_accents() {
-    let wa =
-        |over: Option<char>, under: Option<char>, base: Row| Node::WideAccent { over, under, base };
+    let wa = |over: Option<char>, under: Option<char>, base: Row| Node::WideAccent {
+        overs: over.into_iter().collect(),
+        unders: under.into_iter().collect(),
+        base,
+    };
     let row = n(wa(Some('^'), None, s("abc")));
     roundtrip("widehat", &row);
     let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
@@ -280,7 +283,7 @@ fn wide_accents() {
     roundtrip("vec-underline", &row);
     assert_eq!(
         row_to_latex(&normalize(&row)),
-        "\\underline{\\overrightarrow{AB}}"
+        "\\overrightarrow{\\underline{AB}}"
     );
     // Under tilde (\utilde): the ˜/˷ pair swaps between AST mark and
     // drawn glyph; the wide band fills with the high ˜ below.
@@ -1449,15 +1452,25 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
                     .collect()
             };
             let unders = ['‗', '˷'];
-            let (over, under) = match rng.below(3) {
-                0 => (Some(overs[rng.below(overs.len())]), None),
-                1 => (None, Some(unders[rng.below(2)])),
-                _ => (
-                    Some(overs[rng.below(overs.len())]),
-                    Some(unders[rng.below(2)]),
-                ),
+            // Marks stack, so generate 0-2 per side.
+            let pick = |rng: &mut Rng, pool: &[char], n: usize| -> Vec<char> {
+                let mut v = Vec::new();
+                for _ in 0..n {
+                    v.push(pool[rng.below(pool.len())]);
+                }
+                v
             };
-            Node::WideAccent { over, under, base }
+            let (no, nu) = match rng.below(4) {
+                0 => (1, 0),
+                1 => (0, 1),
+                2 => (1, 1),
+                _ => (1 + rng.below(2), rng.below(2)),
+            };
+            Node::WideAccent {
+                overs: pick(rng, &overs, no),
+                unders: pick(rng, &unders, nu),
+                base,
+            }
         }
         6 => {
             // Grid inside a random known pair (bracket matrix most often).

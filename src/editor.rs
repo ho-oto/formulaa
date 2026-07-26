@@ -1189,9 +1189,14 @@ impl Editor {
         if self.selection().is_some() {
             if let Some(content) = self.take_selection() {
                 let under = crate::symbols::is_under_mark(mark);
+                let (overs, unders) = if under {
+                    (vec![], vec![mark])
+                } else {
+                    (vec![mark], vec![])
+                };
                 let node = Node::WideAccent {
-                    over: (!under).then_some(mark),
-                    under: under.then_some(mark),
+                    overs,
+                    unders,
                     base: content,
                 };
                 let col = self.col;
@@ -1229,15 +1234,9 @@ impl Editor {
                     overs.push(mark)
                 }
             }
-            // Fill the free side of a wide accent (¯ then ‗, say).
-            Node::WideAccent { over, under: u, .. } => {
-                let slot = if under { u } else { over };
-                if slot.is_none() {
-                    *slot = Some(mark);
-                } else {
-                    self.message = "that side of the wide accent is taken".into();
-                }
-            }
+            // Stack onto a wide accent, the same way a compact one
+            // stacks (the extra band rides outside the existing ones).
+            Node::WideAccent { overs, unders, .. } => if under { unders } else { overs }.push(mark),
             _ => self.message = "accents apply to a single character".into(),
         }
     }

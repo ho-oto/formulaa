@@ -54,10 +54,16 @@ fn node_to_latex(node: &Node) -> String {
             "\\operatorname{{{}}}",
             crate::symbols::func_latex_text(name)
         ),
-        Node::WideAccent { over, under, base } => {
+        Node::WideAccent {
+            overs,
+            unders,
+            base,
+        } => {
+            // Under-marks innermost, then over-marks — the same nesting
+            // order the compact Accent uses.
             let mut s = row_to_latex(base);
-            for m in over.iter().chain(under.iter()) {
-                s = format!("\\{}{{{}}}", crate::symbols::wide_accent_latex(*m), s);
+            for &m in unders.iter().chain(overs.iter()) {
+                s = format!("\\{}{{{}}}", crate::symbols::wide_accent_latex(m), s);
             }
             s
         }

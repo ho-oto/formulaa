@@ -885,11 +885,15 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
         // Stretchy accent: the base stays bare on the baseline; an
         // accent band — a ┈ run whose only piece is the mark — rides
         // above (over) and/or below (under) marking the extent.
-        Node::WideAccent { over, under, base } => {
+        Node::WideAccent {
+            overs,
+            unders,
+            base,
+        } => {
             let b = render_row(base, None, true, ctx);
             // The ddot material ․․ needs two cells between the band
             // edges, so its band widens past a one-cell base.
-            let bw = if *over == Some('¨') {
+            let bw = if overs.contains(&'¨') {
                 b.width().max(2)
             } else {
                 b.width().max(1)
@@ -949,16 +953,14 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 }
                 r
             };
-            let mut lines: Vec<Vec<char>> = Vec::new();
-            if let Some(m) = over {
-                lines.push(band_row(*m));
-            }
+            // Bands stack outward, innermost first in each list — the
+            // same order the compact Accent uses, so the two forms read
+            // alike (the outermost over band ends up on top).
+            let mut lines: Vec<Vec<char>> = overs.iter().rev().map(|&m| band_row(m)).collect();
             let off = lines.len();
             let baseline = off + b.baseline.min(b.height().saturating_sub(1));
             lines.extend(center_pad(&b, w));
-            if let Some(m) = under {
-                lines.push(band_row(*m));
-            }
+            lines.extend(unders.iter().map(|&m| band_row(m)));
             Annots::default()
                 .centered(&b, w, off)
                 .into_block(lines, baseline)

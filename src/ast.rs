@@ -58,8 +58,8 @@ pub enum Node {
     /// cursor-editable (wrap a selection; re-edit by deleting).
     /// A one-char base with a single over mark normalizes to Accent.
     WideAccent {
-        over: Option<char>,
-        under: Option<char>,
+        overs: Vec<char>,
+        unders: Vec<char>,
         base: Row,
     },
     Frac {
@@ -327,10 +327,10 @@ pub fn normalize(row: &Row) -> Row {
             }
             // A markless wide accent is just its base.
             Node::WideAccent {
-                over: None,
-                under: None,
+                overs,
+                unders,
                 base,
-            } => pre.extend(base),
+            } if overs.is_empty() && unders.is_empty() => pre.extend(base),
             // A one-letter upright run is Roman: its picture ('d' or a
             // glued d𝑥) reads back that way, so Func stays 2+ letters.
             Node::Func(t) if t.chars().count() == 1 => {
@@ -448,9 +448,13 @@ fn strip_cancels(row: &Row) -> Row {
             | Node::Text(_)
             | Node::Roman(_)
             | Node::Accent { .. } => out.push(n.clone()),
-            Node::WideAccent { over, under, base } => out.push(Node::WideAccent {
-                over: *over,
-                under: *under,
+            Node::WideAccent {
+                overs,
+                unders,
+                base,
+            } => out.push(Node::WideAccent {
+                overs: overs.clone(),
+                unders: unders.clone(),
                 base: strip_cancels(base),
             }),
             Node::Frac { num, den } => out.push(Node::Frac {
@@ -525,9 +529,13 @@ pub fn strip_spacers(row: &Row) -> Row {
             | Node::Text(_)
             | Node::Roman(_)
             | Node::Accent { .. } => out.push(n.clone()),
-            Node::WideAccent { over, under, base } => out.push(Node::WideAccent {
-                over: *over,
-                under: *under,
+            Node::WideAccent {
+                overs,
+                unders,
+                base,
+            } => out.push(Node::WideAccent {
+                overs: overs.clone(),
+                unders: unders.clone(),
                 base: strip_spacers(base),
             }),
             Node::Frac { num, den } => out.push(Node::Frac {
@@ -609,28 +617,24 @@ fn normalize_node(node: &Node) -> Node {
         | Node::Text(_)
         | Node::Roman(_)
         | Node::Accent { .. } => node.clone(),
-        Node::WideAccent { over, under, base } => {
+        Node::WideAccent {
+            overs,
+            unders,
+            base,
+        } => {
             let base = normalize(base);
-            // Markless: splice would need row context; degrade to the
-            // bare base wrapped in nothing — callers splice via the
-            // pre-pass below? Simplest: keep as a one-char Accent when
-            // possible, else keep the node.
-            match (&base[..], over, under) {
-                // One-char base with a single over mark is the compact
-                // stacked Accent (x̂) — one picture per formula.
-                ([Node::Sym(c)], Some(m), None) => Node::Accent {
-                    overs: vec![*m],
-                    unders: vec![],
-                    base: *c,
-                },
-                ([Node::Sym(c)], None, Some(m)) => Node::Accent {
-                    overs: vec![],
-                    unders: vec![*m],
+            // A one-char base is the compact stacked Accent (x̂): the
+            // two would draw the same picture otherwise. Marks stack
+            // the same way in both, so the lists carry straight over.
+            match &base[..] {
+                [Node::Sym(c)] => Node::Accent {
+                    overs: overs.clone(),
+                    unders: unders.clone(),
                     base: *c,
                 },
                 _ => Node::WideAccent {
-                    over: *over,
-                    under: *under,
+                    overs: overs.clone(),
+                    unders: unders.clone(),
                     base,
                 },
             }

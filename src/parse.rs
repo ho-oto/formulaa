@@ -1573,25 +1573,46 @@ fn parse_wide_accent(
             .rows()
             .all(|r| (col..=right).all(|c2| g.at(r, c2) == ' ' || g.cancelled(r, c2)));
     let in_cancel = in_cancel || struck;
-    let (over, top) = if over_first {
-        let (m, _) = accent_band_run(g, rect, brow, col, true).unwrap();
-        (Some(m), brow + 1)
+    // Bands stack: walk away from the baseline while they keep coming,
+    // so `overs` comes out innermost-first like a compact Accent's.
+    let (overs, top) = if over_first {
+        // `brow` is the *outermost* over band (the search runs top
+        // down), so collect downward to the baseline and reverse:
+        // `overs` is innermost-first, like a compact Accent's.
+        let mut marks = Vec::new();
+        let mut r = brow;
+        while r < bl
+            && let Some((m, _)) = accent_band_run(g, rect, r, col, true)
+        {
+            marks.push(m);
+            r += 1;
+        }
+        marks.reverse();
+        (marks, r)
     } else {
-        (None, rect.t)
+        (Vec::new(), rect.t)
     };
-    // A matching under band below the baseline (when we started from an
+    // The first under band below the baseline (when we started from an
     // over band) — or the anchoring band itself (under-only).
     let under_row = if over_first {
         (bl + 1..=rect.b).find(|&r| accent_band_run(g, rect, r, col, false).is_some())
     } else {
         Some(brow)
     };
-    let (under, bot) = match under_row {
-        Some(r) => {
-            let (m, _) = accent_band_run(g, rect, r, col, false).unwrap();
-            (Some(m), r - 1)
+    let (unders, bot) = match under_row {
+        Some(first) => {
+            let mut marks = Vec::new();
+            let mut r = first;
+            while let Some((m, _)) = accent_band_run(g, rect, r, col, false) {
+                marks.push(m);
+                if r == rect.b {
+                    break;
+                }
+                r += 1;
+            }
+            (marks, first - 1)
         }
-        None => (None, rect.b),
+        None => (Vec::new(), rect.b),
     };
     let base_rect = Rect {
         t: top,
@@ -1600,7 +1621,11 @@ fn parse_wide_accent(
         r: right,
     };
     let base = parse_region(g, base_rect, Some(bl), depth + 1, trace, in_cancel)?;
-    let node = Node::WideAccent { over, under, base };
+    let node = Node::WideAccent {
+        overs,
+        unders,
+        base,
+    };
     let node = if struck {
         Node::Cancel { arg: vec![node] }
     } else {
