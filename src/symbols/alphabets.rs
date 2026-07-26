@@ -25,6 +25,11 @@ pub struct Alphabet {
     pub digits: Option<u32>,
     /// Characters that sit outside the block (letterlike symbols).
     pub exceptions: &'static [(char, char)],
+    /// The LaTeX macro that styles a plain letter the same way, so the
+    /// serializer can spell any member (`𝔸` -> `\mathbb{A}`). These are
+    /// the unicode-math names, which is the toolchain the raw-Unicode
+    /// fallback already assumes.
+    pub latex: &'static str,
 }
 
 pub const ALPHABETS: &[Alphabet] = &[
@@ -33,6 +38,7 @@ pub const ALPHABETS: &[Alphabet] = &[
         upper: 0x1D538,
         lower: 0x1D552,
         digits: Some(0x1D7D8),
+        latex: "mathbb",
         exceptions: &[
             ('C', 'ℂ'),
             ('H', 'ℍ'),
@@ -48,6 +54,7 @@ pub const ALPHABETS: &[Alphabet] = &[
         upper: 0x1D400,
         lower: 0x1D41A,
         digits: Some(0x1D7CE),
+        latex: "mathbf",
         exceptions: &[],
     },
     Alphabet {
@@ -55,6 +62,7 @@ pub const ALPHABETS: &[Alphabet] = &[
         upper: 0x1D4D0,
         lower: 0x1D4EA,
         digits: Some(0x1D7CE),
+        latex: "mathbfcal",
         exceptions: &[],
     },
     Alphabet {
@@ -62,6 +70,7 @@ pub const ALPHABETS: &[Alphabet] = &[
         upper: 0x1D56C,
         lower: 0x1D586,
         digits: Some(0x1D7CE),
+        latex: "mathbffrak",
         exceptions: &[],
     },
     Alphabet {
@@ -69,6 +78,7 @@ pub const ALPHABETS: &[Alphabet] = &[
         upper: 0x1D468,
         lower: 0x1D482,
         digits: Some(0x1D7CE),
+        latex: "mathbfit",
         exceptions: &[],
     },
     Alphabet {
@@ -76,6 +86,7 @@ pub const ALPHABETS: &[Alphabet] = &[
         upper: 0x1D63C,
         lower: 0x1D656,
         digits: Some(0x1D7EC),
+        latex: "mathbfsfit",
         exceptions: &[],
     },
     Alphabet {
@@ -83,6 +94,7 @@ pub const ALPHABETS: &[Alphabet] = &[
         upper: 0x1D5D4,
         lower: 0x1D5EE,
         digits: Some(0x1D7EC),
+        latex: "mathbfsf",
         exceptions: &[],
     },
     Alphabet {
@@ -90,6 +102,7 @@ pub const ALPHABETS: &[Alphabet] = &[
         upper: 0x1D49C,
         lower: 0x1D4B6,
         digits: None,
+        latex: "mathcal",
         exceptions: &[
             ('B', 'ℬ'),
             ('E', 'ℰ'),
@@ -109,6 +122,7 @@ pub const ALPHABETS: &[Alphabet] = &[
         upper: 0x1D504,
         lower: 0x1D51E,
         digits: None,
+        latex: "mathfrak",
         exceptions: &[('C', 'ℭ'), ('H', 'ℌ'), ('I', 'ℑ'), ('R', 'ℜ'), ('Z', 'ℨ')],
     },
     Alphabet {
@@ -116,6 +130,7 @@ pub const ALPHABETS: &[Alphabet] = &[
         upper: 0x1D608,
         lower: 0x1D622,
         digits: Some(0x1D7E2),
+        latex: "mathsfit",
         exceptions: &[],
     },
     Alphabet {
@@ -123,6 +138,7 @@ pub const ALPHABETS: &[Alphabet] = &[
         upper: 0x1D5A0,
         lower: 0x1D5BA,
         digits: Some(0x1D7E2),
+        latex: "mathsf",
         exceptions: &[],
     },
     Alphabet {
@@ -130,6 +146,7 @@ pub const ALPHABETS: &[Alphabet] = &[
         upper: 0x1D670,
         lower: 0x1D68A,
         digits: Some(0x1D7F6),
+        latex: "mathtt",
         exceptions: &[],
     },
 ];
@@ -165,100 +182,36 @@ pub fn alphabet_char(name: &str) -> Option<char> {
     of(family(&name[first.len_utf8()..])?, first)
 }
 
-/// Super/subscript modifier letters (`\supA` = `\Asup` = `\^A` =
-/// `\A^` = ᴬ). Unlike the alphabet families these are not a contiguous
-/// block — Unicode has no capital form for every letter — so the table
-/// is explicit. The editor shadows the `^` / `_` spellings with the
-/// script *commands* (`\^z` builds a real superscript node), so these
-/// normally reach a formula through `sup` / `sub`.
-///
-/// The style token is matched only against this table's arguments, so
-/// the ordinary names it happens to prefix (`\supset` ⊃, `\subseteq`
-/// ⊆) keep their own meaning.
-pub struct Script {
-    /// Style tokens that select it, leading or trailing.
-    pub names: &'static [&'static str],
-    /// (argument name, styled char) — a letter as a one-char name, or
-    /// a symbol name (`alpha`).
-    pub chars: &'static [(&'static str, char)],
-}
-
-pub const SCRIPTS: &[Script] = &[
-    Script {
-        names: &["sup", "^"],
-        chars: &[
-            ("A", 'ᴬ'),
-            ("B", 'ᴮ'),
-            ("D", 'ᴰ'),
-            ("E", 'ᴱ'),
-            ("G", 'ᴳ'),
-            ("H", 'ᴴ'),
-            ("I", 'ᴵ'),
-            ("J", 'ᴶ'),
-            ("K", 'ᴷ'),
-            ("L", 'ᴸ'),
-            ("M", 'ᴹ'),
-            ("N", 'ᴺ'),
-            ("O", 'ᴼ'),
-            ("P", 'ᴾ'),
-            ("R", 'ᴿ'),
-            ("T", 'ᵀ'),
-            ("U", 'ᵁ'),
-            ("V", 'ⱽ'),
-            ("W", 'ᵂ'),
-            ("Z", 'ᶻ'),
-            ("a", 'ᵃ'),
-            ("alpha", 'ᵅ'),
-            ("b", 'ᵇ'),
-            ("beta", 'ᵝ'),
-            ("c", 'ᶜ'),
-            ("chi", 'ᵡ'),
-            ("d", 'ᵈ'),
-            ("delta", 'ᵟ'),
-            ("e", 'ᵉ'),
-            ("f", 'ᶠ'),
-            ("g", 'ᵍ'),
-            ("gamma", 'ᵞ'),
-            ("h", 'ʰ'),
-            ("j", 'ʲ'),
-            ("k", 'ᵏ'),
-            ("l", 'ˡ'),
-            ("m", 'ᵐ'),
-            ("o", 'ᵒ'),
-            ("p", 'ᵖ'),
-            ("phi", 'ᵠ'),
-            ("r", 'ʳ'),
-            ("s", 'ˢ'),
-            ("t", 'ᵗ'),
-            ("theta", 'ᶿ'),
-            ("u", 'ᵘ'),
-            ("v", 'ᵛ'),
-            ("w", 'ʷ'),
-            ("x", 'ˣ'),
-            ("y", 'ʸ'),
-            ("z", 'ᶻ'),
-        ],
-    },
-    Script {
-        names: &["sub", "_"],
-        chars: &[("beta", 'ᵦ'), ("chi", 'ᵪ'), ("phi", 'ᵩ'), ("rho", 'ᵨ')],
-    },
-];
-
-/// `\<style><arg>` or `\<arg><style>` for the super/subscript styles.
-pub fn script_char(name: &str) -> Option<char> {
-    SCRIPTS.iter().find_map(|s| {
-        s.names.iter().find_map(|tok| {
-            let arg = name
-                .strip_prefix(tok)
-                .or_else(|| name.strip_suffix(tok))
-                .filter(|a| !a.is_empty())?;
-            s.chars.iter().find(|&&(k, _)| k == arg).map(|&(_, c)| c)
-        })
-    })
-}
-
-/// Any styled character: an alphabet family or a super/subscript.
+/// Any styled character (today: the alphabet families).
 pub fn styled_char(name: &str) -> Option<char> {
-    alphabet_char(name).or_else(|| script_char(name))
+    alphabet_char(name)
+}
+
+/// The LaTeX spelling of a styled letter (`𝔸` -> `\mathbb{A}`), found
+/// by walking the families back — this is what keeps the char -> LaTeX
+/// direction total for the ~700 characters they generate.
+pub fn styled_latex(c: char) -> Option<String> {
+    for fam in ALPHABETS {
+        if let Some(&(l, _)) = fam.exceptions.iter().find(|&&(_, x)| x == c) {
+            return Some(format!("\\{}{{{}}}", fam.latex, l));
+        }
+        for (base, first, span) in [
+            (Some(fam.upper), b'A', 26),
+            (Some(fam.lower), b'a', 26),
+            (fam.digits, b'0', 10),
+        ] {
+            let Some(base) = base else { continue };
+            if !(base..base + span).contains(&(c as u32)) {
+                continue;
+            }
+            let l = (first + (c as u32 - base) as u8) as char;
+            // …unless that slot is an exception, in which case this
+            // codepoint belongs to no family after all.
+            if fam.exceptions.iter().any(|&(e, _)| e == l) {
+                continue;
+            }
+            return Some(format!("\\{}{{{}}}", fam.latex, l));
+        }
+    }
+    None
 }

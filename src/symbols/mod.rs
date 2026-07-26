@@ -216,11 +216,6 @@ pub fn is_atom(c: char) -> bool {
                             alphabets::alphabet_char(&format!("{}{}", a.prefixes[0], l))
                         })
                 }))
-                .chain(
-                    alphabets::SCRIPTS
-                        .iter()
-                        .flat_map(|s| s.chars.iter().map(|&(_, c)| c)),
-                )
                 .filter(|&c| !is_reserved_glyph(c))
                 .collect()
         })
@@ -461,6 +456,14 @@ pub fn latex_name(c: char) -> Option<&'static str> {
         .map(|&(n, _)| n)
 }
 
+/// The LaTeX spelling of an atom: a curated `\name`, a styled letter
+/// (`𝔸` -> `\mathbb{A}`), or None when only the raw character is left.
+pub fn latex_of(c: char) -> Option<String> {
+    latex_name(c)
+        .map(|n| format!("\\{} ", n))
+        .or_else(|| alphabets::styled_latex(c))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -612,21 +615,43 @@ mod tests {
         }
     }
 
-    /// Super/subscript letters resolve in all four spellings, and the
-    /// style token never swallows an ordinary name that starts with it.
+    /// Every styled letter has a LaTeX spelling through its family, so
+    /// the char -> LaTeX direction is total over the ~700 characters
+    /// they generate. What is left over is measured, not assumed: a
+    /// regression that widens the gap fails here.
     #[test]
-    fn script_letters_resolve_without_eating_names() {
-        for style in ["sup", "^"] {
-            for (arg, want) in [("A", 'ᴬ'), ("x", 'ˣ'), ("alpha", 'ᵅ')] {
-                assert_eq!(symbol_by_name(&format!("{}{}", style, arg)), Some(want));
-                assert_eq!(symbol_by_name(&format!("{}{}", arg, style)), Some(want));
+    fn latex_spelling_covers_the_styled_families() {
+        for fam in alphabets::ALPHABETS {
+            for l in ('A'..='Z').chain('a'..='z') {
+                let c = alphabets::alphabet_char(&format!("{}{}", fam.prefixes[0], l)).unwrap();
+                let want = format!("\\{}{{{}}}", fam.latex, l);
+                // A letterlike symbol the curated table names (ℑ = \Im)
+                // keeps that name — it wins on purpose.
+                let got = latex_of(c).unwrap_or_default();
+                assert!(
+                    got == want || latex_name(c).is_some(),
+                    "{}{}: {:?}",
+                    fam.prefixes[0],
+                    l,
+                    got
+                );
             }
         }
-        for style in ["sub", "_"] {
-            assert_eq!(symbol_by_name(&format!("{}beta", style)), Some('ᵦ'));
-            assert_eq!(symbol_by_name(&format!("beta{}", style)), Some('ᵦ'));
-        }
-        // …and the set relations keep their own meaning.
+        let gap = (1..=0x2FFFFu32)
+            .filter_map(char::from_u32)
+            .filter(|&c| is_atom(c) && !c.is_ascii() && latex_of(c).is_none())
+            .count();
+        // The rest are emitted raw, which unicode-math renders — the
+        // toolchain this crate already assumes for exotic symbols.
+        assert!(gap <= 121, "the LaTeX gap grew to {}", gap);
+    }
+
+    /// The style token never swallows an ordinary name that starts with it.
+    #[test]
+    fn script_letters_resolve_without_eating_names() {
+        // The sup/sub modifier letters are gone (a superscript is
+        // structure: `\^h`), so the names they used to shadow keep
+        // their own meaning and the look-alike atoms are rejected.
         for (name, want) in [
             ("supset", '⊃'),
             ("subset", '⊂'),
@@ -635,5 +660,7 @@ mod tests {
         ] {
             assert_eq!(symbol_by_name(name), Some(want), "\\{}", name);
         }
+        assert_eq!(symbol_by_name("supA"), None);
+        assert!(!is_atom('ᴬ'), "a modifier letter is not an atom");
     }
 }

@@ -50,7 +50,7 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 | `src/output/latex.rs` | AST → LaTeX(crate ルートの `mascii::latex` で再輸出) |
 | `src/symbols/mod.rs` | 厳選シンボル表・関数表 FUNCS(limits/LaTeX フラグ付き)・BIG_OPS・アクセント表・予約グリフ判定 |
 | `src/symbols/ext.rs` | **生成物**(ho-oto/mathematical-symbols 由来、480件)。phf マップ(順序不要・重複はビルドエラー)。手編集しない |
-| `src/symbols/alphabets.rs` | スタイル族: アルファベット(`\bbR` `\Afrk` `\bfsf3`、12族28綴り×前置/後置)を規則+例外表、上下付き(`\supA` `\Asup`)を明示表で |
+| `src/symbols/alphabets.rs` | スタイル族(`\bbR` `\Afrk` `\bfsf3`、12族28綴り×前置/後置)を規則+例外表で。LaTeX 逆引き(`𝔸`→`\mathbb{A}`)もここ |
 | `src/theme.rs` | TUI の配色定数(bin 専用) |
 | `src/main.rs` | TUI(ratatui)+ CLI サブコマンド |
 | `tests/roundtrip.rs` | 実式コーパス + ランダムプロパティテスト |

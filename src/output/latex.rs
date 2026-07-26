@@ -5,7 +5,7 @@
 //! unicode-math toolchain (lualatex/xelatex).
 
 use crate::ast::{Node, Row};
-use crate::symbols::{accent_info, latex_name};
+use crate::symbols::accent_info;
 
 pub fn row_to_latex(row: &Row) -> String {
     row.iter().map(node_to_latex).collect()
@@ -24,10 +24,9 @@ fn sym_to_latex(c: char) -> String {
     if matches!(c, '#' | '$' | '%' | '&') {
         return format!("\\{}", c);
     }
-    match latex_name(c) {
-        Some(name) => format!("\\{} ", name),
-        None => c.to_string(),
-    }
+    // A curated name, or a styled letter spelled through its family;
+    // anything left over is emitted raw (unicode-math renders it).
+    crate::symbols::latex_of(c).unwrap_or_else(|| c.to_string())
 }
 
 /// `base_{lower}^{upper}`, skipping empty limits.
