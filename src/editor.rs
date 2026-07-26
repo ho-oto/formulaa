@@ -2,7 +2,7 @@
 //! pairs from the root row plus a column inside the innermost row —
 //! the same model LyX uses for math insets.
 
-use crate::ast::{Field, Node, Row, row_at, row_at_mut};
+use crate::ast::{Field, Node, Radical, Row, row_at, row_at_mut};
 
 /// A cursor position: path into nested rows plus a column.
 pub type CursorPos = (Vec<(usize, Field)>, usize);
@@ -2097,28 +2097,42 @@ impl Editor {
                 }
                 return;
             }
-            "sqrt" if self.wrap_selection(|c| Node::Sqrt { arg: c, index: 2 }) => return,
-            "cbrt" | "sqrt3" if self.wrap_selection(|c| Node::Sqrt { arg: c, index: 3 }) => return,
+            "sqrt"
+                if self.wrap_selection(|c| Node::Sqrt {
+                    arg: c,
+                    index: Radical::Sqrt,
+                }) =>
+            {
+                return;
+            }
+            "cbrt" | "sqrt3"
+                if self.wrap_selection(|c| Node::Sqrt {
+                    arg: c,
+                    index: Radical::Cbrt,
+                }) =>
+            {
+                return;
+            }
             "cancel" if self.wrap_selection(|c| Node::Cancel { arg: c }) => return,
             _ => {}
         }
         match cmd {
             "sqrt" => self.insert_and_enter(Node::Sqrt {
                 arg: vec![],
-                index: 2,
+                index: Radical::Sqrt,
             }),
             "cbrt" | "sqrt3" => self.insert_and_enter(Node::Sqrt {
                 arg: vec![],
-                index: 3,
+                index: Radical::Cbrt,
             }),
             "qdrt" | "sqrt4" => self.insert_and_enter(Node::Sqrt {
                 arg: vec![],
-                index: 4,
+                index: Radical::Qdrt,
             }),
             "cancel" => self.insert_and_enter(Node::Cancel { arg: vec![] }),
             "ceil" => self.insert_delim('⌈', '⌉', vec![]),
             "floor" => self.insert_delim('⌊', '⌋', vec![]),
-            "norm" | "Vert" => self.insert_delim('‖', '‖', vec![]),
+            "norm" | "Vert" => self.insert_and_enter(Node::Norm { arg: vec![] }),
             // Grid commands take an optional RxC digit suffix:
             // \matrix (2×2), \matrix34 (3 rows × 4 cols), \cases41 …
             _ if grid_command(cmd).is_some() => {

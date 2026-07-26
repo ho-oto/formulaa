@@ -10,7 +10,7 @@
 //! "Three famous mathematical formulas" (Cardano, Cauchy–Schwarz,
 //! Vandermonde determinant).
 
-use mascii::ast::{Node, Row, normalize, strip_spacers};
+use mascii::ast::{Node, Radical, Row, normalize, strip_spacers};
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
 use mascii::render::{RenderCtx, render_root};
@@ -30,11 +30,17 @@ fn frac(num: Row, den: Row) -> Node {
 }
 
 fn sqrt(arg: Row) -> Node {
-    Node::Sqrt { arg, index: 2 }
+    Node::Sqrt {
+        arg,
+        index: Radical::Sqrt,
+    }
 }
 
 fn cbrt(arg: Row) -> Node {
-    Node::Sqrt { arg, index: 3 }
+    Node::Sqrt {
+        arg,
+        index: Radical::Cbrt,
+    }
 }
 
 fn sup(arg: Row) -> Node {
@@ -393,7 +399,9 @@ fn box_drawing_delim_forms() {
     roundtrip("null-left", &row);
     let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
     assert!(aa.contains('┆') && aa.contains('⎞'), "{}", aa);
-    let row = n(delim('‖', '‖', vec![], vec![n(frac(s("1"), s("2")))]));
+    let row = n(Node::Norm {
+        arg: n(frac(s("1"), s("2"))),
+    });
     roundtrip("tall-norm-stacked", &row);
     let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
     assert_eq!(
@@ -440,12 +448,9 @@ fn ceil_floor_norm() {
     );
     let row = cat(&[n(delim('⌊', '⌋', vec![], vec![s("n")]))]);
     roundtrip("floor", &row);
-    let row = cat(&[n(delim(
-        '‖',
-        '‖',
-        vec![],
-        vec![cat(&[s("v"), n(frac(s("a"), s("b")))])],
-    ))]);
+    let row = cat(&[n(Node::Norm {
+        arg: cat(&[s("v"), n(frac(s("a"), s("b")))]),
+    })]);
     roundtrip("norm", &row);
     assert_eq!(
         row_to_latex(&normalize(&row)),
@@ -453,9 +458,9 @@ fn ceil_floor_norm() {
     );
     // Two sibling norms stay siblings (parity per row).
     let row = cat(&[
-        n(delim('‖', '‖', vec![], vec![s("v")])),
+        n(Node::Norm { arg: s("v") }),
         s("+"),
-        n(delim('‖', '‖', vec![], vec![s("w")])),
+        n(Node::Norm { arg: s("w") }),
     ]);
     roundtrip("norm-siblings", &row);
 }
@@ -1183,7 +1188,7 @@ fn stacked_accents() {
     let row = cat(&[
         n(Node::Sqrt {
             arg: vec![],
-            index: 2,
+            index: Radical::Sqrt,
         }),
         n(Node::Accent {
             overs: vec!['¯'],
@@ -1375,7 +1380,7 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
         },
         1 => Node::Sqrt {
             arg: gen_row(rng, d, 3),
-            index: [2, 2, 3, 4][rng.below(4)],
+            index: [Radical::Sqrt, Radical::Sqrt, Radical::Cbrt, Radical::Qdrt][rng.below(4)],
         },
         2 => Node::Sup {
             arg: gen_row(rng, d, 2),
@@ -1413,7 +1418,6 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
                 ('.', '}'),
                 ('⌈', '⌉'),
                 ('⌊', '⌋'),
-                ('‖', '‖'),
             ];
             let (l, r) = pairs[rng.below(pairs.len())];
             let nsegs = 1 + rng.below(2); // 1 or 2 segs
@@ -1425,8 +1429,14 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
                 segs,
             }
         }
-        7 => Node::Cancel {
-            arg: gen_row(rng, d, 3),
+        7 => match rng.below(4) {
+            // Norms nest (the outer pair renders two rows taller).
+            0 => Node::Norm {
+                arg: gen_row(rng, d, 3),
+            },
+            _ => Node::Cancel {
+                arg: gen_row(rng, d, 3),
+            },
         },
         13 => {
             // Stretchy accent; the band rides over any base block.

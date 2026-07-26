@@ -71,10 +71,20 @@ fn node_to_latex(node: &Node) -> String {
             s
         }
         Node::Frac { num, den } => format!("\\frac{}{}", braced(num), braced(den)),
-        Node::Sqrt { arg, index } => match index {
-            2 => format!("\\sqrt{}", braced(arg)),
-            i => format!("\\sqrt[{}]{}", i, braced(arg)),
+        Node::Sqrt { arg, index } => match index.latex_index() {
+            None => format!("\\sqrt{}", braced(arg)),
+            Some(i) => format!("\\sqrt[{}]{}", i, braced(arg)),
         },
+        Node::Norm { arg } => {
+            // A norm around a sole grid is Vmatrix, like the other pairs.
+            if let [Node::Array { cols, cells, .. }] = &arg[..] {
+                return format!(
+                    "\\begin{{Vmatrix}} {} \\end{{Vmatrix}}",
+                    array_body(*cols, cells)
+                );
+            }
+            format!("\\left\\|{}\\right\\|", row_to_latex(arg))
+        }
         Node::Sup { arg } => format!("^{}", braced(arg)),
         Node::Sub { arg } => format!("_{}", braced(arg)),
         Node::BigOpSym { op, lower, upper } => limited(sym_to_latex(*op).trim_end(), lower, upper),
@@ -246,7 +256,7 @@ mod tests {
             },
             Node::Sqrt {
                 arg: vec![Node::Sym('x')],
-                index: 3,
+                index: crate::ast::Radical::Cbrt,
             },
         ];
         assert_eq!(

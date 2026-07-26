@@ -3,7 +3,7 @@
 //! (Formula definitions mirror tests/roundtrip.rs.)
 
 #![allow(dead_code)]
-use mascii::ast::{Node, Row, normalize};
+use mascii::ast::{Node, Radical, Row, normalize};
 use mascii::latex::row_to_latex;
 use mascii::render::{RenderCtx, render_row};
 
@@ -22,11 +22,17 @@ fn frac(num: Row, den: Row) -> Node {
 }
 
 fn sqrt(arg: Row) -> Node {
-    Node::Sqrt { arg, index: 2 }
+    Node::Sqrt {
+        arg,
+        index: Radical::Sqrt,
+    }
 }
 
 fn cbrt(arg: Row) -> Node {
-    Node::Sqrt { arg, index: 3 }
+    Node::Sqrt {
+        arg,
+        index: Radical::Cbrt,
+    }
 }
 
 fn sup(arg: Row) -> Node {

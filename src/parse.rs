@@ -20,10 +20,8 @@ use crate::render::{
 const LATTICE_LEFT: &[char] = &['┌', '├', '└']; // U+250C/251C/2514
 const LATTICE_TOP: &[char] = &['┌', '┬', '┐'];
 
-const RADICALS: &[(char, u8)] = &[('√', 2), ('∛', 3), ('∜', 4)];
-
-fn radical_index(c: char) -> Option<u8> {
-    RADICALS.iter().find(|&&(r, _)| r == c).map(|&(_, i)| i)
+fn radical_index(c: char) -> Option<crate::ast::Radical> {
+    crate::ast::Radical::of_glyph(c)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1998,11 +1996,22 @@ fn parse_delim(
         segs.push(seg);
         start = m + 1;
     }
-    let node = Node::Delim {
-        left,
-        right,
-        mids: vec!['|'; mid_cols.len()],
-        segs,
+    // Both norm sides are the same ‖, so it has no middles to speak of
+    // (a `│` inside one would have no side to belong to).
+    let node = if left == '‖' {
+        if segs.len() != 1 {
+            return err("a norm takes no │ middle", bl, col);
+        }
+        Node::Norm {
+            arg: segs.into_iter().next().unwrap(),
+        }
+    } else {
+        Node::Delim {
+            left,
+            right,
+            mids: vec!['|'; mid_cols.len()],
+            segs,
+        }
     };
     Ok((node, close_col))
 }
@@ -2196,11 +2205,11 @@ mod tests {
         }]);
         roundtrip(&vec![Node::Sqrt {
             arg: syms("2"),
-            index: 2,
+            index: crate::ast::Radical::Sqrt,
         }]);
         roundtrip(&vec![Node::Sqrt {
             arg: syms("x+1"),
-            index: 3,
+            index: crate::ast::Radical::Cbrt,
         }]);
         roundtrip(&vec![Node::Accent {
             overs: vec!['^'],

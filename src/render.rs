@@ -1044,11 +1044,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             // radical stem hugging the left:
             // ┌────
             // √x+1
-            let radical = match index {
-                3 => '∛',
-                4 => '∜',
-                _ => '√',
-            };
+            let radical = index.glyph();
             let mut lines = Vec::with_capacity(h + 1);
             let mut top = vec![FRAC_BAR; w + 1];
             top[0] = '┌';
@@ -1212,12 +1208,21 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 .into_block(lines, baseline)
         }
 
-        Node::Delim {
-            left,
-            right,
-            mids,
-            segs,
-        } => {
+        // A norm renders exactly like a one-segment ‖ ‖ delimiter; it
+        // is a separate node only because its *parse* needs the extent
+        // rule (both sides are the same glyph).
+        Node::Norm { .. } | Node::Delim { .. } => {
+            let (left, right, mids, segs) = match node {
+                Node::Norm { arg } => ('‖', '‖', &[][..], std::slice::from_ref(arg)),
+                Node::Delim {
+                    left,
+                    right,
+                    mids,
+                    segs,
+                } => (*left, *right, &mids[..], &segs[..]),
+                _ => unreachable!(),
+            };
+            let (left, right) = (&left, &right);
             // A sole Array segment fuses with the delimiter: the delimiter
             // columns absorb the lattice edges (junction rows show ├ ┤,
             // column markers ┬ ┴ ride the delimiter's top/bottom rows).
@@ -1229,7 +1234,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 // norm/angle geometry take a bare lattice instead.
                 && matches!(*left, '(' | '[' | '⌈' | '⌊' | '|')
                 && matches!(*right, ')' | ']' | '⌉' | '⌋' | '|')
-                && let [seg] = &segs[..]
+                && let [seg] = segs
                 // Display markers are transparent: a labeled sole-Array
                 // segment still fuses (the label overlays a cell).
                 && let [Node::Array { rows, cols, cells }] =
@@ -1827,7 +1832,7 @@ mod tests {
     fn sqrt_single_line() {
         let root = vec![Node::Sqrt {
             arg: sym_row("2"),
-            index: 2,
+            index: crate::ast::Radical::Sqrt,
         }];
         assert_eq!(plain(&root), vec!["┌─", "√2"]);
     }

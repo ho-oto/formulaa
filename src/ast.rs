@@ -69,7 +69,7 @@ pub enum Node {
     /// index 2 = √, 3 = ∛, 4 = ∜ (the only radical glyphs Unicode has).
     Sqrt {
         arg: Row,
-        index: u8,
+        index: Radical,
     },
     Sup {
         arg: Row,
@@ -93,6 +93,14 @@ pub enum Node {
         name: String,
         lower: Row,
         upper: Row,
+    },
+    /// `‖x‖`: both sides are the same glyph, so the parser tells the
+    /// pair apart by column extent rather than by the side-distinct
+    /// glyphs a `Delim` relies on — its own node keeps that exception
+    /// out of the general delimiter machinery. Its one slot is
+    /// `Field::Seg(0)`, so cursor paths look like a one-segment Delim.
+    Norm {
+        arg: Row,
     },
     /// Horizontal brace over/under its argument (\overbrace/\underbrace):
     /// a ╭──╮ / ╰──╯ row hugging the argument block, with an optional
@@ -140,8 +148,45 @@ pub enum Node {
 
 /// Valid delimiter spec chars for `Node::Delim` (`.` = null delimiter,
 /// `‖` = the double-bar norm — same spec char on both sides).
+/// Which root sign a `Sqrt` draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Radical {
+    /// √ — the square root, drawn without an index.
+    Sqrt,
+    /// ∛
+    Cbrt,
+    /// ∜
+    Qdrt,
+}
+
+impl Radical {
+    pub const ALL: [Radical; 3] = [Radical::Sqrt, Radical::Cbrt, Radical::Qdrt];
+
+    /// The root glyph, which is also how the picture spells the index.
+    pub fn glyph(self) -> char {
+        match self {
+            Radical::Sqrt => '√',
+            Radical::Cbrt => '∛',
+            Radical::Qdrt => '∜',
+        }
+    }
+
+    pub fn of_glyph(c: char) -> Option<Radical> {
+        Radical::ALL.into_iter().find(|r| r.glyph() == c)
+    }
+
+    /// The LaTeX index (`\sqrt[3]`); the square root has none.
+    pub fn latex_index(self) -> Option<u8> {
+        match self {
+            Radical::Sqrt => None,
+            Radical::Cbrt => Some(3),
+            Radical::Qdrt => Some(4),
+        }
+    }
+}
+
 pub const DELIM_SPECS: &[char] = &[
-    '(', ')', '[', ']', '{', '}', '⟨', '⟩', '|', '.', '⌈', '⌉', '⌊', '⌋', '‖',
+    '(', ')', '[', ']', '{', '}', '⟨', '⟩', '|', '.', '⌈', '⌉', '⌊', '⌋',
 ];
 
 /// Identifies one editable slot inside a structure node.
@@ -189,6 +234,7 @@ impl Node {
             Node::Arrow { .. } => vec![Field::ArrowOver, Field::ArrowUnder],
             Node::Brace { .. } => vec![Field::BraceArg, Field::BraceLabel],
             Node::Delim { segs, .. } => (0..segs.len()).map(Field::Seg).collect(),
+            Node::Norm { .. } => vec![Field::Seg(0)],
             Node::Cancel { .. } => vec![Field::CancelArg],
             Node::Array { cells, .. } => (0..cells.len()).map(Field::Cell).collect(),
         }
@@ -441,6 +487,9 @@ fn strip_cancels(row: &Row) -> Row {
                 arg: strip_cancels(arg),
                 label: strip_cancels(label),
             }),
+            Node::Norm { arg } => out.push(Node::Norm {
+                arg: strip_cancels(arg),
+            }),
             Node::Delim {
                 left,
                 right,
@@ -514,6 +563,9 @@ pub fn strip_spacers(row: &Row) -> Row {
                 over: *over,
                 arg: strip_spacers(arg),
                 label: strip_spacers(label),
+            }),
+            Node::Norm { arg } => out.push(Node::Norm {
+                arg: strip_spacers(arg),
             }),
             Node::Delim {
                 left,
@@ -616,6 +668,9 @@ fn normalize_node(node: &Node) -> Node {
             over: *over,
             arg: normalize(arg),
             label: normalize(label),
+        },
+        Node::Norm { arg } => Node::Norm {
+            arg: normalize(arg),
         },
         Node::Delim {
             left,

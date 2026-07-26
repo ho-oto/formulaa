@@ -1,7 +1,7 @@
 //! Prints a few formulas rendered by the layout engine, without the TUI.
 //! Run with: cargo run --example demo
 
-use mascii::ast::{Node, Row};
+use mascii::ast::{Node, Radical, Row};
 use mascii::latex;
 use mascii::render::{RenderCtx, render_row};
 
@@ -36,7 +36,7 @@ fn main() {
         Node::Sym('='),
         Node::Sqrt {
             arg: vec![Node::Sym('π')],
-            index: 2,
+            index: Radical::Sqrt,
         },
     ];
     show("Gaussian integral", &gaussian);
@@ -51,7 +51,7 @@ fn main() {
                 Node::Sym('b'),
                 Node::Sym('±'),
                 Node::Sqrt {
-                    index: 2,
+                    index: Radical::Sqrt,
                     arg: vec![
                         Node::Sym('b'),
                         Node::Sup { arg: syms("2") },
