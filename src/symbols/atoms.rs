@@ -5,12 +5,12 @@
 use super::{alphabets, ext};
 
 /// One curated character per row: the char itself is the canonical
-/// identity, `latex` is the one spelling the serializer writes (and,
-/// inverted, the canonical input spelling), and `kind` is how the
-/// editor materializes it — a plain atom, or a ∑-class operator that
-/// comes in as a band. Extra input spellings (`\leq` for ≤) are not
-/// listed here: every alternative spelling lives in `ALIASES`, the
-/// same table that spells commands (`\sqrt3` = `\cbrt`).
+/// identity, `latex` is the one spelling the serializer writes, and
+/// `kind` is how the editor materializes it — a plain atom, or a
+/// ∑-class operator that comes in as a band. This is the *output*
+/// table (char -> info); the input direction (spelling -> char,
+/// including the extra spellings like `\leq` for ≤) is `NAMES`, and
+/// the tests hold the two mirrors together.
 ///
 /// Most spellings also appear in the generated `ext` table. That
 /// overlap is deliberate, not redundancy: it **pins** the meaning of
@@ -165,37 +165,139 @@ pub fn atom_of(c: char) -> Option<&'static AtomSpec> {
     ATOMS.iter().find(|a| a.ch == c)
 }
 
-/// Command spellings that mean another command. Keeping them in one
-/// table lets the dispatch name each command exactly once, and makes
-/// "what else is this called" answerable in one place.
-pub const ALIASES: &[(&str, &str)] = &[
-    // LaTeX names for what the editor calls something shorter.
-    ("sqrt3", "cbrt"),
-    ("sqrt4", "qdrt"),
-    ("Vert", "norm"),
-    ("xrightarrow", "xto"),
-    ("xleftarrow", "xfrom"),
-    ("xRightarrow", "xTo"),
-    ("xLeftarrow", "xFrom"),
-    ("operatorname", "op"),
-    ("operatorname*", "op*"),
-    ("limits", "op*"),
-    ("delim", "lr"),
-    // Symbol spellings: aliases for a character's canonical (LaTeX)
-    // name, resolved by the same one-hop rule as the command aliases.
-    ("leq", "le"),
-    ("geq", "ge"),
-    ("neq", "ne"),
-    ("rightarrow", "to"),
-    ("dots", "ldots"),
+/// The input direction, spelled out: every `\name` that types a
+/// curated character, alternative spellings listed right next to the
+/// canonical one (which comes first — it doubles as the row's label).
+/// Deliberately a hand-written mirror of `ATOMS` rather than derived
+/// from it, so each direction reads on its own; the tests pin the two
+/// together (same chars, canonical spelling first, no spelling claimed
+/// twice). Command aliases (`\sqrt3` = `\cbrt`) are not names of a
+/// character, so they live as extra patterns in `resolve`'s match.
+pub const NAMES: &[(&[&str], char)] = &[
+    // Greek lowercase
+    (&["alpha"], 'α'),
+    (&["beta"], 'β'),
+    (&["gamma"], 'γ'),
+    (&["delta"], 'δ'),
+    (&["epsilon"], 'ε'),
+    (&["zeta"], 'ζ'),
+    (&["eta"], 'η'),
+    (&["theta"], 'θ'),
+    (&["iota"], 'ι'),
+    (&["kappa"], 'κ'),
+    (&["lambda"], 'λ'),
+    (&["mu"], 'μ'),
+    (&["nu"], 'ν'),
+    (&["xi"], 'ξ'),
+    (&["pi"], 'π'),
+    (&["rho"], 'ρ'),
+    (&["sigma"], 'σ'),
+    (&["tau"], 'τ'),
+    (&["upsilon"], 'υ'),
+    (&["phi"], 'φ'),
+    (&["chi"], 'χ'),
+    (&["psi"], 'ψ'),
+    (&["omega"], 'ω'),
+    (&["varphi"], 'ϕ'),
+    (&["vartheta"], 'ϑ'),
+    // Greek uppercase
+    (&["Gamma"], 'Γ'),
+    (&["Delta"], 'Δ'),
+    (&["Theta"], 'Θ'),
+    (&["Lambda"], 'Λ'),
+    (&["Xi"], 'Ξ'),
+    (&["Pi"], 'Π'),
+    (&["Sigma"], 'Σ'),
+    (&["Upsilon"], 'Υ'),
+    (&["Phi"], 'Φ'),
+    (&["Psi"], 'Ψ'),
+    (&["Omega"], 'Ω'),
+    // Binary operators / relations
+    (&["pm"], '±'),
+    (&["mp"], '∓'),
+    (&["times"], '×'),
+    (&["div"], '÷'),
+    (&["cdot"], '⋅'),
+    (&["circ"], '∘'),
+    (&["oplus"], '⊕'),
+    (&["otimes"], '⊗'),
+    (&["ast"], '∗'),
+    (&["le", "leq"], '≤'),
+    (&["ge", "geq"], '≥'),
+    (&["ne", "neq"], '≠'),
+    (&["approx"], '≈'),
+    (&["equiv"], '≡'),
+    (&["sim"], '∼'),
+    (&["simeq"], '≃'),
+    (&["propto"], '∝'),
+    (&["ll"], '≪'),
+    (&["gg"], '≫'),
+    // Arrows
+    (&["to", "rightarrow"], '→'),
+    (&["leftarrow"], '←'),
+    (&["Rightarrow"], '⇒'),
+    (&["Leftarrow"], '⇐'),
+    (&["leftrightarrow"], '↔'),
+    (&["Leftrightarrow"], '⇔'),
+    (&["mapsto"], '↦'),
+    // Sets / logic
+    (&["in"], '∈'),
+    (&["notin"], '∉'),
+    (&["ni"], '∋'),
+    (&["subset"], '⊂'),
+    (&["subseteq"], '⊆'),
+    (&["supset"], '⊃'),
+    (&["supseteq"], '⊇'),
+    (&["cup"], '∪'),
+    (&["cap"], '∩'),
+    (&["setminus"], '∖'),
+    (&["emptyset"], '∅'),
+    (&["forall"], '∀'),
+    (&["exists"], '∃'),
+    (&["neg"], '¬'),
+    (&["land"], '∧'),
+    (&["lor"], '∨'),
+    (&["vdash"], '⊢'),
+    (&["models"], '⊨'),
+    // Misc
+    (&["infty"], '∞'),
+    (&["partial"], '∂'),
+    (&["nabla"], '∇'),
+    (&["hbar"], 'ℏ'),
+    (&["ell"], 'ℓ'),
+    (&["Re"], 'ℜ'),
+    (&["Im"], 'ℑ'),
+    (&["aleph"], 'ℵ'),
+    (&["angle"], '∠'),
+    (&["perp"], '⊥'),
+    (&["parallel"], '∥'),
+    (&["prime"], '′'),
+    (&["degree"], '°'),
+    (&["cdots"], '⋯'),
+    (&["ldots", "dots"], '…'),
+    (&["vdots"], '⋮'),
+    (&["ddots"], '⋱'),
+    (&["space"], '␣'),
+    // ∑-class big operators
+    (&["sum"], '∑'),
+    (&["prod"], '∏'),
+    (&["coprod"], '∐'),
+    (&["int"], '∫'),
+    (&["iint"], '∬'),
+    (&["oint"], '∮'),
+    (&["bigcup"], '⋃'),
+    (&["bigcap"], '⋂'),
+    (&["bigoplus"], '⨁'),
+    (&["bigotimes"], '⨂'),
+    (&["bigvee"], '⋁'),
+    (&["bigwedge"], '⋀'),
 ];
 
-/// One-hop alias resolution: the spelling's canonical form, or itself.
-pub fn unalias(name: &str) -> &str {
-    ALIASES
+/// The char a curated `\name` types (any spelling in its `NAMES` row).
+pub fn named_char(name: &str) -> Option<char> {
+    NAMES
         .iter()
-        .find_map(|&(from, to)| (from == name).then_some(to))
-        .unwrap_or(name)
+        .find_map(|&(names, c)| names.contains(&name).then_some(c))
 }
 
 /// Names where the curated table deliberately differs from the
@@ -305,26 +407,31 @@ pub fn is_atom(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::symbols::*;
-    /// One row per character: the char is unique, every spelling is
-    /// claimed once (canonical names and aliases together), and the
-    /// output is the row's `latex` — \le and \leq type the same ≤ but
-    /// it always prints as \le.
+    /// The two hand-written tables mirror each other: every atom has
+    /// exactly one `NAMES` row led by its canonical `latex` spelling,
+    /// every spelling is claimed once and types that row's char — \le
+    /// and \leq type the same ≤ but it always prints as \le.
     #[test]
     fn atom_rows_are_canonical() {
         let mut chars = std::collections::HashSet::new();
         let mut names = std::collections::HashSet::new();
         for a in ATOMS {
             assert!(chars.insert(a.ch), "{:?} has two rows", a.ch);
-            assert!(names.insert(a.latex), "\\{} is claimed twice", a.latex);
             assert_eq!(latex_name(a.ch), Some(a.latex));
             assert_eq!(symbol_by_name(a.latex), Some(a.ch), "\\{}", a.latex);
         }
-        for &(from, to) in ALIASES {
-            assert!(names.insert(from), "\\{} is claimed twice", from);
-            // An alias points at a canonical spelling, never another
-            // alias (resolution is one hop).
-            assert_eq!(unalias(to), to, "\\{} chains", from);
-            assert_eq!(symbol_by_name(from), symbol_by_name(to), "\\{}", from);
+        let mut targets = std::collections::HashSet::new();
+        for &(spellings, ch) in NAMES {
+            let a = atom_of(ch).unwrap_or_else(|| panic!("{:?} is not a curated atom", ch));
+            assert!(targets.insert(ch), "{:?} has two NAMES rows", ch);
+            assert_eq!(spellings.first(), Some(&a.latex), "{:?}", ch);
+            for &s in spellings {
+                assert!(names.insert(s), "\\{} is claimed twice", s);
+                assert_eq!(symbol_by_name(s), Some(ch), "\\{}", s);
+            }
+        }
+        for a in ATOMS {
+            assert!(targets.contains(&a.ch), "\\{} has no NAMES row", a.latex);
         }
     }
 
@@ -370,11 +477,9 @@ mod tests {
     /// nothing would notice.
     #[test]
     fn curated_names_pin_the_generated_table() {
-        let spellings = ATOMS.iter().map(|a| (a.latex, a.ch)).chain(
-            ALIASES
-                .iter()
-                .filter_map(|&(from, to)| Some((from, atom_of(symbol_by_name(to)?)?.ch))),
-        );
+        let spellings = NAMES
+            .iter()
+            .flat_map(|&(names, ch)| names.iter().map(move |&n| (n, ch)));
         let mut diverged: Vec<&str> = spellings
             .filter(|(n, c)| ext::EXT_SYMBOLS.get(n).is_some_and(|e| e != c))
             .map(|(n, _)| n)

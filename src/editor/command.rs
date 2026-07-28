@@ -225,11 +225,11 @@ pub enum Edit {
 /// Resolve a command spelling to the edit it performs. Pure: this is
 /// the whole input side of the command layer, so "is it valid" and
 /// "what would it do" (the preview) come for free. Order matters and
-/// mirrors the old dispatch: structural names, grids, `\lr` specs,
-/// then the name tables (funcs -> accents -> scripts -> symbols), and
-/// the `\rm<x>` / `\text<x>` attached forms last.
+/// mirrors the old dispatch: structural names (alternative spellings
+/// as extra patterns on their arm), grids, `\lr` specs, then the name
+/// tables (funcs -> accents -> scripts -> symbols), and the `\rm<x>` /
+/// `\text<x>` attached forms last.
 pub fn resolve(cmd: &str) -> Option<Edit> {
-    let cmd = crate::symbols::unalias(cmd);
     let ins = |node: Node| Some(Edit::Insert { node, wrap: false });
     let wrap = |node: Node| Some(Edit::Insert { node, wrap: true });
     let delim = |l: char, r: char, mids: Vec<char>| {
@@ -248,26 +248,27 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
             arg: vec![],
             index: Radical::Sqrt,
         }),
-        "cbrt" => wrap(Node::Sqrt {
+        "cbrt" | "sqrt3" => wrap(Node::Sqrt {
             arg: vec![],
             index: Radical::Cbrt,
         }),
-        "qdrt" => ins(Node::Sqrt {
+        "qdrt" | "sqrt4" => ins(Node::Sqrt {
             arg: vec![],
             index: Radical::Qdrt,
         }),
         "cancel" => wrap(Node::Cancel { arg: vec![] }),
-        "norm" => ins(Node::Norm { arg: vec![] }),
+        "norm" | "Vert" => ins(Node::Norm { arg: vec![] }),
         "overbrace" | "underbrace" => wrap(Node::Brace {
             over: cmd == "overbrace",
             arg: vec![],
             label: vec![],
         }),
-        "xto" | "xfrom" | "xTo" | "xFrom" => ins(Node::Arrow {
+        "xto" | "xfrom" | "xTo" | "xFrom" | "xrightarrow" | "xleftarrow" | "xRightarrow"
+        | "xLeftarrow" => ins(Node::Arrow {
             op: match cmd {
-                "xto" => Arrow::To,
-                "xfrom" => Arrow::From,
-                "xTo" => Arrow::DoubleTo,
+                "xto" | "xrightarrow" => Arrow::To,
+                "xfrom" | "xleftarrow" => Arrow::From,
+                "xTo" | "xRightarrow" => Arrow::DoubleTo,
                 _ => Arrow::DoubleFrom,
             },
             over: vec![],
@@ -284,8 +285,12 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
         "addcol" => Some(Edit::AddCol),
         "delrow" => Some(Edit::DelRow),
         "delcol" => Some(Edit::DelCol),
-        "op" => Some(Edit::OpenBox(BoxKind::Op)),
-        "op*" => Some(Edit::OpenBox(BoxKind::OpStar)),
+        // The exact spelling `\delim` is `\lr` in every way — including
+        // the way a bare `\lr` falls through the spec parser onto the
+        // ext symbol `lr` (↔).
+        "delim" => resolve("lr"),
+        "op" | "operatorname" => Some(Edit::OpenBox(BoxKind::Op)),
+        "op*" | "operatorname*" | "limits" => Some(Edit::OpenBox(BoxKind::OpStar)),
         "rm" => Some(Edit::OpenBox(BoxKind::Rm)),
         "text" => Some(Edit::OpenBox(BoxKind::Text)),
         _ => {

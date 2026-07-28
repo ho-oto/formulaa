@@ -29,16 +29,12 @@ pub use atoms::*;
 pub use delims::*;
 pub use funcs::*;
 
-/// Resolve an input spelling to its character. Every name is an alias
-/// for a char: one `ALIASES` hop first, then the canonical (LaTeX)
-/// spellings, the styled families (\bbR) and the generated long tail,
-/// in that order.
+/// Resolve an input spelling to its character: the curated input
+/// table (`NAMES`, canonical spellings and their aliases alike), then
+/// the styled families (\bbR) and the generated long tail, in that
+/// order.
 pub fn symbol_by_name(name: &str) -> Option<char> {
-    let name = unalias(name);
-    ATOMS
-        .iter()
-        .find(|a| a.latex == name)
-        .map(|a| a.ch)
+    named_char(name)
         .or_else(|| alphabets::styled_char(name))
         .or_else(|| ext::EXT_SYMBOLS.get(name).copied())
         .filter(|&c| !is_reserved_glyph(c))

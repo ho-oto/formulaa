@@ -234,9 +234,27 @@ fn command_known_tracks_execute() {
 
 #[test]
 fn aliases_resolve_to_the_same_command() {
-    // Every alias must do exactly what its target does — the dispatch
-    // names each command once and the table carries the spellings.
-    for &(from, to) in mascii::symbols::ALIASES {
+    // Every alias must do exactly what its target does. Command
+    // aliases are extra patterns on their `resolve` arm (this list
+    // names each of them once); symbol aliases are the non-leading
+    // spellings of their `NAMES` row.
+    let command_aliases = [
+        ("sqrt3", "cbrt"),
+        ("sqrt4", "qdrt"),
+        ("Vert", "norm"),
+        ("xrightarrow", "xto"),
+        ("xleftarrow", "xfrom"),
+        ("xRightarrow", "xTo"),
+        ("xLeftarrow", "xFrom"),
+        ("operatorname", "op"),
+        ("operatorname*", "op*"),
+        ("limits", "op*"),
+        ("delim", "lr"),
+    ];
+    let symbol_aliases = mascii::symbols::NAMES
+        .iter()
+        .flat_map(|&(names, _)| names[1..].iter().map(move |&from| (from, names[0])));
+    for (from, to) in command_aliases.into_iter().chain(symbol_aliases) {
         // The box commands open a mode rather than insert; compare the
         // mode instead of the formula.
         let (mut a, mut b) = (Editor::new(), Editor::new());
