@@ -96,6 +96,18 @@ fn selection_wraps_into_fraction() {
 }
 
 #[test]
+fn wrap_keys_wrap_the_selection() {
+    // ^ and ( spell the same wrap-Edits the \commands resolve to: the
+    // selection lands in the first slot, the cursor steps past.
+    let mut ed = Editor::new();
+    type_script(&mut ed, "y x S-Left ^");
+    assert_eq!(latex(&ed), "y^{x}");
+    let mut ed = Editor::new();
+    type_script(&mut ed, "a + b S-Left S-Left S-Left (");
+    assert_eq!(latex(&ed), "\\left(a+b\\right)");
+}
+
+#[test]
 fn ctrl_keys_return_host_effects() {
     let mut ed = Editor::new();
     assert_eq!(ed.input(Key::Char('q'), false, true), Effect::Quit);

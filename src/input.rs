@@ -5,7 +5,7 @@
 //! drift apart.
 
 use crate::ast::Node;
-use crate::editor::{Editor, JUMP_LABELS};
+use crate::editor::{BoxKind, Edit, Editor, JUMP_LABELS};
 use crate::symbols::Delim;
 
 /// One keystroke, host-neutral. `Char` carries printable input
@@ -269,12 +269,12 @@ impl Editor {
                     Key::Right => self.grid_move(0, 1),
                     Key::Up => self.grid_move(-1, 0),
                     Key::Down => self.grid_move(1, 0),
-                    Key::Enter | Key::Char('r') => self.add_row(),
-                    Key::Char('R') => self.add_row_above(),
-                    Key::Char('c') => self.add_col(),
-                    Key::Char('C') => self.add_col_left(),
-                    Key::Char('d') => self.del_row(),
-                    Key::Char('D') => self.del_col(),
+                    Key::Enter | Key::Char('r') => self.apply(Edit::AddRow),
+                    Key::Char('R') => self.apply(Edit::AddRowAbove),
+                    Key::Char('c') => self.apply(Edit::AddCol),
+                    Key::Char('C') => self.apply(Edit::AddColLeft),
+                    Key::Char('d') => self.apply(Edit::DelRow),
+                    Key::Char('D') => self.apply(Edit::DelCol),
                     Key::Esc | Key::Tab => self.grid_mode = false,
                     _ => {
                         self.message =
@@ -343,55 +343,53 @@ impl Editor {
                 }
             }
             Key::Char('\\') => self.minibuffer = Some(String::new()),
-            Key::Char('^') => {
-                if !self.wrap_selection(|c| Node::Sup { arg: c }) {
-                    self.insert_and_enter(Node::Sup { arg: vec![] });
-                }
-            }
-            Key::Char('_') => {
-                if !self.wrap_selection(|c| Node::Sub { arg: c }) {
-                    self.insert_and_enter(Node::Sub { arg: vec![] });
-                }
-            }
-            Key::Char('(') => {
-                if !self.wrap_selection(|c| Node::Delim {
+            // ^ / _ / ( { [ spell the same Edits the \commands resolve
+            // to: an empty template enters its slot, a selection lands
+            // inside it (`apply` owns both readings).
+            Key::Char('^') => self.apply(Edit::Insert {
+                node: Node::Sup { arg: vec![] },
+                wrap: true,
+            }),
+            Key::Char('_') => self.apply(Edit::Insert {
+                node: Node::Sub { arg: vec![] },
+                wrap: true,
+            }),
+            Key::Char('(') => self.apply(Edit::Insert {
+                node: Node::Delim {
                     left: Delim::Paren,
                     right: Delim::Paren,
                     mids: 0,
-                    segs: vec![c],
-                }) {
-                    self.insert_delim(Delim::Paren, Delim::Paren, 0);
-                }
-            }
+                    segs: vec![vec![]],
+                },
+                wrap: true,
+            }),
             Key::Char(')') => self.close_paren(),
-            Key::Char('{') => {
-                if !self.wrap_selection(|c| Node::Delim {
+            Key::Char('{') => self.apply(Edit::Insert {
+                node: Node::Delim {
                     left: Delim::Brace,
                     right: Delim::Brace,
                     mids: 0,
-                    segs: vec![c],
-                }) {
-                    self.insert_delim(Delim::Brace, Delim::Brace, 0);
-                }
-            }
+                    segs: vec![vec![]],
+                },
+                wrap: true,
+            }),
             Key::Char('}') => self.close_brace(),
-            Key::Char('[') => {
-                if !self.wrap_selection(|c| Node::Delim {
+            Key::Char('[') => self.apply(Edit::Insert {
+                node: Node::Delim {
                     left: Delim::Bracket,
                     right: Delim::Bracket,
                     mids: 0,
-                    segs: vec![c],
-                }) {
-                    self.insert_delim(Delim::Bracket, Delim::Bracket, 0);
-                }
-            }
+                    segs: vec![vec![]],
+                },
+                wrap: true,
+            }),
             // The quote glyphs are reserved for roman/text runs; the
             // prime is its own atom (\prime, ′ U+2032).
-            Key::Char('\'') => self.insert_sym('′'),
+            Key::Char('\'') => self.apply(Edit::Sym('′')),
             Key::Char('"') => {
                 // Text mode: the box commits on the closing " (like
                 // typing the quoted run directly); \" escapes.
-                self.op_start(crate::editor::BoxKind::Text);
+                self.apply(Edit::OpenBox(BoxKind::Text));
             }
             Key::Char(']') => self.close_bracket(),
             // `//` makes a fraction (a lone `/` stays the slash atom).
@@ -403,21 +401,24 @@ impl Editor {
                 if self.path.is_empty() {
                     self.break_line();
                 } else {
-                    self.add_row();
+                    self.apply(Edit::AddRow);
                 }
             }
             // Space is a formatting space (Tab leaves insets; \space gives
             // the semantic ␣ atom).
             Key::Char(' ') => {
                 self.select_anchor = None;
-                self.insert_spacer();
+                self.apply(Edit::Insert {
+                    node: Node::Spacer,
+                    wrap: false,
+                });
             }
             // The same allow-list the parser uses: a key that is not a
             // valid atom (`~` `^` `\`, or anything non-ASCII) would build
             // a formula that cannot be read back.
             Key::Char(c) if crate::symbols::is_atom(c) => {
                 self.select_anchor = None;
-                self.insert_sym(c);
+                self.apply(Edit::Sym(c));
             }
             _ => {}
         }

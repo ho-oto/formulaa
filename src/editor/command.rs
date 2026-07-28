@@ -174,7 +174,9 @@ impl Editor {
             },
             Edit::Mid => self.insert_mid(),
             Edit::AddRow => self.add_row(),
+            Edit::AddRowAbove => self.add_row_above(),
             Edit::AddCol => self.add_col(),
+            Edit::AddColLeft => self.add_col_left(),
             Edit::DelRow => self.del_row(),
             Edit::DelCol => self.del_col(),
             Edit::OpenBox(kind) => self.op_start(kind),
@@ -215,7 +217,11 @@ pub enum Edit {
     /// A │ middle added to the enclosing delimiter.
     Mid,
     AddRow,
+    /// Grid-mode `R` (no command spelling — keys build it directly).
+    AddRowAbove,
     AddCol,
+    /// Grid-mode `C`.
+    AddColLeft,
     DelRow,
     DelCol,
     /// Open the in-place name box (`\op` `\op*` `\rm` `\text`).

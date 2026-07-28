@@ -13,6 +13,8 @@ use crate::symbols::{Accent, Delim, bigop_by_char, is_func_name, symbol_by_name}
 mod command;
 mod modes;
 
+pub use command::{Edit, resolve};
+
 /// One undo step: the formula with the cursor that belonged to it.
 type Snapshot = (Row, Vec<(usize, Field)>, usize);
 
@@ -330,14 +332,6 @@ impl Editor {
     pub fn insert_sym(&mut self, c: char) {
         let col = self.col;
         self.cur_row_mut().insert(col, Node::Sym(c));
-        self.col += 1;
-    }
-
-    /// Formatting space (Space key): blank column in the AA, nothing in
-    /// LaTeX, vanishes on reparse.
-    pub fn insert_spacer(&mut self) {
-        let col = self.col;
-        self.cur_row_mut().insert(col, Node::Spacer);
         self.col += 1;
     }
 
@@ -1096,20 +1090,6 @@ impl Editor {
             self.select_anchor = Some(0);
             self.select_path = self.path.clone();
             self.col = self.cur_row().len();
-        }
-    }
-
-    /// Replace the selection with `build(selection)`, cursor after the node.
-    pub fn wrap_selection(&mut self, build: impl FnOnce(Row) -> Node) -> bool {
-        match self.take_selection() {
-            Some(content) => {
-                let node = build(content);
-                let col = self.col;
-                self.cur_row_mut().insert(col, node);
-                self.col += 1;
-                true
-            }
-            None => false,
         }
     }
 }

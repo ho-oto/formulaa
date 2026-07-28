@@ -942,15 +942,14 @@
       構造なら空スロットの形)をその場に薄く重ねて見せる。
       `Editor::command_known` と同じ clone-probe で描画まで回せば、
       確定前に結果が分かる
-- [ ] **シンボル表とコマンド解決の整理**(2026-07 の検討結果):
-      (A) `SYMBOLS` を役割で分割 — 「ext に無い/上書きする 23 件」と
-      「文字→LaTeX 名(出力専用)」に。今は 103 件中 84 件が ext と
-      重複し、うち 4 件(epsilon/phi/varphi/hbar)が黙って上書きしている
-      (B) `execute` の 35 分岐+6 テーブルのフォールバック連鎖を
-      `resolve(cmd) -> Option<Cmd>` に集約し、優先順位を 1 箇所に。
-      `command_known` の clone-probe も不要になる
-      (C) LaTeX 逆引きの網羅性 — ext の英字名 420 件のうち実在する
-      LaTeX コマンドだけを逆引きに追加(要照合、不確実性が高いので後)
+- [x] **シンボル表とコマンド解決の整理**(2026-07 完了。最終形は当初案から発展):
+      (A)(B) は `NAMES`(綴り→char)/`ATOMS`(char→LaTeX+kind)の
+      手書き phf 2枚と `resolve(cmd) -> Option<Edit>` に。さらに
+      (C) は「逆引き追加」でなく **ext 廃止**で解決 — KaTeX/MathJax が
+      表示できるコマンドを持つ文字だけを昇格・残置し(ϵ/φ は TeX 準拠に
+      入れ替え、大文字ギリシャ等は削除)、「入力できる原子は必ず LaTeX
+      綴りを持つ」を gap=0 テストで固定。enum(Arrow/Accent/Delim/Radical)
+      も「綴り→variant の phf+variant→info の match 1箇所」に統一
 - [ ] **^F の範囲選択(仕様再検討)** — Shift+矢印スイープを2案
       (両端スナップ span / 矩形含有 fold)試作したがどちらも期待に
       合わず撤去(§44 に教訓)。何を「選択範囲」とみなすかの仕様から
