@@ -213,6 +213,8 @@ pub static ATOMS: phf::Map<char, AtomSpec> = phf::phf_map! {
     '⊳' => sym("vartriangleright"),
     '⊴' => sym("trianglelefteq"),
     '⊵' => sym("trianglerighteq"),
+    '⋤' => sym("sqsubsetneq"),
+    '⋥' => sym("sqsupsetneq"),
     '⋦' => sym("lnsim"),
     '⋧' => sym("gnsim"),
     '⋘' => sym("lll"),
@@ -247,7 +249,10 @@ pub static ATOMS: phf::Map<char, AtomSpec> = phf::phf_map! {
     '⋊' => sym("rtimes"),
     // ∑-class big operators (amsmath tier)
     '∭' => big("iiint"),
+    '∯' => big("oiint"),
+    '∰' => big("oiiint"),
     '⨀' => big("bigodot"),
+    '⨅' => big("bigsqcap"),
     '⨆' => big("bigsqcup"),
     // ∑-class big operators (band-promotable; see AtomKind::BigOp).
     '∑' => big("sum"),
@@ -446,6 +451,8 @@ pub static NAMES: phf::Map<&'static str, char> = phf::phf_map! {
     "vartriangleright" | "|>" => '⊳',
     "trianglelefteq" | "-<|" | "<|-" => '⊴',
     "trianglerighteq" | "-|>" | "|>-" => '⊵',
+    "sqsubsetneq" => '⋤',
+    "sqsupsetneq" => '⋥',
     "lnsim" => '⋦',
     "gnsim" => '⋧',
     "lll" | "<<<" => '⋘',
@@ -480,7 +487,10 @@ pub static NAMES: phf::Map<&'static str, char> = phf::phf_map! {
     "rtimes" | "x|" => '⋊',
     // ∑-class big operators (amsmath tier)
     "iiint" | "III" => '∭',
+    "oiint" | "oII" => '∯',
+    "oiiint" | "oIII" => '∰',
     "bigodot" => '⨀',
+    "bigsqcap" => '⨅',
     "bigsqcup" => '⨆',
     // ∑-class big operators
     "sum" | "S" => '∑',
