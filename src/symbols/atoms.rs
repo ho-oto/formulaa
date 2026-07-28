@@ -4,13 +4,13 @@
 
 use super::{alphabets, ext};
 
-/// One curated character per row: the char itself is the canonical
-/// identity, `latex` is the one spelling the serializer writes, and
-/// `kind` is how the editor materializes it — a plain atom, or a
-/// ∑-class operator that comes in as a band. This is the *output*
-/// table (char -> info); the input direction (spelling -> char,
-/// including the extra spellings like `\leq` for ≤) is `NAMES`, and
-/// the tests hold the two mirrors together.
+/// What a curated character *is*: `latex` is the one spelling the
+/// serializer writes, and `kind` is how the editor materializes it —
+/// a plain atom, or a ∑-class operator that comes in as a band. This
+/// is the *output* table (char -> info, the char being the key); the
+/// input direction (spelling -> char, including the extra spellings
+/// like `\leq` for ≤) is `NAMES`, and the tests hold the two mirrors
+/// together.
 ///
 /// Most spellings also appear in the generated `ext` table. That
 /// overlap is deliberate, not redundancy: it **pins** the meaning of
@@ -19,7 +19,6 @@ use super::{alphabets, ext};
 /// entries disagree with upstream on purpose (`INTENTIONAL_OVERRIDES`),
 /// and a test fails if a new divergence appears silently.
 pub struct AtomSpec {
-    pub ch: char,
     pub latex: &'static str,
     pub kind: AtomKind,
 }
@@ -34,270 +33,279 @@ pub enum AtomKind {
     BigOp,
 }
 
-const fn atom(ch: char, latex: &'static str, kind: AtomKind) -> AtomSpec {
-    AtomSpec { ch, latex, kind }
+const fn sym(latex: &'static str) -> AtomSpec {
+    AtomSpec {
+        latex,
+        kind: AtomKind::Sym,
+    }
 }
 
-pub const ATOMS: &[AtomSpec] = &[
+const fn big(latex: &'static str) -> AtomSpec {
+    AtomSpec {
+        latex,
+        kind: AtomKind::BigOp,
+    }
+}
+
+pub static ATOMS: phf::Map<char, AtomSpec> = phf::phf_map! {
     // Greek lowercase
-    atom('α', "alpha", AtomKind::Sym),
-    atom('β', "beta", AtomKind::Sym),
-    atom('γ', "gamma", AtomKind::Sym),
-    atom('δ', "delta", AtomKind::Sym),
-    atom('ε', "epsilon", AtomKind::Sym),
-    atom('ζ', "zeta", AtomKind::Sym),
-    atom('η', "eta", AtomKind::Sym),
-    atom('θ', "theta", AtomKind::Sym),
-    atom('ι', "iota", AtomKind::Sym),
-    atom('κ', "kappa", AtomKind::Sym),
-    atom('λ', "lambda", AtomKind::Sym),
-    atom('μ', "mu", AtomKind::Sym),
-    atom('ν', "nu", AtomKind::Sym),
-    atom('ξ', "xi", AtomKind::Sym),
-    atom('π', "pi", AtomKind::Sym),
-    atom('ρ', "rho", AtomKind::Sym),
-    atom('σ', "sigma", AtomKind::Sym),
-    atom('τ', "tau", AtomKind::Sym),
-    atom('υ', "upsilon", AtomKind::Sym),
-    atom('φ', "phi", AtomKind::Sym),
-    atom('χ', "chi", AtomKind::Sym),
-    atom('ψ', "psi", AtomKind::Sym),
-    atom('ω', "omega", AtomKind::Sym),
-    atom('ϕ', "varphi", AtomKind::Sym),
-    atom('ϑ', "vartheta", AtomKind::Sym),
+    'α' => sym("alpha"),
+    'β' => sym("beta"),
+    'γ' => sym("gamma"),
+    'δ' => sym("delta"),
+    'ε' => sym("epsilon"),
+    'ζ' => sym("zeta"),
+    'η' => sym("eta"),
+    'θ' => sym("theta"),
+    'ι' => sym("iota"),
+    'κ' => sym("kappa"),
+    'λ' => sym("lambda"),
+    'μ' => sym("mu"),
+    'ν' => sym("nu"),
+    'ξ' => sym("xi"),
+    'π' => sym("pi"),
+    'ρ' => sym("rho"),
+    'σ' => sym("sigma"),
+    'τ' => sym("tau"),
+    'υ' => sym("upsilon"),
+    'φ' => sym("phi"),
+    'χ' => sym("chi"),
+    'ψ' => sym("psi"),
+    'ω' => sym("omega"),
+    'ϕ' => sym("varphi"),
+    'ϑ' => sym("vartheta"),
     // Greek uppercase
-    atom('Γ', "Gamma", AtomKind::Sym),
-    atom('Δ', "Delta", AtomKind::Sym),
-    atom('Θ', "Theta", AtomKind::Sym),
-    atom('Λ', "Lambda", AtomKind::Sym),
-    atom('Ξ', "Xi", AtomKind::Sym),
-    atom('Π', "Pi", AtomKind::Sym),
-    atom('Σ', "Sigma", AtomKind::Sym),
-    atom('Υ', "Upsilon", AtomKind::Sym),
-    atom('Φ', "Phi", AtomKind::Sym),
-    atom('Ψ', "Psi", AtomKind::Sym),
-    atom('Ω', "Omega", AtomKind::Sym),
+    'Γ' => sym("Gamma"),
+    'Δ' => sym("Delta"),
+    'Θ' => sym("Theta"),
+    'Λ' => sym("Lambda"),
+    'Ξ' => sym("Xi"),
+    'Π' => sym("Pi"),
+    'Σ' => sym("Sigma"),
+    'Υ' => sym("Upsilon"),
+    'Φ' => sym("Phi"),
+    'Ψ' => sym("Psi"),
+    'Ω' => sym("Omega"),
     // Binary operators / relations
-    atom('±', "pm", AtomKind::Sym),
-    atom('∓', "mp", AtomKind::Sym),
-    atom('×', "times", AtomKind::Sym),
-    atom('÷', "div", AtomKind::Sym),
-    atom('⋅', "cdot", AtomKind::Sym),
-    atom('∘', "circ", AtomKind::Sym),
-    atom('⊕', "oplus", AtomKind::Sym),
-    atom('⊗', "otimes", AtomKind::Sym),
-    atom('∗', "ast", AtomKind::Sym),
-    atom('≤', "le", AtomKind::Sym),
-    atom('≥', "ge", AtomKind::Sym),
-    atom('≠', "ne", AtomKind::Sym),
-    atom('≈', "approx", AtomKind::Sym),
-    atom('≡', "equiv", AtomKind::Sym),
-    atom('∼', "sim", AtomKind::Sym),
-    atom('≃', "simeq", AtomKind::Sym),
-    atom('∝', "propto", AtomKind::Sym),
-    atom('≪', "ll", AtomKind::Sym),
-    atom('≫', "gg", AtomKind::Sym),
+    '±' => sym("pm"),
+    '∓' => sym("mp"),
+    '×' => sym("times"),
+    '÷' => sym("div"),
+    '⋅' => sym("cdot"),
+    '∘' => sym("circ"),
+    '⊕' => sym("oplus"),
+    '⊗' => sym("otimes"),
+    '∗' => sym("ast"),
+    '≤' => sym("le"),
+    '≥' => sym("ge"),
+    '≠' => sym("ne"),
+    '≈' => sym("approx"),
+    '≡' => sym("equiv"),
+    '∼' => sym("sim"),
+    '≃' => sym("simeq"),
+    '∝' => sym("propto"),
+    '≪' => sym("ll"),
+    '≫' => sym("gg"),
     // Arrows
-    atom('→', "to", AtomKind::Sym),
-    atom('←', "leftarrow", AtomKind::Sym),
-    atom('⇒', "Rightarrow", AtomKind::Sym),
-    atom('⇐', "Leftarrow", AtomKind::Sym),
-    atom('↔', "leftrightarrow", AtomKind::Sym),
-    atom('⇔', "Leftrightarrow", AtomKind::Sym),
-    atom('↦', "mapsto", AtomKind::Sym),
+    '→' => sym("to"),
+    '←' => sym("leftarrow"),
+    '⇒' => sym("Rightarrow"),
+    '⇐' => sym("Leftarrow"),
+    '↔' => sym("leftrightarrow"),
+    '⇔' => sym("Leftrightarrow"),
+    '↦' => sym("mapsto"),
     // Sets / logic
-    atom('∈', "in", AtomKind::Sym),
-    atom('∉', "notin", AtomKind::Sym),
-    atom('∋', "ni", AtomKind::Sym),
-    atom('⊂', "subset", AtomKind::Sym),
-    atom('⊆', "subseteq", AtomKind::Sym),
-    atom('⊃', "supset", AtomKind::Sym),
-    atom('⊇', "supseteq", AtomKind::Sym),
-    atom('∪', "cup", AtomKind::Sym),
-    atom('∩', "cap", AtomKind::Sym),
-    atom('∖', "setminus", AtomKind::Sym),
-    atom('∅', "emptyset", AtomKind::Sym),
-    atom('∀', "forall", AtomKind::Sym),
-    atom('∃', "exists", AtomKind::Sym),
-    atom('¬', "neg", AtomKind::Sym),
-    atom('∧', "land", AtomKind::Sym),
-    atom('∨', "lor", AtomKind::Sym),
-    atom('⊢', "vdash", AtomKind::Sym),
-    atom('⊨', "models", AtomKind::Sym),
+    '∈' => sym("in"),
+    '∉' => sym("notin"),
+    '∋' => sym("ni"),
+    '⊂' => sym("subset"),
+    '⊆' => sym("subseteq"),
+    '⊃' => sym("supset"),
+    '⊇' => sym("supseteq"),
+    '∪' => sym("cup"),
+    '∩' => sym("cap"),
+    '∖' => sym("setminus"),
+    '∅' => sym("emptyset"),
+    '∀' => sym("forall"),
+    '∃' => sym("exists"),
+    '¬' => sym("neg"),
+    '∧' => sym("land"),
+    '∨' => sym("lor"),
+    '⊢' => sym("vdash"),
+    '⊨' => sym("models"),
     // Misc
-    atom('∞', "infty", AtomKind::Sym),
-    atom('∂', "partial", AtomKind::Sym),
-    atom('∇', "nabla", AtomKind::Sym),
-    atom('ℏ', "hbar", AtomKind::Sym),
-    atom('ℓ', "ell", AtomKind::Sym),
-    atom('ℜ', "Re", AtomKind::Sym),
-    atom('ℑ', "Im", AtomKind::Sym),
-    atom('ℵ', "aleph", AtomKind::Sym),
-    atom('∠', "angle", AtomKind::Sym),
-    atom('⊥', "perp", AtomKind::Sym),
-    atom('∥', "parallel", AtomKind::Sym),
-    atom('′', "prime", AtomKind::Sym),
-    atom('°', "degree", AtomKind::Sym),
-    atom('⋯', "cdots", AtomKind::Sym),
-    atom('…', "ldots", AtomKind::Sym),
-    atom('⋮', "vdots", AtomKind::Sym),
-    atom('⋱', "ddots", AtomKind::Sym),
+    '∞' => sym("infty"),
+    '∂' => sym("partial"),
+    '∇' => sym("nabla"),
+    'ℏ' => sym("hbar"),
+    'ℓ' => sym("ell"),
+    'ℜ' => sym("Re"),
+    'ℑ' => sym("Im"),
+    'ℵ' => sym("aleph"),
+    '∠' => sym("angle"),
+    '⊥' => sym("perp"),
+    '∥' => sym("parallel"),
+    '′' => sym("prime"),
+    '°' => sym("degree"),
+    '⋯' => sym("cdots"),
+    '…' => sym("ldots"),
+    '⋮' => sym("vdots"),
+    '⋱' => sym("ddots"),
     // Explicit space atom (the Space key): visible ␣ in canonical AA so the
     // picture stays parseable (a real blank column is a sibling separator).
-    atom('␣', "space", AtomKind::Sym),
+    '␣' => sym("space"),
     // ∑-class big operators (band-promotable; see AtomKind::BigOp).
-    atom('∑', "sum", AtomKind::BigOp),
-    atom('∏', "prod", AtomKind::BigOp),
-    atom('∐', "coprod", AtomKind::BigOp),
-    atom('∫', "int", AtomKind::BigOp),
-    atom('∬', "iint", AtomKind::BigOp),
-    atom('∮', "oint", AtomKind::BigOp),
-    atom('⋃', "bigcup", AtomKind::BigOp),
-    atom('⋂', "bigcap", AtomKind::BigOp),
-    atom('⨁', "bigoplus", AtomKind::BigOp),
-    atom('⨂', "bigotimes", AtomKind::BigOp),
-    atom('⋁', "bigvee", AtomKind::BigOp),
-    atom('⋀', "bigwedge", AtomKind::BigOp),
-];
+    '∑' => big("sum"),
+    '∏' => big("prod"),
+    '∐' => big("coprod"),
+    '∫' => big("int"),
+    '∬' => big("iint"),
+    '∮' => big("oint"),
+    '⋃' => big("bigcup"),
+    '⋂' => big("bigcap"),
+    '⨁' => big("bigoplus"),
+    '⨂' => big("bigotimes"),
+    '⋁' => big("bigvee"),
+    '⋀' => big("bigwedge"),
+};
 
 /// The curated row for a character.
 pub fn atom_of(c: char) -> Option<&'static AtomSpec> {
-    ATOMS.iter().find(|a| a.ch == c)
+    ATOMS.get(&c)
 }
 
 /// The input direction, spelled out: every `\name` that types a
-/// curated character, alternative spellings listed right next to the
-/// canonical one (which comes first — it doubles as the row's label).
-/// Deliberately a hand-written mirror of `ATOMS` rather than derived
-/// from it, so each direction reads on its own; the tests pin the two
-/// together (same chars, canonical spelling first, no spelling claimed
-/// twice). Command aliases (`\sqrt3` = `\cbrt`) are not names of a
-/// character, so they live as extra patterns in `resolve`'s match.
-pub const NAMES: &[(&[&str], char)] = &[
+/// curated character, alternative spellings or-ed onto the canonical
+/// one (which comes first) in the same entry. Deliberately a
+/// hand-written mirror of `ATOMS` rather than derived from it, so each
+/// direction reads on its own; a spelling claimed twice fails the
+/// build (phf), and the tests pin the two tables together (same chars,
+/// every canonical spelling present). Command aliases (`\sqrt3` =
+/// `\cbrt`) are not names of a character, so they live as extra
+/// patterns in `resolve`'s match.
+pub static NAMES: phf::Map<&'static str, char> = phf::phf_map! {
     // Greek lowercase
-    (&["alpha"], 'α'),
-    (&["beta"], 'β'),
-    (&["gamma"], 'γ'),
-    (&["delta"], 'δ'),
-    (&["epsilon"], 'ε'),
-    (&["zeta"], 'ζ'),
-    (&["eta"], 'η'),
-    (&["theta"], 'θ'),
-    (&["iota"], 'ι'),
-    (&["kappa"], 'κ'),
-    (&["lambda"], 'λ'),
-    (&["mu"], 'μ'),
-    (&["nu"], 'ν'),
-    (&["xi"], 'ξ'),
-    (&["pi"], 'π'),
-    (&["rho"], 'ρ'),
-    (&["sigma"], 'σ'),
-    (&["tau"], 'τ'),
-    (&["upsilon"], 'υ'),
-    (&["phi"], 'φ'),
-    (&["chi"], 'χ'),
-    (&["psi"], 'ψ'),
-    (&["omega"], 'ω'),
-    (&["varphi"], 'ϕ'),
-    (&["vartheta"], 'ϑ'),
+    "alpha" => 'α',
+    "beta" => 'β',
+    "gamma" => 'γ',
+    "delta" => 'δ',
+    "epsilon" => 'ε',
+    "zeta" => 'ζ',
+    "eta" => 'η',
+    "theta" => 'θ',
+    "iota" => 'ι',
+    "kappa" => 'κ',
+    "lambda" => 'λ',
+    "mu" => 'μ',
+    "nu" => 'ν',
+    "xi" => 'ξ',
+    "pi" => 'π',
+    "rho" => 'ρ',
+    "sigma" => 'σ',
+    "tau" => 'τ',
+    "upsilon" => 'υ',
+    "phi" => 'φ',
+    "chi" => 'χ',
+    "psi" => 'ψ',
+    "omega" => 'ω',
+    "varphi" => 'ϕ',
+    "vartheta" => 'ϑ',
     // Greek uppercase
-    (&["Gamma"], 'Γ'),
-    (&["Delta"], 'Δ'),
-    (&["Theta"], 'Θ'),
-    (&["Lambda"], 'Λ'),
-    (&["Xi"], 'Ξ'),
-    (&["Pi"], 'Π'),
-    (&["Sigma"], 'Σ'),
-    (&["Upsilon"], 'Υ'),
-    (&["Phi"], 'Φ'),
-    (&["Psi"], 'Ψ'),
-    (&["Omega"], 'Ω'),
+    "Gamma" => 'Γ',
+    "Delta" => 'Δ',
+    "Theta" => 'Θ',
+    "Lambda" => 'Λ',
+    "Xi" => 'Ξ',
+    "Pi" => 'Π',
+    "Sigma" => 'Σ',
+    "Upsilon" => 'Υ',
+    "Phi" => 'Φ',
+    "Psi" => 'Ψ',
+    "Omega" => 'Ω',
     // Binary operators / relations
-    (&["pm"], '±'),
-    (&["mp"], '∓'),
-    (&["times"], '×'),
-    (&["div"], '÷'),
-    (&["cdot"], '⋅'),
-    (&["circ"], '∘'),
-    (&["oplus"], '⊕'),
-    (&["otimes"], '⊗'),
-    (&["ast"], '∗'),
-    (&["le", "leq"], '≤'),
-    (&["ge", "geq"], '≥'),
-    (&["ne", "neq"], '≠'),
-    (&["approx"], '≈'),
-    (&["equiv"], '≡'),
-    (&["sim"], '∼'),
-    (&["simeq"], '≃'),
-    (&["propto"], '∝'),
-    (&["ll"], '≪'),
-    (&["gg"], '≫'),
+    "pm" => '±',
+    "mp" => '∓',
+    "times" => '×',
+    "div" => '÷',
+    "cdot" => '⋅',
+    "circ" => '∘',
+    "oplus" => '⊕',
+    "otimes" => '⊗',
+    "ast" => '∗',
+    "le" | "leq" => '≤',
+    "ge" | "geq" => '≥',
+    "ne" | "neq" => '≠',
+    "approx" => '≈',
+    "equiv" => '≡',
+    "sim" => '∼',
+    "simeq" => '≃',
+    "propto" => '∝',
+    "ll" => '≪',
+    "gg" => '≫',
     // Arrows
-    (&["to", "rightarrow"], '→'),
-    (&["leftarrow"], '←'),
-    (&["Rightarrow"], '⇒'),
-    (&["Leftarrow"], '⇐'),
-    (&["leftrightarrow"], '↔'),
-    (&["Leftrightarrow"], '⇔'),
-    (&["mapsto"], '↦'),
+    "to" | "rightarrow" => '→',
+    "leftarrow" => '←',
+    "Rightarrow" => '⇒',
+    "Leftarrow" => '⇐',
+    "leftrightarrow" => '↔',
+    "Leftrightarrow" => '⇔',
+    "mapsto" => '↦',
     // Sets / logic
-    (&["in"], '∈'),
-    (&["notin"], '∉'),
-    (&["ni"], '∋'),
-    (&["subset"], '⊂'),
-    (&["subseteq"], '⊆'),
-    (&["supset"], '⊃'),
-    (&["supseteq"], '⊇'),
-    (&["cup"], '∪'),
-    (&["cap"], '∩'),
-    (&["setminus"], '∖'),
-    (&["emptyset"], '∅'),
-    (&["forall"], '∀'),
-    (&["exists"], '∃'),
-    (&["neg"], '¬'),
-    (&["land"], '∧'),
-    (&["lor"], '∨'),
-    (&["vdash"], '⊢'),
-    (&["models"], '⊨'),
+    "in" => '∈',
+    "notin" => '∉',
+    "ni" => '∋',
+    "subset" => '⊂',
+    "subseteq" => '⊆',
+    "supset" => '⊃',
+    "supseteq" => '⊇',
+    "cup" => '∪',
+    "cap" => '∩',
+    "setminus" => '∖',
+    "emptyset" => '∅',
+    "forall" => '∀',
+    "exists" => '∃',
+    "neg" => '¬',
+    "land" => '∧',
+    "lor" => '∨',
+    "vdash" => '⊢',
+    "models" => '⊨',
     // Misc
-    (&["infty"], '∞'),
-    (&["partial"], '∂'),
-    (&["nabla"], '∇'),
-    (&["hbar"], 'ℏ'),
-    (&["ell"], 'ℓ'),
-    (&["Re"], 'ℜ'),
-    (&["Im"], 'ℑ'),
-    (&["aleph"], 'ℵ'),
-    (&["angle"], '∠'),
-    (&["perp"], '⊥'),
-    (&["parallel"], '∥'),
-    (&["prime"], '′'),
-    (&["degree"], '°'),
-    (&["cdots"], '⋯'),
-    (&["ldots", "dots"], '…'),
-    (&["vdots"], '⋮'),
-    (&["ddots"], '⋱'),
-    (&["space"], '␣'),
+    "infty" => '∞',
+    "partial" => '∂',
+    "nabla" => '∇',
+    "hbar" => 'ℏ',
+    "ell" => 'ℓ',
+    "Re" => 'ℜ',
+    "Im" => 'ℑ',
+    "aleph" => 'ℵ',
+    "angle" => '∠',
+    "perp" => '⊥',
+    "parallel" => '∥',
+    "prime" => '′',
+    "degree" => '°',
+    "cdots" => '⋯',
+    "ldots" | "dots" => '…',
+    "vdots" => '⋮',
+    "ddots" => '⋱',
+    "space" => '␣',
     // ∑-class big operators
-    (&["sum"], '∑'),
-    (&["prod"], '∏'),
-    (&["coprod"], '∐'),
-    (&["int"], '∫'),
-    (&["iint"], '∬'),
-    (&["oint"], '∮'),
-    (&["bigcup"], '⋃'),
-    (&["bigcap"], '⋂'),
-    (&["bigoplus"], '⨁'),
-    (&["bigotimes"], '⨂'),
-    (&["bigvee"], '⋁'),
-    (&["bigwedge"], '⋀'),
-];
+    "sum" => '∑',
+    "prod" => '∏',
+    "coprod" => '∐',
+    "int" => '∫',
+    "iint" => '∬',
+    "oint" => '∮',
+    "bigcup" => '⋃',
+    "bigcap" => '⋂',
+    "bigoplus" => '⨁',
+    "bigotimes" => '⨂',
+    "bigvee" => '⋁',
+    "bigwedge" => '⋀',
+};
 
-/// The char a curated `\name` types (any spelling in its `NAMES` row).
+/// The char a curated `\name` types (any spelling in its `NAMES` entry).
 pub fn named_char(name: &str) -> Option<char> {
-    NAMES
-        .iter()
-        .find_map(|&(names, c)| names.contains(&name).then_some(c))
+    NAMES.get(name).copied()
 }
 
 /// Names where the curated table deliberately differs from the
@@ -387,8 +395,8 @@ pub fn is_atom(c: char) -> bool {
     ATOM_SET
         .get_or_init(|| {
             ATOMS
-                .iter()
-                .map(|a| a.ch)
+                .keys()
+                .copied()
                 .chain(ext::EXT_SYMBOLS.values().copied())
                 .chain(alphabets::ALPHABETS.iter().flat_map(|a| {
                     ('A'..='Z')
@@ -407,31 +415,24 @@ pub fn is_atom(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::symbols::*;
-    /// The two hand-written tables mirror each other: every atom has
-    /// exactly one `NAMES` row led by its canonical `latex` spelling,
-    /// every spelling is claimed once and types that row's char — \le
-    /// and \leq type the same ≤ but it always prints as \le.
+    /// The two hand-written tables mirror each other: every atom's
+    /// canonical `latex` spelling is claimed by exactly one char and
+    /// types it back through `NAMES` itself (not the ext fallback) —
+    /// \le and \leq type the same ≤ but it always prints as \le — and
+    /// every `NAMES` entry targets a curated atom. A spelling written
+    /// twice is a phf build error, so uniqueness needs no test.
     #[test]
     fn atom_rows_are_canonical() {
-        let mut chars = std::collections::HashSet::new();
         let mut names = std::collections::HashSet::new();
-        for a in ATOMS {
-            assert!(chars.insert(a.ch), "{:?} has two rows", a.ch);
-            assert_eq!(latex_name(a.ch), Some(a.latex));
-            assert_eq!(symbol_by_name(a.latex), Some(a.ch), "\\{}", a.latex);
+        for (&ch, a) in ATOMS.entries() {
+            assert!(names.insert(a.latex), "\\{} is claimed twice", a.latex);
+            assert_eq!(latex_name(ch), Some(a.latex));
+            assert_eq!(named_char(a.latex), Some(ch), "\\{}", a.latex);
+            assert_eq!(symbol_by_name(a.latex), Some(ch), "\\{}", a.latex);
         }
-        let mut targets = std::collections::HashSet::new();
-        for &(spellings, ch) in NAMES {
-            let a = atom_of(ch).unwrap_or_else(|| panic!("{:?} is not a curated atom", ch));
-            assert!(targets.insert(ch), "{:?} has two NAMES rows", ch);
-            assert_eq!(spellings.first(), Some(&a.latex), "{:?}", ch);
-            for &s in spellings {
-                assert!(names.insert(s), "\\{} is claimed twice", s);
-                assert_eq!(symbol_by_name(s), Some(ch), "\\{}", s);
-            }
-        }
-        for a in ATOMS {
-            assert!(targets.contains(&a.ch), "\\{} has no NAMES row", a.latex);
+        for (&name, &ch) in NAMES.entries() {
+            assert!(atom_of(ch).is_some(), "\\{} targets a non-atom", name);
+            assert_eq!(symbol_by_name(name), Some(ch), "\\{}", name);
         }
     }
 
@@ -477,9 +478,7 @@ mod tests {
     /// nothing would notice.
     #[test]
     fn curated_names_pin_the_generated_table() {
-        let spellings = NAMES
-            .iter()
-            .flat_map(|&(names, ch)| names.iter().map(move |&n| (n, ch)));
+        let spellings = NAMES.entries().map(|(&n, &c)| (n, c));
         let mut diverged: Vec<&str> = spellings
             .filter(|(n, c)| ext::EXT_SYMBOLS.get(n).is_some_and(|e| e != c))
             .map(|(n, _)| n)
@@ -490,7 +489,7 @@ mod tests {
         assert_eq!(diverged, want, "undocumented divergence from ext");
         // …and an override is a name the curated table actually wins.
         for &n in INTENTIONAL_OVERRIDES {
-            let curated = ATOMS.iter().find(|a| a.latex == n).map(|a| a.ch);
+            let curated = ATOMS.entries().find(|(_, a)| a.latex == n).map(|(&c, _)| c);
             assert_eq!(symbol_by_name(n), curated, "\\{}", n);
         }
     }

@@ -236,8 +236,8 @@ fn command_known_tracks_execute() {
 fn aliases_resolve_to_the_same_command() {
     // Every alias must do exactly what its target does. Command
     // aliases are extra patterns on their `resolve` arm (this list
-    // names each of them once); symbol aliases are the non-leading
-    // spellings of their `NAMES` row.
+    // names each of them once); symbol aliases are the `NAMES`
+    // spellings that are not their char's canonical one.
     let command_aliases = [
         ("sqrt3", "cbrt"),
         ("sqrt4", "qdrt"),
@@ -251,9 +251,10 @@ fn aliases_resolve_to_the_same_command() {
         ("limits", "op*"),
         ("delim", "lr"),
     ];
-    let symbol_aliases = mascii::symbols::NAMES
-        .iter()
-        .flat_map(|&(names, _)| names[1..].iter().map(move |&from| (from, names[0])));
+    let symbol_aliases = mascii::symbols::NAMES.entries().filter_map(|(&from, &ch)| {
+        let to = mascii::symbols::latex_name(ch).unwrap();
+        (from != to).then_some((from, to))
+    });
     for (from, to) in command_aliases.into_iter().chain(symbol_aliases) {
         // The box commands open a mode rather than insert; compare the
         // mode instead of the formula.
