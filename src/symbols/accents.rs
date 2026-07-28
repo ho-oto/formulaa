@@ -67,6 +67,22 @@ macro_rules! mark {
     };
 }
 
+/// The input direction, same shape as the symbol `NAMES` table:
+/// spelling -> variant, canonical first, aliases or-ed on (the LaTeX
+/// spelling where it differs from the editor's name).
+pub static ACCENT_NAMES: phf::Map<&'static str, Accent> = phf::phf_map! {
+    "hat" => Accent::Hat,
+    "tilde" => Accent::Tilde,
+    "bar" => Accent::Bar,
+    "vec" => Accent::Vec,
+    "dot" => Accent::Dot,
+    "ddot" => Accent::Ddot,
+    "check" => Accent::Check,
+    "ring" | "mathring" => Accent::Ring,
+    "underline" => Accent::Underline,
+    "utilde" => Accent::Utilde,
+};
+
 impl Accent {
     pub const ALL: [Accent; 10] = [
         Accent::Hat,
@@ -106,8 +122,10 @@ impl Accent {
         self.info().name
     }
 
+    /// The mark a `\name` applies (any spelling in its `ACCENT_NAMES`
+    /// entry).
     pub fn of_name(name: &str) -> Option<Accent> {
-        Accent::ALL.into_iter().find(|a| a.name() == name)
+        ACCENT_NAMES.get(name).copied()
     }
 
     pub fn latex(self) -> &'static str {
@@ -161,6 +179,7 @@ mod tests {
     fn drawn_glyphs_are_unambiguous() {
         for a in Accent::ALL {
             assert_eq!(Accent::of_name(a.name()), Some(a));
+            assert_eq!(Accent::of_name(a.latex()), Some(a));
             match (a.under(), a.drawn()) {
                 (_, DrawnForm::Dots) => assert_eq!(a, Accent::Ddot),
                 (false, _) => assert_eq!(Accent::of_over_glyph(a.glyph()), Some(a)),

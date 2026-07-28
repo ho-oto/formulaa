@@ -263,17 +263,6 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
             arg: vec![],
             label: vec![],
         }),
-        "xto" | "xfrom" | "xTo" | "xFrom" | "xrightarrow" | "xleftarrow" | "xRightarrow"
-        | "xLeftarrow" => ins(Node::Arrow {
-            op: match cmd {
-                "xto" | "xrightarrow" => Arrow::To,
-                "xfrom" | "xleftarrow" => Arrow::From,
-                "xTo" | "xRightarrow" => Arrow::DoubleTo,
-                _ => Arrow::DoubleFrom,
-            },
-            over: vec![],
-            under: vec![],
-        }),
         "ceil" => delim('⌈', '⌉', vec![]),
         "floor" => delim('⌊', '⌋', vec![]),
         "abs" => delim('|', '|', vec![]),
@@ -294,7 +283,14 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
         "rm" => Some(Edit::OpenBox(BoxKind::Rm)),
         "text" => Some(Edit::OpenBox(BoxKind::Text)),
         _ => {
-            if let Some((delims, rows, cols)) = grid_command(cmd) {
+            if let Some(op) = Arrow::of_name(cmd) {
+                // The stretchy labeled arrows (\xto and friends).
+                ins(Node::Arrow {
+                    op,
+                    over: vec![],
+                    under: vec![],
+                })
+            } else if let Some((delims, rows, cols)) = grid_command(cmd) {
                 Some(Edit::Grid { delims, rows, cols })
             } else if let Some((l, r, mids)) = lr_spec(cmd) {
                 delim(l, r, mids)

@@ -53,9 +53,9 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 | `src/symbols/` | **全テーブルの家**(1関心1ファイル、`symbols::X` でフラットに再輸出) |
 | ├ `atoms.rs` | **全記号語彙のテーブル2枚**(どちらも phf・手書き): 出力側 `ATOMS`(char → LaTeX 綴り+`kind` Sym/BigOp)と入力側 `NAMES`(綴り → char、別綴り・ASCII 絵文字綴りは `\|` で併記。コマンド別綴りは `resolve` の match パターン)・予約グリフ・`is_atom`。**入力できる原子は必ず LaTeX 綴りを持つ**(gap=0 をテストが固定) |
 | ├ `funcs.rs` | 立体関数 `FUNCS`(limits/spaced)。∑系は `ATOMS` の kind に統合 |
-| ├ `accents.rs` | `Accent` enum(`info()` の1 match に名前・LaTeX・側・描画形を集約) |
+| ├ `accents.rs` | `Accent` enum: 入力 `ACCENT_NAMES`(phf, 綴り→variant)+`info()`(variant→全属性の1 match) |
 | ├ `delims.rs` | **括弧表 `DELIMS`**(仕様文字・1行/縦グリフ・LaTeX を1行に。parse/render/latex がここを引く) |
-| ├ `arrows.rs` | `Arrow` enum(`info()` の1 match に向き・胴体・LaTeX を集約) |
+| ├ `arrows.rs` | `Arrow` enum: 入力 `ARROW_NAMES`(phf, 綴り→variant)+`info()`(variant→全属性の1 match) |
 | ├ `scripts.rs` | インライン上付き/下付きの双射表 |
 | ├ `alphabets.rs` | スタイル族(12族28綴り×前置/後置)を規則+例外表で。LaTeX 逆引き(`𝔸`→`\mathbb{A}`)もここ |
 | `src/theme.rs` | TUI の配色定数(bin 専用) |
