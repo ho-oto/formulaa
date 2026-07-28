@@ -32,6 +32,41 @@ pub enum DrawnForm {
     Dots,
 }
 
+/// Everything about one mark, in one row — `info` is the single match,
+/// so a variant's whole story reads in one place.
+pub struct AccentInfo {
+    /// The `\name` that applies this mark.
+    pub name: &'static str,
+    /// The LaTeX command for the single-char form.
+    pub latex: &'static str,
+    /// The LaTeX command for the stretchy (wide) form; marks without
+    /// one use their plain command (\dot etc. accept groups).
+    pub wide_latex: &'static str,
+    /// Under-marks hug the base from below; everything else is over.
+    pub under: bool,
+    /// The glyph the picture shows. Every mark hugs its base: over
+    /// marks draw low in their cell (bar as `_` like the √ overline,
+    /// tilde as the low `˷`), under marks draw high (underline as `¯`,
+    /// utilde as the high `˜`) — so the tilde/bar pairs swap between
+    /// the over and under roles, and every drawn glyph names exactly
+    /// one (mark, side).
+    pub drawn: DrawnForm,
+}
+
+/// One row, positionally: (name, latex, wide_latex, under, drawn).
+/// A macro rather than a const fn so the `&` still promotes to 'static.
+macro_rules! mark {
+    ($name:literal, $latex:literal, $wide:literal, $under:literal, $drawn:expr) => {
+        &AccentInfo {
+            name: $name,
+            latex: $latex,
+            wide_latex: $wide,
+            under: $under,
+            drawn: $drawn,
+        }
+    };
+}
+
 impl Accent {
     pub const ALL: [Accent; 10] = [
         Accent::Hat,
@@ -46,73 +81,49 @@ impl Accent {
         Accent::Utilde,
     ];
 
-    /// The `\name` that applies this mark (also its LaTeX command,
-    /// except `\ring` -> `\mathring`).
-    pub fn name(self) -> &'static str {
+    /// The one row that says everything about this mark.
+    #[rustfmt::skip]
+    pub const fn info(self) -> &'static AccentInfo {
         match self {
-            Accent::Hat => "hat",
-            Accent::Tilde => "tilde",
-            Accent::Bar => "bar",
-            Accent::Vec => "vec",
-            Accent::Dot => "dot",
-            Accent::Ddot => "ddot",
-            Accent::Check => "check",
-            Accent::Ring => "ring",
-            Accent::Underline => "underline",
-            Accent::Utilde => "utilde",
+            // Drawn glyphs: ˰ U+02F0 LOW UP ARROWHEAD, ˯ U+02EF LOW
+            // DOWN ARROWHEAD, ˳ U+02F3 LOW RING, ․ U+2024 LEADER (not
+            // the '.' atom), ￫ halfwidth U+FFEB (not the → atom),
+            // ˷ U+02F7 LOW TILDE, ˜ U+02DC SMALL TILDE.
+            Accent::Hat       => mark!("hat", "hat", "widehat", false, DrawnForm::Center('˰')),
+            Accent::Tilde     => mark!("tilde", "tilde", "widetilde", false, DrawnForm::Fill('˷')),
+            Accent::Bar       => mark!("bar", "bar", "overline", false, DrawnForm::Fill('_')),
+            Accent::Vec       => mark!("vec", "vec", "overrightarrow", false, DrawnForm::Center('￫')),
+            Accent::Dot       => mark!("dot", "dot", "dot", false, DrawnForm::Center('․')),
+            Accent::Ddot      => mark!("ddot", "ddot", "ddot", false, DrawnForm::Dots),
+            Accent::Check     => mark!("check", "check", "widecheck", false, DrawnForm::Center('˯')),
+            Accent::Ring      => mark!("ring", "mathring", "mathring", false, DrawnForm::Center('˳')),
+            Accent::Underline => mark!("underline", "underline", "underline", true, DrawnForm::Fill('¯')),
+            Accent::Utilde    => mark!("utilde", "utilde", "utilde", true, DrawnForm::Fill('˜')),
         }
+    }
+
+    pub fn name(self) -> &'static str {
+        self.info().name
     }
 
     pub fn of_name(name: &str) -> Option<Accent> {
         Accent::ALL.into_iter().find(|a| a.name() == name)
     }
 
-    /// The LaTeX command for the single-char form.
     pub fn latex(self) -> &'static str {
-        match self {
-            Accent::Ring => "mathring",
-            a => a.name(),
-        }
+        self.info().latex
     }
 
-    /// The LaTeX command for the stretchy (wide) form; marks without
-    /// one use their plain command (\dot etc. accept groups).
     pub fn wide_latex(self) -> &'static str {
-        match self {
-            Accent::Hat => "widehat",
-            Accent::Tilde => "widetilde",
-            Accent::Bar => "overline",
-            Accent::Vec => "overrightarrow",
-            Accent::Check => "widecheck",
-            a => a.latex(),
-        }
+        self.info().wide_latex
     }
 
-    /// Under-marks hug the base from below; everything else is over.
     pub fn under(self) -> bool {
-        matches!(self, Accent::Underline | Accent::Utilde)
+        self.info().under
     }
 
-    /// The glyph the picture shows. Every mark hugs its base: over
-    /// marks draw low in their cell (bar as `_` like the √ overline,
-    /// tilde as the low `˷`), under marks draw high (underline as `¯`,
-    /// utilde as the high `˜`) — so the tilde/bar pairs swap between
-    /// the over and under roles, and every drawn glyph names exactly
-    /// one (mark, side).
     pub fn drawn(self) -> DrawnForm {
-        match self {
-            Accent::Hat => DrawnForm::Center('˰'), // U+02F0 LOW UP ARROWHEAD
-            Accent::Check => DrawnForm::Center('˯'), // U+02EF LOW DOWN ARROWHEAD
-            Accent::Ring => DrawnForm::Center('˳'), // U+02F3 LOW RING
-            Accent::Dot => DrawnForm::Center('․'), // U+2024 LEADER (not the '.' atom)
-            // Halfwidth ￫ U+FFEB, distinct from the → atom.
-            Accent::Vec => DrawnForm::Center('￫'),
-            Accent::Ddot => DrawnForm::Dots,
-            Accent::Bar => DrawnForm::Fill('_'),
-            Accent::Underline => DrawnForm::Fill('¯'),
-            Accent::Tilde => DrawnForm::Fill('˷'), // U+02F7 LOW TILDE
-            Accent::Utilde => DrawnForm::Fill('˜'), // U+02DC SMALL TILDE
-        }
+        self.info().drawn
     }
 
     /// The single glyph shown in a compact one-cell column (the ddot

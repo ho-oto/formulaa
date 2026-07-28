@@ -16,29 +16,40 @@ pub enum Arrow {
     DoubleFrom,
 }
 
+/// Everything about one arrow, in one row — `info` is the single
+/// match, so a variant's whole story reads in one place.
+pub struct ArrowInfo {
+    /// True when the arrow points right.
+    pub right: bool,
+    /// The rule the body is drawn with.
+    pub body: char,
+    pub latex: &'static str,
+}
+
 impl Arrow {
     pub const ALL: [Arrow; 4] = [Arrow::To, Arrow::From, Arrow::DoubleTo, Arrow::DoubleFrom];
 
-    /// True when the arrow points right.
-    pub fn right(self) -> bool {
-        matches!(self, Arrow::To | Arrow::DoubleTo)
+    /// The one row that says everything about this arrow.
+    #[rustfmt::skip]
+    pub const fn info(self) -> &'static ArrowInfo {
+        match self {
+            Arrow::To         => &ArrowInfo { right: true,  body: '─', latex: "xrightarrow" },
+            Arrow::From       => &ArrowInfo { right: false, body: '─', latex: "xleftarrow" },
+            Arrow::DoubleTo   => &ArrowInfo { right: true,  body: '═', latex: "xRightarrow" },
+            Arrow::DoubleFrom => &ArrowInfo { right: false, body: '═', latex: "xLeftarrow" },
+        }
     }
 
-    /// The rule the body is drawn with.
+    pub fn right(self) -> bool {
+        self.info().right
+    }
+
     pub fn body(self) -> char {
-        match self {
-            Arrow::To | Arrow::From => '─',
-            Arrow::DoubleTo | Arrow::DoubleFrom => '═',
-        }
+        self.info().body
     }
 
     pub fn latex(self) -> &'static str {
-        match self {
-            Arrow::To => "xrightarrow",
-            Arrow::From => "xleftarrow",
-            Arrow::DoubleTo => "xRightarrow",
-            Arrow::DoubleFrom => "xLeftarrow",
-        }
+        self.info().latex
     }
 
     /// The arrow a body rule draws, in the given direction — the
