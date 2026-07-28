@@ -756,6 +756,23 @@ fn euler_identity() {
     roundtrip("euler", &row);
 }
 
+/// ∭_Ω ∇⋅F dV — the triple integral is ∑-class (band-promotable).
+#[test]
+fn triple_integral_band() {
+    let row = cat(&[n(bigop('∭', s("Ω"), vec![])), s("∇⋅F␣dV")]);
+    roundtrip("triple-integral", &row);
+}
+
+/// The amssymb tier: relations, orders and operators that now carry a
+/// LaTeX spelling (a ≼ b ⪅ c ⋆ d ⊓ e ⟹ a ≺ e).
+#[test]
+fn amssymb_tier_atoms() {
+    roundtrip("amssymb-relations", &s("a≼b⪅c⋆d⊓e⟹a≺e"));
+    // TeX-aligned Greek variants: ϵ = \epsilon, ε = \varepsilon,
+    // ϕ = \phi, φ = \varphi, ϰ = \varkappa.
+    roundtrip("greek-variants", &s("ϵ≠ε␣ϕ≠φ␣ϰ≠κ"));
+}
+
 // ----- statistics -----
 
 /// f(x) = (1/√(2πσ²)) e^{−(x−μ)²/(2σ²)}   (normal distribution PDF)

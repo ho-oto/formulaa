@@ -97,7 +97,7 @@ i\hbar \frac{\partial \Psi }{\partial t}=-\frac{\hbar ^{2}}{2m}\frac{\partial ^{
 LaTeX:
 
 ```latex
-\oint \vec{E}\cdot d\vec{A}=\frac{Q}{\epsilon _{0}}
+\oint \vec{E}\cdot d\vec{A}=\frac{Q}{\varepsilon _{0}}
 ```
 
 ### cauchy-integral
