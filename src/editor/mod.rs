@@ -8,7 +8,7 @@ use crate::ast::{Field, Node, Radical, Row, row_at, row_at_mut};
 pub type CursorPos = (Vec<(usize, Field)>, usize);
 /// A block-select target: (parent row path, node index).
 pub type BlockRef = (Vec<(usize, Field)>, usize);
-use crate::symbols::{Accent, bigop_by_char, is_func_name, symbol_by_name};
+use crate::symbols::{Accent, Delim, bigop_by_char, is_func_name, symbol_by_name};
 
 mod command;
 mod modes;
@@ -221,7 +221,7 @@ fn script_cmd(cmd: &str) -> Option<(bool, crate::ast::Row)> {
     Some((marker == '^', arg))
 }
 
-fn lr_spec(cmd: &str) -> Option<(char, char, Vec<char>)> {
+fn lr_spec(cmd: &str) -> Option<(Delim, Delim, usize)> {
     let spec = cmd
         .strip_prefix("delim")
         .or_else(|| cmd.strip_prefix("lr"))?;
@@ -234,19 +234,7 @@ fn lr_spec(cmd: &str) -> Option<(char, char, Vec<char>)> {
                 while it.peek().is_some_and(|c| c.is_ascii_alphabetic()) {
                     name.push(it.next().unwrap());
                 }
-                match name.as_str() {
-                    "langle" => '⟨',
-                    "rangle" => '⟩',
-                    "lparen" => '(',
-                    "rparen" => ')',
-                    "lbrack" => '[',
-                    "rbrack" => ']',
-                    "lbrace" => '{',
-                    "rbrace" => '}',
-                    "vert" | "mid" => '|',
-                    "dot" | "none" => '.',
-                    _ => return None,
-                }
+                *crate::symbols::DELIM_NAMES.get(name.as_str())?
             }
             '<' => '⟨',
             '>' => '⟩',
@@ -254,32 +242,35 @@ fn lr_spec(cmd: &str) -> Option<(char, char, Vec<char>)> {
         };
         tokens.push(tok);
     }
-    if tokens.len() < 2 || !tokens.iter().all(|&c| crate::ast::is_delim_spec(c)) {
+    if tokens.len() < 2 {
         return None;
     }
-    let (left, right) = (tokens[0], *tokens.last().unwrap());
-    let mids = tokens[1..tokens.len() - 1].to_vec();
+    // The slot decides the side: a right-shaped glyph cannot open
+    // (`\lr][` would draw a picture that reads back as unmatched).
+    let left = Delim::of_spec_side(tokens[0], true)?;
+    let right = Delim::of_spec_side(*tokens.last().unwrap(), false)?;
+    let mids = &tokens[1..tokens.len() - 1];
     if !mids.iter().all(|&c| c == '|') {
         return None;
     }
-    Some((left, right, mids))
+    Some((left, right, mids.len()))
 }
 
 /// Delimiter pair of a grid command (None = bare lattice array).
-type GridDelims = Option<(char, char)>;
+type GridDelims = Option<(Delim, Delim)>;
 
 /// Grid minibuffer commands with an optional RxC digit suffix
 /// (`matrix34` = 3 rows × 4 cols; bare name = 2×2). Returns the delimiter
 /// pair and the dimensions.
 fn grid_command(cmd: &str) -> Option<(GridDelims, usize, usize)> {
     const GRIDS: &[(&str, GridDelims)] = &[
-        ("matrix", Some(('[', ']'))),
-        ("bmatrix", Some(('[', ']'))),
-        ("pmatrix", Some(('(', ')'))),
-        ("Bmatrix", Some(('{', '}'))),
-        ("vmatrix", Some(('|', '|'))),
-        ("cases", Some(('{', '.'))),
-        ("rcases", Some(('.', '}'))),
+        ("matrix", Some((Delim::Bracket, Delim::Bracket))),
+        ("bmatrix", Some((Delim::Bracket, Delim::Bracket))),
+        ("pmatrix", Some((Delim::Paren, Delim::Paren))),
+        ("Bmatrix", Some((Delim::Brace, Delim::Brace))),
+        ("vmatrix", Some((Delim::Bar, Delim::Bar))),
+        ("cases", Some((Delim::Brace, Delim::Null))),
+        ("rcases", Some((Delim::Null, Delim::Brace))),
         ("array", None),
     ];
     for &(name, delims) in GRIDS {
@@ -729,8 +720,8 @@ impl Editor {
     // ----- LyX-like keys -----
 
     /// Insert a delimiter block and enter its first segment.
-    pub fn insert_delim(&mut self, left: char, right: char, mids: Vec<char>) {
-        let segs = vec![vec![]; mids.len() + 1];
+    pub fn insert_delim(&mut self, left: Delim, right: Delim, mids: usize) {
+        let segs = vec![vec![]; mids + 1];
         self.insert_and_enter(Node::Delim {
             left,
             right,
@@ -741,7 +732,7 @@ impl Editor {
 
     /// Close (step out of) the innermost enclosing Delim whose right
     /// delimiter is `right`. Returns false when there is none.
-    pub fn close_delim(&mut self, right: char) -> bool {
+    pub fn close_delim(&mut self, right: Delim) -> bool {
         for k in (0..self.path.len()).rev() {
             let (i, f) = self.path[k];
             if !matches!(f, Field::Seg(_)) {
@@ -761,14 +752,14 @@ impl Editor {
     /// allowed: it is indistinguishable from a closing delimiter, so a
     /// mismatched-pair scan inside any delimiter would misread it.
     pub fn close_paren(&mut self) {
-        if !self.close_delim(')') {
+        if !self.close_delim(Delim::Paren) {
             self.message = "not inside a ( ) inset (( inserts one)".into();
         }
     }
 
     /// `]` leaves the innermost [ … ] block (matrix) or bare array.
     pub fn close_bracket(&mut self) {
-        if self.close_delim(']') {
+        if self.close_delim(Delim::Bracket) {
             return;
         }
         if let Some((k, i, _)) = self.enclosing_array() {
@@ -781,14 +772,14 @@ impl Editor {
 
     /// `}` leaves the innermost { … } block.
     pub fn close_brace(&mut self) {
-        if !self.close_delim('}') {
+        if !self.close_delim(Delim::Brace) {
             self.message = "not inside a { } block ({ inserts one)".into();
         }
     }
 
     /// Insert a rows×cols grid wrapped in the given delimiter pair and put
     /// the cursor into the first cell.
-    pub fn insert_grid(&mut self, left: char, right: char, rows: usize, cols: usize) {
+    pub fn insert_grid(&mut self, left: Delim, right: Delim, rows: usize, cols: usize) {
         let array = Node::Array {
             rows,
             cols,
@@ -797,7 +788,7 @@ impl Editor {
         let node = Node::Delim {
             left,
             right,
-            mids: vec![],
+            mids: 0,
             segs: vec![vec![array]],
         };
         let col = self.col;
@@ -949,7 +940,7 @@ impl Editor {
         };
         let tail: Row = segs[k].split_off(col);
         segs.insert(k + 1, tail);
-        mids.insert(k, '|');
+        *mids += 1;
         *self.path.last_mut().unwrap() = (i, Field::Seg(k + 1));
         self.col = 0;
     }
@@ -1175,8 +1166,15 @@ mod tests {
         );
         // Visual order: left ( mid | right ].
         ed.execute("delim(|]");
-        assert!(matches!(ed.root[0],
-            Node::Delim { left: '(', right: ']', ref mids, .. } if mids == &['|']));
+        assert!(matches!(
+            ed.root[0],
+            Node::Delim {
+                left: Delim::Paren,
+                right: Delim::Bracket,
+                mids: 1,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -1186,8 +1184,8 @@ mod tests {
         assert!(matches!(
             ed.root[0],
             Node::Delim {
-                left: '(',
-                right: ']',
+                left: Delim::Paren,
+                right: Delim::Bracket,
                 ..
             }
         ));
@@ -1195,13 +1193,19 @@ mod tests {
         let mut ed = Editor::new();
         ed.execute("lr\\langle||\\rangle");
         assert!(matches!(ed.root[0],
-            Node::Delim { left: '⟨', right: '⟩', ref mids, ref segs }
-                if mids == &['|', '|'] && segs.len() == 3));
+            Node::Delim { left: Delim::Angle, right: Delim::Angle, mids: 2, ref segs }
+                if segs.len() == 3));
         // A non-spec `lr…` name falls through to the symbol table
         // (bare \lr is the ↔ arrow in the extended table).
         let mut ed = Editor::new();
         ed.execute("lr");
         assert_eq!(ed.root, vec![Node::Sym('↔')]);
+        // A right-shaped glyph cannot open (and vice versa): `\lr][`
+        // used to build a picture that read back as unmatched.
+        assert_eq!(lr_spec("lr]["), None);
+        assert_eq!(lr_spec("lr)("), None);
+        // The side-symmetric | and . stand anywhere.
+        assert!(lr_spec("lr|.").is_some());
     }
 
     #[test]
@@ -1524,7 +1528,7 @@ mod tests {
     #[test]
     fn close_paren_exits_inset() {
         let mut ed = Editor::new();
-        ed.insert_delim('(', ')', vec![]);
+        ed.insert_delim(Delim::Paren, Delim::Paren, 0);
         ed.insert_sym('x');
         ed.close_paren();
         assert!(ed.path.is_empty());

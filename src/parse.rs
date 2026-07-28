@@ -138,7 +138,7 @@ fn side_glyphs(left: bool) -> &'static [char] {
     static SIDES: OnceLock<[Vec<char>; 2]> = OnceLock::new();
     let sides = SIDES.get_or_init(|| {
         let build = |left: bool| {
-            let mut v: Vec<char> = crate::symbols::DELIMS
+            let mut v: Vec<char> = crate::symbols::Delim::ALL
                 .iter()
                 .flat_map(|d| d.glyphs(left))
                 .filter(|&c| c != '⎪')
@@ -354,9 +354,8 @@ fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
 fn left_family(spec: char) -> Vec<char> {
     match spec {
         '‖' => vec!['‖'],
-        '⟨' => vec!['⟨'],
         _ => {
-            let mut v = crate::symbols::delim_of(spec)
+            let mut v = crate::symbols::Delim::of_spec(spec)
                 .map(|(d, _)| d.glyphs(true))
                 .unwrap_or_default();
             // A fused-grid junction can sit anywhere in the column…
@@ -1993,10 +1992,16 @@ fn parse_delim(
                 cols: cols_n,
                 cells,
             };
+            let (Some(left), Some(right)) = (
+                crate::symbols::Delim::of_spec_side(left, true),
+                crate::symbols::Delim::of_spec_side(right, false),
+            ) else {
+                return err("cannot resolve delimiter family", bl, col);
+            };
             let node = Node::Delim {
                 left,
                 right,
-                mids: vec![],
+                mids: 0,
                 segs: vec![vec![array]],
             };
             return Ok((node, close_col));
@@ -2045,10 +2050,16 @@ fn parse_delim(
             arg: segs.into_iter().next().unwrap(),
         }
     } else {
+        let (Some(left), Some(right)) = (
+            crate::symbols::Delim::of_spec_side(left, true),
+            crate::symbols::Delim::of_spec_side(right, false),
+        ) else {
+            return err("cannot resolve delimiter family", bl, col);
+        };
         Node::Delim {
             left,
             right,
-            mids: vec!['|'; mid_cols.len()],
+            mids: mid_cols.len(),
             segs,
         }
     };
@@ -2262,10 +2273,11 @@ mod tests {
             base: 'y',
         }]);
         roundtrip(&vec![Node::Func("sin".into()), Node::Sym('x')]);
+        use crate::symbols::Delim as D;
         roundtrip(&vec![Node::Delim {
-            left: '[',
-            right: ']',
-            mids: vec![],
+            left: D::Bracket,
+            right: D::Bracket,
+            mids: 0,
             segs: vec![vec![Node::Array {
                 rows: 2,
                 cols: 2,
@@ -2273,9 +2285,9 @@ mod tests {
             }]],
         }]);
         roundtrip(&vec![Node::Delim {
-            left: '(',
-            right: ')',
-            mids: vec![],
+            left: D::Paren,
+            right: D::Paren,
+            mids: 0,
             segs: vec![syms("a+b")],
         }]);
         roundtrip(&vec![Node::BigOpSym {

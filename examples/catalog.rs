@@ -46,9 +46,9 @@ fn sub(arg: Row) -> Node {
 
 fn paren(inner: Row) -> Node {
     Node::Delim {
-        left: '(',
-        right: ')',
-        mids: vec![],
+        left: mascii::symbols::Delim::Paren,
+        right: mascii::symbols::Delim::Paren,
+        mids: 0,
         segs: vec![inner],
     }
 }
@@ -88,9 +88,9 @@ fn acc(accent: Accent, base: char) -> Node {
 fn mat(rows: usize, cols: usize, cells: Vec<Row>) -> Node {
     assert_eq!(cells.len(), rows * cols);
     Node::Delim {
-        left: '[',
-        right: ']',
-        mids: vec![],
+        left: mascii::symbols::Delim::Bracket,
+        right: mascii::symbols::Delim::Bracket,
+        mids: 0,
         segs: vec![vec![Node::Array { rows, cols, cells }]],
     }
 }
@@ -396,10 +396,11 @@ fn continued_fraction() {
 }
 
 fn delim(left: char, right: char, mids: Vec<char>, segs: Vec<Row>) -> Node {
+    use mascii::symbols::Delim;
     Node::Delim {
-        left,
-        right,
-        mids,
+        left: Delim::of_spec_side(left, true).unwrap(),
+        right: Delim::of_spec_side(right, false).unwrap(),
+        mids: mids.len(),
         segs,
     }
 }

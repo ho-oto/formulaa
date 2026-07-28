@@ -119,15 +119,16 @@ pub enum Node {
         over: Row,
         under: Row,
     },
-    /// Auto-scaling delimiter block. `left`/`right`/`mids` hold delimiter
-    /// *spec* chars: ( ) [ ] { } ⟨ ⟩ | and '.' (null delimiter, drawn as
-    /// the dashed ┆ ┊ ghosts). Middles ('|' only) separate the segments;
-    /// segs.len() == mids.len() + 1. Segments are ordinary rows — a matrix
+    /// Auto-scaling delimiter block. `left`/`right` are pair kinds
+    /// (`Delim`) — the slot decides the side, so `\lr(]` stores
+    /// Paren/Bracket and a right-shaped glyph cannot open. `mids`
+    /// counts the │ middles separating the segments;
+    /// segs.len() == mids + 1. Segments are ordinary rows — a matrix
     /// is nothing more than a Delim whose segment contains an Array.
     Delim {
-        left: char,
-        right: char,
-        mids: Vec<char>,
+        left: crate::symbols::Delim,
+        right: crate::symbols::Delim,
+        mids: usize,
         segs: Vec<Row>,
     },
     /// rows×cols grid (LaTeX array/matrix), cells stored row-major.
@@ -146,8 +147,6 @@ pub enum Node {
     },
 }
 
-/// Valid delimiter spec chars for `Node::Delim` (`.` = null delimiter,
-/// `‖` = the double-bar norm — same spec char on both sides).
 /// Which root sign a `Sqrt` draws.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Radical {
@@ -192,13 +191,6 @@ impl Radical {
     pub fn latex_index(self) -> Option<u8> {
         self.info().latex_index
     }
-}
-
-/// Is `c` a valid delimiter spec for `Node::Delim` (`.` = the null
-/// delimiter, `|` = the vertical bar)? Everything but the angles comes
-/// from `symbols::DELIMS`, so a new pair is described in one place.
-pub fn is_delim_spec(c: char) -> bool {
-    c == '⟨' || c == '⟩' || crate::symbols::delim_of(c).is_some()
 }
 
 /// Identifies one editable slot inside a structure node.
@@ -516,7 +508,7 @@ fn strip_cancels(row: &Row) -> Row {
             } => out.push(Node::Delim {
                 left: *left,
                 right: *right,
-                mids: mids.clone(),
+                mids: *mids,
                 segs: segs.iter().map(strip_cancels).collect(),
             }),
             Node::Array { rows, cols, cells } => out.push(Node::Array {
@@ -597,7 +589,7 @@ pub fn strip_spacers(row: &Row) -> Row {
             } => out.push(Node::Delim {
                 left: *left,
                 right: *right,
-                mids: mids.clone(),
+                mids: *mids,
                 segs: segs.iter().map(strip_spacers).collect(),
             }),
             Node::Array { rows, cols, cells } => out.push(Node::Array {
@@ -720,7 +712,7 @@ fn normalize_node(node: &Node) -> Node {
             Node::Delim {
                 left: *left,
                 right: *right,
-                mids: mids.clone(),
+                mids: *mids,
                 segs,
             }
         }

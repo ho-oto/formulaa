@@ -138,22 +138,22 @@ fn node_to_latex(node: &Node) -> String {
             segs,
         } => {
             // Single grid seg with a well-known pair -> a matrix environment.
-            if mids.is_empty()
+            if *mids == 0
                 && let [seg] = &segs[..]
                 && let [Node::Array { cols, cells, .. }] = &seg[..]
             {
+                use crate::symbols::Delim as D;
                 let env = match (left, right) {
-                    ('(', ')') => Some("pmatrix"),
-                    ('[', ']') => Some("bmatrix"),
-                    ('{', '}') => Some("Bmatrix"),
-                    ('|', '|') => Some("vmatrix"),
-                    ('‖', '‖') => Some("Vmatrix"),
-                    ('.', '.') => Some("matrix"),
+                    (D::Paren, D::Paren) => Some("pmatrix"),
+                    (D::Bracket, D::Bracket) => Some("bmatrix"),
+                    (D::Brace, D::Brace) => Some("Bmatrix"),
+                    (D::Bar, D::Bar) => Some("vmatrix"),
+                    (D::Null, D::Null) => Some("matrix"),
                     // cases is a two-column environment; wider grids fall
                     // through to \left\{ \begin{matrix} … \right.
-                    ('{', '.') if *cols <= 2 => Some("cases"),
+                    (D::Brace, D::Null) if *cols <= 2 => Some("cases"),
                     // mathtools' mirror image (\usepackage{mathtools}).
-                    ('.', '}') if *cols <= 2 => Some("rcases"),
+                    (D::Null, D::Brace) if *cols <= 2 => Some("rcases"),
                     _ => None,
                 };
                 if let Some(env) = env {
@@ -163,14 +163,15 @@ fn node_to_latex(node: &Node) -> String {
                     );
                 }
             }
-            let mut s = format!("\\left{}", delim_latex(*left));
+            let mut s = format!("\\left{}", left.latex(true));
             for (k, seg) in segs.iter().enumerate() {
                 if k > 0 {
-                    s.push_str(&format!("\\middle{}", delim_latex(mids[k - 1])));
+                    // Middles are always the vertical bar.
+                    s.push_str("\\middle|");
                 }
                 s.push_str(&row_to_latex(seg));
             }
-            s.push_str(&format!("\\right{}", delim_latex(*right)));
+            s.push_str(&format!("\\right{}", right.latex(false)));
             s
         }
         Node::Array { cols, cells, .. } => {
@@ -190,20 +191,6 @@ fn array_body(cols: usize, cells: &[Row]) -> String {
         .map(|row| row.iter().map(row_to_latex).collect::<Vec<_>>().join(" & "))
         .collect::<Vec<_>>()
         .join(" \\\\ ")
-}
-
-fn delim_latex(spec: char) -> String {
-    match crate::symbols::delim_of(spec) {
-        Some((d, true)) => d.latex.0.into(),
-        Some((d, false)) => d.latex.1.into(),
-        // The angles are not in the table (their geometry shares
-        // nothing with the stacked pairs).
-        None => match spec {
-            '⟨' => "\\langle ".into(),
-            '⟩' => "\\rangle ".into(),
-            c => c.to_string(),
-        },
-    }
 }
 
 #[cfg(test)]
@@ -247,9 +234,9 @@ mod tests {
                 base: 'v',
             },
             Node::Delim {
-                left: '[',
-                right: ']',
-                mids: vec![],
+                left: crate::symbols::Delim::Bracket,
+                right: crate::symbols::Delim::Bracket,
+                mids: 0,
                 segs: vec![vec![Node::Array {
                     rows: 1,
                     cols: 2,

@@ -673,9 +673,9 @@ impl Editor {
             Node::Delim {
                 left, right, mids, ..
             } => {
-                mids.is_empty()
-                    && matches!(*left, '(' | '[' | '⌈' | '⌊' | '|')
-                    && matches!(*right, ')' | ']' | '⌉' | '⌋' | '|')
+                use crate::symbols::Delim as D;
+                let fuses = |d: D| matches!(d, D::Paren | D::Bracket | D::Ceil | D::Floor | D::Bar);
+                *mids == 0 && fuses(*left) && fuses(*right)
             }
             _ => false,
         }

@@ -54,7 +54,7 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 | ├ `atoms.rs` | **全記号語彙のテーブル2枚**(どちらも phf・手書き): 出力側 `ATOMS`(char → LaTeX 綴り+`kind` Sym/BigOp)と入力側 `NAMES`(綴り → char、別綴り・ASCII 絵文字綴りは `\|` で併記。コマンド別綴りは `resolve` の match パターン)・予約グリフ・`is_atom`。**入力できる原子は必ず LaTeX 綴りを持つ**(gap=0 をテストが固定) |
 | ├ `funcs.rs` | 立体関数 `FUNCS`(limits/spaced)。∑系は `ATOMS` の kind に統合 |
 | ├ `accents.rs` | `Accent` enum: 入力 `ACCENT_NAMES`(phf, 綴り→variant)+`info()`(variant→全属性の1 match) |
-| ├ `delims.rs` | **括弧表 `DELIMS`**(仕様文字・1行/縦グリフ・LaTeX を1行に。parse/render/latex がここを引く) |
+| ├ `delims.rs` | `Delim` enum(ペア種8つ): `info()` の1 match に仕様文字・1行/縦グリフ・LaTeX を集約+`\lr` 名の `DELIM_NAMES`(phf)。parse/render/latex がここを引く |
 | ├ `arrows.rs` | `Arrow` enum: 入力 `ARROW_NAMES`(phf, 綴り→variant)+`info()`(variant→全属性の1 match) |
 | ├ `scripts.rs` | インライン上付き/下付きの双射表 |
 | ├ `alphabets.rs` | スタイル族(12族28綴り×前置/後置)を規則+例外表で。LaTeX 逆引き(`𝔸`→`\mathbb{A}`)もここ |
@@ -90,10 +90,12 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
   画面だけ ▌ を上書き描画)。パース対象はカーソルなし描画のみ。
   render_node の新アームでは caret の伝搬を忘れない(cancel と同じ
   オフセットで写す。忘れると tests/ui.rs の caret 生存チェックが落ちる)。
-- `Sqrt` の `index`・矢印の `op`・アクセントの `overs`/`unders` は
-  enum(`Radical`/`Arrow`/`Accent`)。`Node::Accent` の base は
+- `Sqrt` の `index`・矢印の `op`・アクセントの `overs`/`unders`・括弧の
+  `left`/`right` は enum(`Radical`/`Arrow`/`Accent`/`Delim`)。`Node::Accent` の base は
   1 文字(Row ではない)。
 - 括弧は `Node::Delim{left,right,mids,segs}` に統一(旧 Paren/Matrix は廃止)。
+  `left`/`right` は `Delim` enum(スロットが側を決める — `]` は左に置けない)、
+  `mids` は │ の本数。
   `Node::Array` はどこでも格子(裸なら ┌┬┐ フルフレーム、デリミタの単独 seg
   なら最小マーカーの融合形 — ┼ 区切り行 / ┬┴ 行 / ├┤ 接合。
   波括弧は融合しない)。空白の個数に

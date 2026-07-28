@@ -6,6 +6,7 @@
 
 use crate::ast::Node;
 use crate::editor::{Editor, JUMP_LABELS};
+use crate::symbols::Delim;
 
 /// One keystroke, host-neutral. `Char` carries printable input
 /// (including ' ', '\\', '^' …); everything else is a named key.
@@ -354,34 +355,34 @@ impl Editor {
             }
             Key::Char('(') => {
                 if !self.wrap_selection(|c| Node::Delim {
-                    left: '(',
-                    right: ')',
-                    mids: vec![],
+                    left: Delim::Paren,
+                    right: Delim::Paren,
+                    mids: 0,
                     segs: vec![c],
                 }) {
-                    self.insert_delim('(', ')', vec![]);
+                    self.insert_delim(Delim::Paren, Delim::Paren, 0);
                 }
             }
             Key::Char(')') => self.close_paren(),
             Key::Char('{') => {
                 if !self.wrap_selection(|c| Node::Delim {
-                    left: '{',
-                    right: '}',
-                    mids: vec![],
+                    left: Delim::Brace,
+                    right: Delim::Brace,
+                    mids: 0,
                     segs: vec![c],
                 }) {
-                    self.insert_delim('{', '}', vec![]);
+                    self.insert_delim(Delim::Brace, Delim::Brace, 0);
                 }
             }
             Key::Char('}') => self.close_brace(),
             Key::Char('[') => {
                 if !self.wrap_selection(|c| Node::Delim {
-                    left: '[',
-                    right: ']',
-                    mids: vec![],
+                    left: Delim::Bracket,
+                    right: Delim::Bracket,
+                    mids: 0,
                     segs: vec![c],
                 }) {
-                    self.insert_delim('[', ']', vec![]);
+                    self.insert_delim(Delim::Bracket, Delim::Bracket, 0);
                 }
             }
             // The quote glyphs are reserved for roman/text runs; the

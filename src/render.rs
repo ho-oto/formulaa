@@ -1094,14 +1094,16 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
         // is a separate node only because its *parse* needs the extent
         // rule (both sides are the same glyph).
         Node::Norm { .. } | Node::Delim { .. } => {
+            // The glyph layer below works on spec chars; the slot
+            // decides the side, so the typed kinds spell theirs here.
             let (left, right, mids, segs) = match node {
-                Node::Norm { arg } => ('‖', '‖', &[][..], std::slice::from_ref(arg)),
+                Node::Norm { arg } => ('‖', '‖', 0, std::slice::from_ref(arg)),
                 Node::Delim {
                     left,
                     right,
                     mids,
                     segs,
-                } => (*left, *right, &mids[..], &segs[..]),
+                } => (left.spec(true), right.spec(false), *mids, &segs[..]),
                 _ => unreachable!(),
             };
             let (left, right) = (&left, &right);
@@ -1110,7 +1112,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             // column markers ┬ ┴ ride the delimiter's top/bottom rows).
             // Angles keep their vertex geometry and wrap a bare lattice
             // instead.
-            if mids.is_empty()
+            if mids == 0
                 // Only ( [ ⌈ ⌊ | columns fuse with a sole grid: curly
                 // braces keep their vertex column, null ┆ ┊ ghosts and
                 // norm/angle geometry take a bare lattice instead.
@@ -1559,23 +1561,25 @@ fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
         '\u{2016}' => return vec!['\u{2016}'; h],
         _ => {}
     }
-    let Some((d, spec_side)) = crate::symbols::delim_of(spec) else {
+    let Some((d, spec_side)) = crate::symbols::Delim::of_spec(spec) else {
         return vec![spec; h];
     };
+    let info = d.info();
     // A side-distinct spec names its own side, which is what makes a
     // mismatched pair like `(0,1]` render correctly. `|` and `.` spell
     // both sides the same, so there the caller's side decides.
-    let is_left = if d.spec.0 == d.spec.1 {
-        left
-    } else {
-        spec_side
-    };
+    let is_left = spec_side.unwrap_or(left);
     if h == 1 {
-        return vec![if is_left { d.short.0 } else { d.short.1 }];
+        return vec![if is_left { info.short.0 } else { info.short.1 }];
     }
-    let (top, ext, bot) = d.tall[usize::from(!is_left)];
+    // The angles never reach here (their arms are drawn above); the
+    // stacked families all list a tall column.
+    let Some(tall) = info.tall else {
+        return vec![spec; h];
+    };
+    let (top, ext, bot) = tall[usize::from(!is_left)];
     (0..h)
-        .map(|r| match d.vertex {
+        .map(|r| match info.vertex {
             // A brace shows its vertex on the baseline row, ahead of
             // the corners.
             Some(vx) if r == bl => {
@@ -1662,9 +1666,9 @@ mod tests {
     #[test]
     fn matrix_2x2() {
         let root = vec![Node::Delim {
-            left: '[',
-            right: ']',
-            mids: vec![],
+            left: crate::symbols::Delim::Bracket,
+            right: crate::symbols::Delim::Bracket,
+            mids: 0,
             segs: vec![vec![Node::Array {
                 rows: 2,
                 cols: 2,
@@ -1678,9 +1682,9 @@ mod tests {
     fn delim_families_render() {
         // {x} with a tall fraction: brace vertex ⎨ on the baseline row.
         let root = vec![Node::Delim {
-            left: '{',
-            right: '}',
-            mids: vec![],
+            left: crate::symbols::Delim::Brace,
+            right: crate::symbols::Delim::Brace,
+            mids: 0,
             segs: vec![vec![Node::Frac {
                 num: sym_row("1"),
                 den: sym_row("2"),
@@ -1689,9 +1693,9 @@ mod tests {
         assert_eq!(plain(&root), vec!["⎧ 1 ⎫", "⎨───⎬", "⎩ 2 ⎭"]);
         // ⟨x|y⟩ single-line braket.
         let root = vec![Node::Delim {
-            left: '⟨',
-            right: '⟩',
-            mids: vec!['|'],
+            left: crate::symbols::Delim::Angle,
+            right: crate::symbols::Delim::Angle,
+            mids: 1,
             segs: vec![sym_row("x"), sym_row("y")],
         }];
         assert_eq!(plain(&root), vec!["⟨x│y⟩"]);

@@ -5,7 +5,7 @@
 
 use super::*;
 
-use crate::symbols::Arrow;
+use crate::symbols::{Arrow, Delim};
 
 impl Editor {
     /// Open the `\op` operator-name box at the cursor.
@@ -200,11 +200,11 @@ pub enum Edit {
     /// Accent the atom before the cursor, or wrap the selection in a
     /// wide accent.
     Accent(crate::symbols::Accent),
-    /// A delimiter pair with optional │ middles.
+    /// A delimiter pair with `mids` │ middles.
     Delim {
-        left: char,
-        right: char,
-        mids: Vec<char>,
+        left: crate::symbols::Delim,
+        right: crate::symbols::Delim,
+        mids: usize,
     },
     /// A rows × cols grid, delimited (`\matrix34`) or bare (`\array`).
     Grid {
@@ -232,7 +232,7 @@ pub enum Edit {
 pub fn resolve(cmd: &str) -> Option<Edit> {
     let ins = |node: Node| Some(Edit::Insert { node, wrap: false });
     let wrap = |node: Node| Some(Edit::Insert { node, wrap: true });
-    let delim = |l: char, r: char, mids: Vec<char>| {
+    let delim = |l: Delim, r: Delim, mids: usize| {
         Some(Edit::Delim {
             left: l,
             right: r,
@@ -263,12 +263,12 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
             arg: vec![],
             label: vec![],
         }),
-        "ceil" => delim('⌈', '⌉', vec![]),
-        "floor" => delim('⌊', '⌋', vec![]),
-        "abs" => delim('|', '|', vec![]),
-        "langle" => delim('⟨', '⟩', vec![]),
-        "braket" => delim('⟨', '⟩', vec!['|']),
-        "set" => delim('{', '}', vec!['|']),
+        "ceil" => delim(Delim::Ceil, Delim::Ceil, 0),
+        "floor" => delim(Delim::Floor, Delim::Floor, 0),
+        "abs" => delim(Delim::Bar, Delim::Bar, 0),
+        "langle" => delim(Delim::Angle, Delim::Angle, 0),
+        "braket" => delim(Delim::Angle, Delim::Angle, 1),
+        "set" => delim(Delim::Brace, Delim::Brace, 1),
         "mid" => Some(Edit::Mid),
         "addrow" => Some(Edit::AddRow),
         "addcol" => Some(Edit::AddCol),

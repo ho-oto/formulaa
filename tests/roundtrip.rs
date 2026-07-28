@@ -52,11 +52,14 @@ fn sub(arg: Row) -> Node {
     Node::Sub { arg }
 }
 
+/// Spec-char convenience: the corpus spells pairs visually; the AST
+/// stores the typed kinds.
 fn delim(left: char, right: char, mids: Vec<char>, segs: Vec<Row>) -> Node {
+    use mascii::symbols::Delim;
     Node::Delim {
-        left,
-        right,
-        mids,
+        left: Delim::of_spec_side(left, true).unwrap(),
+        right: Delim::of_spec_side(right, false).unwrap(),
+        mids: mids.len(),
         segs,
     }
 }
@@ -1458,12 +1461,7 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             let (l, r) = pairs[rng.below(pairs.len())];
             let nsegs = 1 + rng.below(2); // 1 or 2 segs
             let segs = (0..nsegs).map(|_| gen_row(rng, d, 3)).collect::<Vec<_>>();
-            Node::Delim {
-                left: l,
-                right: r,
-                mids: vec!['|'; nsegs - 1],
-                segs,
-            }
+            delim(l, r, vec!['|'; nsegs - 1], segs)
         }
         7 => match rng.below(4) {
             // Norms nest (the outer pair renders two rows taller).
@@ -1520,12 +1518,7 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             let (l, r) = pairs[rng.below(pairs.len())];
             let (rows, cols) = [(2, 2), (1, 2), (2, 1), (1, 1)][rng.below(4)];
             let cells = (0..rows * cols).map(|_| gen_row(rng, d, 2)).collect();
-            Node::Delim {
-                left: l,
-                right: r,
-                mids: vec![],
-                segs: vec![vec![Node::Array { rows, cols, cells }]],
-            }
+            delim(l, r, vec![], vec![vec![Node::Array { rows, cols, cells }]])
         }
         8 => {
             // Bare Array: renders as a self-delimiting lattice.

@@ -90,16 +90,16 @@ fn main() {
     let nested = vec![
         Node::Sym('f'),
         Node::Delim {
-            left: '(',
-            right: ')',
-            mids: vec![],
+            left: mascii::symbols::Delim::Paren,
+            right: mascii::symbols::Delim::Paren,
+            mids: 0,
             segs: vec![syms("x")],
         },
         Node::Sym('='),
         Node::Delim {
-            left: '(',
-            right: ')',
-            mids: vec![],
+            left: mascii::symbols::Delim::Paren,
+            right: mascii::symbols::Delim::Paren,
+            mids: 0,
             segs: vec![vec![
                 Node::Sym('1'),
                 Node::Sym('+'),
