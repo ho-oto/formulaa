@@ -2,7 +2,7 @@
 //! characters are structure-reserved, and the allow-list gate every
 //! parsed or typed character passes through.
 
-use super::{alphabets, ext};
+use super::alphabets;
 
 /// What a curated character *is*: `latex` is the one spelling the
 /// serializer writes, and `kind` is how the editor materializes it —
@@ -12,12 +12,10 @@ use super::{alphabets, ext};
 /// like `\leq` for ≤) is `NAMES`, and the tests hold the two mirrors
 /// together.
 ///
-/// Most spellings also appear in the generated `ext` table. That
-/// overlap is deliberate, not redundancy: it **pins** the meaning of
-/// the names worth guaranteeing, so `ext` can be regenerated from
-/// upstream without `\to` quietly changing what it produces. One
-/// entry disagrees with upstream on purpose (`INTENTIONAL_OVERRIDES`),
-/// and a test fails if a new divergence appears silently.
+/// Every non-ASCII char the format accepts appears here or in the
+/// styled families — there is no generated long tail anymore, so
+/// "typeable" implies "spells its LaTeX" by construction (the mod
+/// test measures the gap at zero).
 pub struct AtomSpec {
     pub latex: &'static str,
     pub kind: AtomKind,
@@ -272,59 +270,61 @@ pub fn atom_of(c: char) -> Option<&'static AtomSpec> {
 }
 
 /// The input direction, spelled out: every `\name` that types a
-/// curated character, alternative spellings or-ed onto the canonical
-/// one (which comes first) in the same entry. Deliberately a
+/// character, alternative spellings or-ed onto the canonical one
+/// (which comes first) in the same entry — the LaTeX names, the ASCII
+/// pictures (`\->`, `\:=`, `\|x|`) and the abbreviations alike, all
+/// absorbed from the once-generated ext table. Deliberately a
 /// hand-written mirror of `ATOMS` rather than derived from it, so each
 /// direction reads on its own; a spelling claimed twice fails the
-/// build (phf), and the tests pin the two tables together (same chars,
-/// every canonical spelling present). Command aliases (`\sqrt3` =
-/// `\cbrt`) are not names of a character, so they live as extra
-/// patterns in `resolve`'s match.
+/// build (phf), and the tests pin the two tables together (every
+/// canonical spelling present, every target spells its LaTeX).
+/// Command aliases (`\sqrt3` = `\cbrt`) are not names of a character,
+/// so they live as extra patterns in `resolve`'s match.
 pub static NAMES: phf::Map<&'static str, char> = phf::phf_map! {
     // Greek lowercase
-    "alpha" => 'α',
-    "beta" => 'β',
-    "gamma" => 'γ',
-    "delta" => 'δ',
-    "epsilon" => 'ϵ',
-    "varepsilon" => 'ε',
-    "zeta" => 'ζ',
-    "eta" => 'η',
-    "theta" => 'θ',
-    "iota" => 'ι',
-    "kappa" => 'κ',
-    "lambda" => 'λ',
+    "alpha" | "al" | "alp" => 'α',
+    "beta" | "be" | "bet" => 'β',
+    "gamma" | "ga" | "gam" | "gm" | "gmm" => 'γ',
+    "delta" | "de" | "del" | "dl" | "dlt" => 'δ',
+    "epsilon" | "ep" | "eps" => 'ϵ',
+    "varepsilon" | "varep" | "vareps" | "vep" | "veps" | "vepsilon" => 'ε',
+    "zeta" | "ze" | "zet" => 'ζ',
+    "eta" | "et" => 'η',
+    "theta" | "th" | "the" => 'θ',
+    "iota" | "io" | "iot" => 'ι',
+    "kappa" | "ka" | "kap" | "kp" | "kpp" => 'κ',
+    "lambda" | "la" | "lam" | "lm" => 'λ',
     "mu" => 'μ',
     "nu" => 'ν',
     "xi" => 'ξ',
     "pi" => 'π',
-    "rho" => 'ρ',
-    "sigma" => 'σ',
-    "tau" => 'τ',
-    "upsilon" => 'υ',
-    "phi" => 'ϕ',
-    "chi" => 'χ',
-    "psi" => 'ψ',
-    "omega" => 'ω',
-    "varphi" => 'φ',
-    "vartheta" => 'ϑ',
-    "varkappa" => 'ϰ',
+    "rho" | "rh" => 'ρ',
+    "sigma" | "sg" | "sgm" | "si" | "sig" => 'σ',
+    "tau" | "ta" => 'τ',
+    "upsilon" | "ups" => 'υ',
+    "phi" | "ph" => 'ϕ',
+    "chi" | "ch" => 'χ',
+    "psi" | "ps" => 'ψ',
+    "omega" | "om" | "ome" | "omg" => 'ω',
+    "varphi" | "varph" | "vph" | "vphi" => 'φ',
+    "vartheta" | "varth" | "varthe" | "vth" | "vthe" | "vtheta" => 'ϑ',
+    "varkappa" | "varka" | "varkap" | "varkp" | "varkpp" | "vka" | "vkap" | "vkappa" | "vkp" | "vkpp" => 'ϰ',
     // Greek uppercase
-    "Gamma" => 'Γ',
-    "Delta" => 'Δ',
-    "Theta" => 'Θ',
-    "Lambda" => 'Λ',
+    "Gamma" | "Ga" | "Gam" | "Gm" | "Gmm" => 'Γ',
+    "Delta" | "De" | "Del" | "Dl" | "Dlt" => 'Δ',
+    "Theta" | "Th" | "The" => 'Θ',
+    "Lambda" | "La" | "Lam" | "Lm" => 'Λ',
     "Xi" => 'Ξ',
     "Pi" => 'Π',
-    "Sigma" => 'Σ',
-    "Upsilon" => 'Υ',
-    "Phi" => 'Φ',
-    "Psi" => 'Ψ',
-    "Omega" => 'Ω',
+    "Sigma" | "Sg" | "Sgm" | "Si" | "Sig" => 'Σ',
+    "Upsilon" | "Ups" => 'Υ',
+    "Phi" | "Ph" => 'Φ',
+    "Psi" | "Ps" => 'Ψ',
+    "Omega" | "Om" | "Ome" | "Omg" => 'Ω',
     // Binary operators / relations
-    "pm" => '±',
-    "mp" => '∓',
-    "times" => '×',
+    "pm" | "+-" => '±',
+    "mp" | "-+" => '∓',
+    "times" | "x" => '×',
     "div" => '÷',
     "cdot" => '⋅',
     "circ" => '∘',
@@ -333,22 +333,22 @@ pub static NAMES: phf::Map<&'static str, char> = phf::phf_map! {
     "ast" => '∗',
     "le" | "leq" => '≤',
     "ge" | "geq" => '≥',
-    "ne" | "neq" => '≠',
-    "approx" => '≈',
-    "equiv" => '≡',
+    "ne" | "neq" | "/=" | "=/" | "=/=" => '≠',
+    "approx" | "~~" => '≈',
+    "equiv" | "-=" | "=-" => '≡',
     "sim" => '∼',
-    "simeq" => '≃',
-    "propto" => '∝',
-    "ll" => '≪',
-    "gg" => '≫',
+    "simeq" | "-~" | "~-" => '≃',
+    "propto" | "oc" | "prop" => '∝',
+    "ll" | "<<" => '≪',
+    "gg" | ">>" => '≫',
     // Arrows
-    "to" | "rightarrow" => '→',
-    "leftarrow" => '←',
-    "Rightarrow" => '⇒',
-    "Leftarrow" => '⇐',
-    "leftrightarrow" => '↔',
-    "Leftrightarrow" => '⇔',
-    "mapsto" => '↦',
+    "to" | "rightarrow" | "right" | "->" => '→',
+    "leftarrow" | "left" | "<-" => '←',
+    "Rightarrow" | "Right" | "=>" => '⇒',
+    "Leftarrow" | "Left" | "<=" => '⇐',
+    "leftrightarrow" | "leftright" | "lr" | "<->" => '↔',
+    "Leftrightarrow" | "LR" | "Leftrigh" | "Lr" | "<=>" => '⇔',
+    "mapsto" | "|->" => '↦',
     // Sets / logic
     "in" => '∈',
     "notin" => '∉',
@@ -359,80 +359,80 @@ pub static NAMES: phf::Map<&'static str, char> = phf::phf_map! {
     "supseteq" => '⊇',
     "cup" => '∪',
     "cap" => '∩',
-    "setminus" => '∖',
-    "emptyset" => '∅',
-    "forall" => '∀',
-    "exists" => '∃',
-    "neg" => '¬',
-    "land" => '∧',
-    "lor" => '∨',
+    "setminus" | "setm" | "sm" => '∖',
+    "emptyset" | "empty" => '∅',
+    "forall" | "A" | "all" => '∀',
+    "exists" | "E" | "exist" => '∃',
+    "neg" | "not" => '¬',
+    "land" | "and" | "wedge" => '∧',
+    "lor" | "or" | "vee" => '∨',
     "vdash" => '⊢',
-    "models" => '⊨',
+    "models" | "vDash" => '⊨',
     // Misc
-    "infty" => '∞',
-    "partial" => '∂',
+    "infty" | "oo" => '∞',
+    "partial" | "p" | "par" => '∂',
     "nabla" => '∇',
-    "hbar" => 'ℏ',
+    "hbar" | "hslash" => 'ℏ',
     "ell" => 'ℓ',
     "Re" => 'ℜ',
     "Im" => 'ℑ',
     "aleph" => 'ℵ',
     "angle" => '∠',
-    "perp" => '⊥',
+    "perp" | "bot" => '⊥',
     "parallel" => '∥',
     "prime" => '′',
     "degree" => '°',
-    "cdots" => '⋯',
-    "ldots" | "dots" => '…',
+    "cdots" | "---" => '⋯',
+    "ldots" | "dots" | "..." => '…',
     "vdots" => '⋮',
     "ddots" => '⋱',
     "space" => '␣',
     // Arrows (amssymb tier)
-    "uparrow" => '↑',
-    "downarrow" => '↓',
-    "updownarrow" => '↕',
+    "uparrow" | "up" => '↑',
+    "downarrow" | "dn" | "down" => '↓',
+    "updownarrow" | "ud" | "updn" | "updown" => '↕',
     "nwarrow" => '↖',
     "nearrow" => '↗',
     "searrow" => '↘',
     "swarrow" => '↙',
-    "twoheadleftarrow" => '↞',
-    "twoheadrightarrow" => '↠',
-    "leftarrowtail" => '↢',
-    "rightarrowtail" => '↣',
-    "hookleftarrow" => '↩',
-    "hookrightarrow" => '↪',
+    "twoheadleftarrow" | "twoheadleft" | "<<-" => '↞',
+    "twoheadrightarrow" | "twoheadright" | "->>" => '↠',
+    "leftarrowtail" | "lefttail" | "<-<" => '↢',
+    "rightarrowtail" | "righttail" | ">->" => '↣',
+    "hookleftarrow" | "hookleft" | "<-C" | "<-c" => '↩',
+    "hookrightarrow" | "hookright" | "C->" | "c->" => '↪',
     "rightleftarrows" => '⇄',
     "leftrightarrows" => '⇆',
-    "leftleftarrows" => '⇇',
-    "upuparrows" => '⇈',
-    "rightrightarrows" => '⇉',
-    "downdownarrows" => '⇊',
-    "Uparrow" => '⇑',
-    "Downarrow" => '⇓',
-    "Updownarrow" => '⇕',
-    "rightsquigarrow" => '⇝',
-    "longleftarrow" => '⟵',
-    "longrightarrow" => '⟶',
-    "longleftrightarrow" => '⟷',
-    "Longleftarrow" => '⟸',
-    "Longrightarrow" => '⟹',
-    "Longleftrightarrow" => '⟺',
-    "longmapsto" => '⟼',
+    "leftleftarrows" | "leftleft" | "<-<-" => '⇇',
+    "upuparrows" | "upup" => '⇈',
+    "rightrightarrows" | "rightright" | "->->" => '⇉',
+    "downdownarrows" | "dndn" | "downdown" => '⇊',
+    "Uparrow" | "Up" => '⇑',
+    "Downarrow" | "Dn" | "Down" => '⇓',
+    "Updownarrow" | "UD" | "Ud" | "Updn" | "Updown" => '⇕',
+    "rightsquigarrow" | "leadsto" | "~>" => '⇝',
+    "longleftarrow" | "longleft" | "<--" => '⟵',
+    "longrightarrow" | "longright" | "-->" => '⟶',
+    "longleftrightarrow" | "longleftright" | "longlr" | "<-->" => '⟷',
+    "Longleftarrow" | "Longleft" | "<==" => '⟸',
+    "Longrightarrow" | "Longright" | "==>" => '⟹',
+    "Longleftrightarrow" | "Longleftright" | "Longlr" | "iff" | "<==>" => '⟺',
+    "longmapsto" | "|-->" => '⟼',
     // Relations and orders (amssymb tier)
-    "cong" => '≅',
-    "approxeq" => '≊',
-    "coloneqq" => '≔',
-    "eqqcolon" => '≕',
+    "cong" | "simeqq" | "=~" | "~=" => '≅',
+    "approxeq" | "-~~" | "~~-" => '≊',
+    "coloneqq" | "ceq" | "coloneq" | ":=" => '≔',
+    "eqqcolon" | "eqc" | "eqcolon" | "=:" => '≕',
     "leqq" => '≦',
     "geqq" => '≧',
     "lneqq" => '≨',
     "gneqq" => '≩',
-    "lesssim" => '≲',
-    "gtrsim" => '≳',
+    "lesssim" | "lsim" => '≲',
+    "gtrsim" | "gsim" => '≳',
     "prec" => '≺',
     "succ" => '≻',
-    "preccurlyeq" => '≼',
-    "succcurlyeq" => '≽',
+    "preccurlyeq" | "preceq" => '≼',
+    "succcurlyeq" | "succeq" => '≽',
     "subsetneq" => '⊊',
     "supsetneq" => '⊋',
     "sqsubset" => '⊏',
@@ -442,16 +442,16 @@ pub static NAMES: phf::Map<&'static str, char> = phf::phf_map! {
     "dashv" => '⊣',
     "top" => '⊤',
     "Vdash" => '⊩',
-    "vartriangleleft" => '⊲',
-    "vartriangleright" => '⊳',
-    "trianglelefteq" => '⊴',
-    "trianglerighteq" => '⊵',
+    "vartriangleleft" | "<|" => '⊲',
+    "vartriangleright" | "|>" => '⊳',
+    "trianglelefteq" | "-<|" | "<|-" => '⊴',
+    "trianglerighteq" | "-|>" | "|>-" => '⊵',
     "lnsim" => '⋦',
     "gnsim" => '⋧',
-    "lll" => '⋘',
-    "ggg" => '⋙',
-    "lessapprox" => '⪅',
-    "gtrapprox" => '⪆',
+    "lll" | "<<<" => '⋘',
+    "ggg" | ">>>" => '⋙',
+    "lessapprox" | "lapprox" => '⪅',
+    "gtrapprox" | "gapprox" => '⪆',
     "lneq" => '⪇',
     "gneq" => '⪈',
     "lnapprox" => '⪉',
@@ -463,8 +463,8 @@ pub static NAMES: phf::Map<&'static str, char> = phf::phf_map! {
     "therefore" => '∴',
     "because" => '∵',
     // Operators (amssymb tier)
-    "dagger" => '†',
-    "ddagger" => '‡',
+    "dagger" | "+" => '†',
+    "ddagger" | "++" => '‡',
     "complement" => '∁',
     "dotplus" => '∔',
     "bullet" => '∙',
@@ -472,40 +472,44 @@ pub static NAMES: phf::Map<&'static str, char> = phf::phf_map! {
     "sqcup" => '⊔',
     "ominus" => '⊖',
     "odot" => '⊙',
-    "veebar" => '⊻',
-    "barwedge" => '⊼',
+    "veebar" | "xor" => '⊻',
+    "barwedge" | "nand" => '⊼',
     "star" => '⋆',
-    "bowtie" => '⋈',
-    "ltimes" => '⋉',
-    "rtimes" => '⋊',
+    "bowtie" | "|x|" => '⋈',
+    "ltimes" | "|x" => '⋉',
+    "rtimes" | "x|" => '⋊',
     // ∑-class big operators (amsmath tier)
-    "iiint" => '∭',
+    "iiint" | "III" => '∭',
     "bigodot" => '⨀',
     "bigsqcup" => '⨆',
     // ∑-class big operators
-    "sum" => '∑',
-    "prod" => '∏',
+    "sum" | "S" => '∑',
+    "prod" | "P" => '∏',
     "coprod" => '∐',
-    "int" => '∫',
-    "iint" => '∬',
-    "oint" => '∮',
+    "int" | "I" => '∫',
+    "iint" | "II" => '∬',
+    "oint" | "oI" => '∮',
     "bigcup" => '⋃',
     "bigcap" => '⋂',
     "bigoplus" => '⨁',
     "bigotimes" => '⨂',
     "bigvee" => '⋁',
     "bigwedge" => '⋀',
+    // Blackboard shortcuts (\RR = \bbR; the LaTeX spelling comes
+    // from the styled families, not a curated row)
+    "CC" => 'ℂ',
+    "HH" => 'ℍ',
+    "NN" => 'ℕ',
+    "PP" => 'ℙ',
+    "QQ" => 'ℚ',
+    "RR" => 'ℝ',
+    "ZZ" => 'ℤ',
 };
 
 /// The char a curated `\name` types (any spelling in its `NAMES` entry).
 pub fn named_char(name: &str) -> Option<char> {
     NAMES.get(name).copied()
 }
-
-/// Names where the curated table deliberately differs from the
-/// generated one: the TeX convention is not what upstream picked, and
-/// the curated spelling wins.
-pub const INTENTIONAL_OVERRIDES: &[&str] = &["hbar"];
 
 /// Structure-reserved glyphs: never valid as atoms (see docs/aa-spec.md §2).
 /// `symbol_by_name` filters these so no symbol table entry can inject one.
@@ -588,10 +592,9 @@ pub fn is_atom(c: char) -> bool {
     }
     ATOM_SET
         .get_or_init(|| {
-            ATOMS
-                .keys()
+            NAMES
+                .values()
                 .copied()
-                .chain(ext::EXT_SYMBOLS.values().copied())
                 .chain(alphabets::ALPHABETS.iter().flat_map(|a| {
                     ('A'..='Z')
                         .chain('a'..='z')
@@ -625,7 +628,13 @@ mod tests {
             assert_eq!(symbol_by_name(a.latex), Some(ch), "\\{}", a.latex);
         }
         for (&name, &ch) in NAMES.entries() {
-            assert!(atom_of(ch).is_some(), "\\{} targets a non-atom", name);
+            // Every target spells its LaTeX — a curated row, or a
+            // styled letter for the \RR-style blackboard shortcuts.
+            assert!(
+                crate::symbols::latex_of(ch).is_some(),
+                "\\{} targets a char with no LaTeX spelling",
+                name
+            );
             assert_eq!(symbol_by_name(name), Some(ch), "\\{}", name);
         }
     }
@@ -664,27 +673,6 @@ mod tests {
         assert!(!is_atom('￫'));
         for c in ['😀', '漢', '\u{0301}', '─', '┈'] {
             assert!(!is_atom(c), "{:?} must be rejected", c);
-        }
-    }
-    /// The curated table pins the names worth guaranteeing against the
-    /// generated one. Every disagreement must be a listed override —
-    /// otherwise a regeneration could change what `\to` means and
-    /// nothing would notice.
-    #[test]
-    fn curated_names_pin_the_generated_table() {
-        let spellings = NAMES.entries().map(|(&n, &c)| (n, c));
-        let mut diverged: Vec<&str> = spellings
-            .filter(|(n, c)| ext::EXT_SYMBOLS.get(n).is_some_and(|e| e != c))
-            .map(|(n, _)| n)
-            .collect();
-        diverged.sort_unstable();
-        let mut want = INTENTIONAL_OVERRIDES.to_vec();
-        want.sort_unstable();
-        assert_eq!(diverged, want, "undocumented divergence from ext");
-        // …and an override is a name the curated table actually wins.
-        for &n in INTENTIONAL_OVERRIDES {
-            let curated = ATOMS.entries().find(|(_, a)| a.latex == n).map(|(&c, _)| c);
-            assert_eq!(symbol_by_name(n), curated, "\\{}", n);
         }
     }
     /// The style token never swallows an ordinary name that starts with it.

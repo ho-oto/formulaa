@@ -1,8 +1,9 @@
 //! Every table the format rests on, one concern per file:
 //!
-//! - [`atoms`] — `\name` -> char (curated + aliases), the reserved
-//!   glyphs and the `is_atom` allow-list gate
-//! - [`ext`] — the generated long tail (480 names, phf)
+//! - [`atoms`] — the whole symbol vocabulary, both directions:
+//!   `NAMES` (spelling -> char, aliases or-ed on), `ATOMS`
+//!   (char -> LaTeX + kind), the reserved glyphs and the `is_atom`
+//!   allow-list gate
 //! - [`alphabets`] — the styled families as rules (`\bbR`, `\Afrk`),
 //!   including the char -> `\mathbb{R}` reverse spelling
 //! - [`funcs`] — upright function names, limit-takers and ∑-class ops
@@ -19,7 +20,6 @@ pub mod alphabets;
 pub mod arrows;
 pub mod atoms;
 pub mod delims;
-pub mod ext;
 pub mod funcs;
 pub mod scripts;
 
@@ -29,14 +29,12 @@ pub use atoms::*;
 pub use delims::*;
 pub use funcs::*;
 
-/// Resolve an input spelling to its character: the curated input
-/// table (`NAMES`, canonical spellings and their aliases alike), then
-/// the styled families (\bbR) and the generated long tail, in that
-/// order.
+/// Resolve an input spelling to its character: the input table
+/// (`NAMES`, canonical spellings and their aliases alike), then the
+/// styled families (\bbR).
 pub fn symbol_by_name(name: &str) -> Option<char> {
     named_char(name)
         .or_else(|| alphabets::styled_char(name))
-        .or_else(|| ext::EXT_SYMBOLS.get(name).copied())
         .filter(|&c| !is_reserved_glyph(c))
 }
 
@@ -85,12 +83,12 @@ mod tests {
                 );
             }
         }
-        let gap = (1..=0x2FFFFu32)
+        let gap: Vec<char> = (1..=0x2FFFFu32)
             .filter_map(char::from_u32)
             .filter(|&c| is_atom(c) && !c.is_ascii() && latex_of(c).is_none())
-            .count();
-        // The rest are emitted raw, which unicode-math renders — the
-        // toolchain this crate already assumes for exotic symbols.
-        assert!(gap <= 121, "the LaTeX gap grew to {}", gap);
+            .collect();
+        // Typeable implies spellable: no atom is emitted as raw
+        // Unicode, so the output never assumes unicode-math.
+        assert!(gap.is_empty(), "atoms with no LaTeX spelling: {:?}", gap);
     }
 }

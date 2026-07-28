@@ -252,7 +252,14 @@ fn aliases_resolve_to_the_same_command() {
         ("delim", "lr"),
     ];
     let symbol_aliases = mascii::symbols::NAMES.entries().filter_map(|(&from, &ch)| {
-        let to = mascii::symbols::latex_name(ch).unwrap();
+        // A spelling an earlier resolve stage claims (\ch is the
+        // hyperbolic function, not χ) only acts as this char in \^ch
+        // positions; a styled shortcut (\RR) has no canonical command
+        // spelling. Neither has a command to compare against here.
+        if mascii::symbols::is_func_name(from) {
+            return None;
+        }
+        let to = mascii::symbols::latex_name(ch)?;
         (from != to).then_some((from, to))
     });
     for (from, to) in command_aliases.into_iter().chain(symbol_aliases) {

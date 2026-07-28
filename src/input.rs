@@ -172,8 +172,8 @@ impl Editor {
                         self.execute(&cmd);
                     }
                 }
-                // Graphic chars (not just alphanumerics): the extended
-                // symbol table has names like "->", "+-", "oo".
+                // Graphic chars (not just alphanumerics): the symbol
+                // table has names like "->", "+-", "oo".
                 Key::Char(c) if c.is_ascii_graphic() => {
                     self.minibuffer.as_mut().unwrap().push(c);
                 }

@@ -24,7 +24,7 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
    (`render(parse(aa)) == aa` は要求ではない — AA はソースコードで、
    受理は正準形より広い。fmt が整える)
 2. 新しい描画グリフを導入するときは docs/aa-spec.md の予約グリフ表を更新し、
-   `symbols/mod.rs`(is_reserved_glyph)/ `symbols/ext.rs` に原子として同じ文字が存在しないことを確認。
+   `symbols/atoms.rs`(is_reserved_glyph / `NAMES`)に原子として同じ文字が存在しないことを確認。
 3. `normalize`(ast.rs)は**冪等**でなければならない(合流後の再正規化)。
 4. 機能追加はまず `tests/roundtrip.rs` に実式を足してから実装する。
    キー操作の変更は `tests/ui.rs`(キースクリプト)に足す。キーの意味は
@@ -51,13 +51,12 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 | `src/input.rs` | **共有キーマップ**(`Key`/`Effect`/`Editor::input`)。TUI と wasm は変換だけ |
 | `src/output/latex.rs` | AST → LaTeX(crate ルートの `mascii::latex` で再輸出) |
 | `src/symbols/` | **全テーブルの家**(1関心1ファイル、`symbols::X` でフラットに再輸出) |
-| ├ `atoms.rs` | 厳選テーブル2枚(どちらも phf・手書き): 出力側 `ATOMS`(char → LaTeX 綴り+`kind` Sym/BigOp)と入力側 `NAMES`(綴り → char、別綴りは `\|` で併記。コマンド別綴りは `resolve` の match パターン)・予約グリフ・`is_atom` |
+| ├ `atoms.rs` | **全記号語彙のテーブル2枚**(どちらも phf・手書き): 出力側 `ATOMS`(char → LaTeX 綴り+`kind` Sym/BigOp)と入力側 `NAMES`(綴り → char、別綴り・ASCII 絵文字綴りは `\|` で併記。コマンド別綴りは `resolve` の match パターン)・予約グリフ・`is_atom`。**入力できる原子は必ず LaTeX 綴りを持つ**(gap=0 をテストが固定) |
 | ├ `funcs.rs` | 立体関数 `FUNCS`(limits/spaced)。∑系は `ATOMS` の kind に統合 |
 | ├ `accents.rs` | `Accent` enum(`info()` の1 match に名前・LaTeX・側・描画形を集約) |
 | ├ `delims.rs` | **括弧表 `DELIMS`**(仕様文字・1行/縦グリフ・LaTeX を1行に。parse/render/latex がここを引く) |
 | ├ `arrows.rs` | `Arrow` enum(`info()` の1 match に向き・胴体・LaTeX を集約) |
 | ├ `scripts.rs` | インライン上付き/下付きの双射表 |
-| └ `ext.rs` | **生成物**(ho-oto/mathematical-symbols 由来、480件)。phf マップ(順序不要・重複はビルドエラー)。手編集しない |
 | ├ `alphabets.rs` | スタイル族(12族28綴り×前置/後置)を規則+例外表で。LaTeX 逆引き(`𝔸`→`\mathbb{A}`)もここ |
 | `src/theme.rs` | TUI の配色定数(bin 専用) |
 | `src/main.rs` | メインループ + CLI サブコマンド |
