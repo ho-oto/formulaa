@@ -1,5 +1,6 @@
 pub mod ast;
 pub mod editor;
+pub mod from_latex;
 pub mod input;
 pub mod output;
 pub mod parse;

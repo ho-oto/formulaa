@@ -7,7 +7,38 @@
 use crate::ast::{Node, Row};
 
 pub fn row_to_latex(row: &Row) -> String {
-    row.iter().map(node_to_latex).collect()
+    let mut s = String::new();
+    for (i, n) in row.iter().enumerate() {
+        // A node that could absorb the following script node — a
+        // ∑-class atom (`\sum_{i}` means band limits), a band with that
+        // limit still empty, a brace with no label yet — is braced, so
+        // the script stays the separate side-script the picture shows.
+        let next_script = match row.get(i + 1) {
+            Some(Node::Sup { .. }) => Some(true),
+            Some(Node::Sub { .. }) => Some(false),
+            _ => None,
+        };
+        let absorbs = match n {
+            Node::Sym(c) if crate::symbols::bigop_by_char(*c) => next_script.is_some(),
+            Node::BigOpSym { lower, upper, .. } | Node::BigOp { lower, upper, .. } => {
+                match next_script {
+                    Some(true) => upper.is_empty(),
+                    Some(false) => lower.is_empty(),
+                    None => false,
+                }
+            }
+            Node::Brace { over, label, .. } => label.is_empty() && next_script == Some(*over),
+            _ => false,
+        };
+        if absorbs {
+            s.push('{');
+            s.push_str(node_to_latex(n).trim_end());
+            s.push('}');
+        } else {
+            s.push_str(&node_to_latex(n));
+        }
+    }
+    s
 }
 
 fn braced(row: &Row) -> String {
@@ -59,8 +90,16 @@ fn node_to_latex(node: &Node) -> String {
             base,
         } => {
             // Under-marks innermost, then over-marks — the same nesting
-            // order the compact Accent uses.
-            let mut s = row_to_latex(base);
+            // order the compact Accent uses. A base that is itself a
+            // sole accent is braced: `\dot{{\hat{x}}}` is a band over
+            // an accented block, `\dot{\hat{x}}` is the stacked marks
+            // — without the braces the two would read alike.
+            let sole_accent = matches!(base[..], [Node::Accent { .. } | Node::WideAccent { .. }]);
+            let mut s = if sole_accent {
+                format!("{{{}}}", row_to_latex(base))
+            } else {
+                row_to_latex(base)
+            };
             for &m in unders.iter().chain(overs.iter()) {
                 s = format!("\\{}{{{}}}", m.wide_latex(), s);
             }
@@ -72,7 +111,14 @@ fn node_to_latex(node: &Node) -> String {
             base,
         } => {
             // Canonical nesting: under-marks innermost, then over-marks.
-            let mut s = sym_to_latex(*base).trim_end().to_string();
+            // (The trim drops a \name's trailing space; the ␣ base is
+            // exactly its trailing space, so it keeps it — trimming
+            // would leave a bare backslash that eats the brace.)
+            let mut s = if *base == '␣' {
+                sym_to_latex(*base)
+            } else {
+                sym_to_latex(*base).trim_end().to_string()
+            };
             for &m in unders.iter().chain(overs.iter()) {
                 let cmd = m.latex();
                 s = format!("\\{}{{{}}}", cmd, s);
@@ -148,7 +194,9 @@ fn node_to_latex(node: &Node) -> String {
                     (D::Bracket, D::Bracket) => Some("bmatrix"),
                     (D::Brace, D::Brace) => Some("Bmatrix"),
                     (D::Bar, D::Bar) => Some("vmatrix"),
-                    (D::Null, D::Null) => Some("matrix"),
+                    // (Null, Null) deliberately absent: \begin{matrix}
+                    // is the bare Array's spelling, so the null pair
+                    // keeps its \left. shell to read back as itself.
                     // cases is a two-column environment; wider grids fall
                     // through to \left\{ \begin{matrix} … \right.
                     (D::Brace, D::Null) if *cols <= 2 => Some("cases"),

@@ -123,6 +123,42 @@ fn every_radical_wraps_the_selection() {
 }
 
 #[test]
+fn tex_box_reads_latex_in_place() {
+    // \tex opens a box; typing (or pasting) LaTeX and committing
+    // splices the parsed nodes at the cursor.
+    let mut ed = Editor::new();
+    ed.execute("tex");
+    assert!(ed.op_entry.is_some());
+    for c in r"\frac{1}{2}+\alpha".chars() {
+        ed.op_type(c);
+    }
+    ed.op_commit();
+    assert_eq!(latex(&ed), "\\frac{1}{2}+\\alpha ");
+    // The cursor sits after the spliced nodes; typing continues.
+    ed.input(Key::Char('x'), false, false);
+    assert_eq!(latex(&ed), "\\frac{1}{2}+\\alpha x");
+    // \latex is the same box; junk input inserts nothing and the
+    // editor stays consistent.
+    let mut ed = Editor::new();
+    ed.execute("latex");
+    for c in r"\begin{".chars() {
+        ed.op_type(c);
+    }
+    ed.op_commit();
+    assert_eq!(ed.root, vec![]);
+    // Keys reach the box through the shared keymap too: space is
+    // content, Enter commits.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ t e x Space");
+    assert!(ed.op_entry.is_some(), "{:?}", ed.op_entry);
+    for c in r"x ^ 2".chars() {
+        ed.input(Key::Char(c), false, false);
+    }
+    ed.input(Key::Enter, false, false);
+    assert_eq!(latex(&ed), "x^{2}");
+}
+
+#[test]
 fn ctrl_keys_return_host_effects() {
     let mut ed = Editor::new();
     assert_eq!(ed.input(Key::Char('q'), false, true), Effect::Quit);

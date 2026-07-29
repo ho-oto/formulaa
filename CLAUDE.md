@@ -50,7 +50,8 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 | `src/editor/modes.rs` | ^F フリーカーソル・^G ジャンプ・^B ブロック選択・表示装飾 |
 | `src/editor/command.rs` | **`Edit` enum + `resolve`/`apply`**(綴り→編集の純粋解決と適用の分離)、`\op` 名前ボックス |
 | `src/input.rs` | **共有キーマップ**(`Key`/`Effect`/`Editor::input`)。TUI と wasm は変換だけ。木を変えるキーは `Edit` を組んで `apply` に流す(モード・ナビゲーション・文脈キー `// ) ] }` はキー層) |
-| `src/output/latex.rs` | AST → LaTeX(crate ルートの `mascii::latex` で再輸出) |
+| `src/output/latex.rs` | AST → LaTeX(crate ルートの `mascii::latex` で再輸出)。スクリプトを吸収しうるノードは `{…}` で保護(往復のため) |
+| `src/from_latex.rs` | **LaTeX → AST**(第2経路)。自前出力は完全往復(roundtrip ハーネスが検証)、外部 LaTeX(KaTeX/MathJax 方言)は best-effort で不明要素をスキップ。`\tex` ボックス・`tex2aa`・wasm `latex_to_aa` が使う |
 | `src/symbols/` | **全テーブルの家**(1関心1ファイル、`symbols::X` でフラットに再輸出) |
 | ├ `atoms.rs` | **全記号語彙のテーブル2枚**(どちらも phf・手書き): 出力側 `ATOMS`(char → LaTeX 綴り+`kind` Sym/BigOp)と入力側 `NAMES`(綴り → char、別綴り・ASCII 絵文字綴りは `\|` で併記。コマンド別綴りは `resolve` の match パターン)・予約グリフ・`is_atom`。**入力できる原子は必ず LaTeX 綴りを持つ**(gap=0 をテストが固定) |
 | ├ `funcs.rs` | 立体関数 `FUNCS`(limits/spaced)。∑系は `ATOMS` の kind に統合 |

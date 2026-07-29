@@ -60,6 +60,22 @@ impl Editor {
                     self.col += 1;
                 }
             }
+            BoxKind::Tex => {
+                // LaTeX, read best-effort; the guard re-checks the
+                // resulting picture like any other edit.
+                let mut row = crate::ast::normalize(&crate::from_latex::row_from_latex(&text));
+                if !self.path.is_empty() {
+                    // Formula line breaks only exist at the top level.
+                    row.retain(|n| !matches!(n, Node::Break));
+                }
+                if row.is_empty() {
+                    return;
+                }
+                let col = self.col;
+                let n = row.len();
+                self.cur_row_mut().splice(col..col, row);
+                self.col += n;
+            }
             BoxKind::Op | BoxKind::OpStar => {
                 let words: Vec<&str> = text.split_whitespace().collect();
                 if words.is_empty() {
@@ -276,6 +292,7 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
         "op*" | "operatorname*" | "limits" => Some(Edit::OpenBox(BoxKind::OpStar)),
         "rm" => Some(Edit::OpenBox(BoxKind::Rm)),
         "text" => Some(Edit::OpenBox(BoxKind::Text)),
+        "tex" | "latex" => Some(Edit::OpenBox(BoxKind::Tex)),
         _ => {
             if let Some(index) = Radical::of_name(cmd) {
                 // The root signs (\sqrt \cbrt \qdrt) wrap a selection.

@@ -124,6 +124,8 @@ pub enum BoxKind {
     Rm,
     /// \text: one "double-quoted" text run.
     Text,
+    /// \tex / \latex: LaTeX math, read best-effort into nodes.
+    Tex,
 }
 
 #[derive(Clone, Debug)]

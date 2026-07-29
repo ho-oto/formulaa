@@ -32,6 +32,14 @@ pub fn aa_format(text: &str) -> Result<String, JsError> {
     Ok(render_root(&row, None, &RenderCtx::canonical()).to_text())
 }
 
+/// LaTeX math -> canonical AA, best effort (unknown commands are
+/// skipped, never an error).
+#[wasm_bindgen]
+pub fn latex_to_aa(text: &str) -> String {
+    let row = normalize(&mascii::from_latex::row_from_latex(text));
+    render_root(&row, None, &RenderCtx::canonical()).to_text()
+}
+
 /// Quick validity check (empty string on success, message on error).
 #[wasm_bindgen]
 pub fn aa_check(text: &str) -> String {

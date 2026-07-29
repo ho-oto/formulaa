@@ -13,11 +13,12 @@ mod tui;
 use mascii::editor::Editor;
 use mascii::input::{Effect, Key};
 use mascii::render::{RenderCtx, render_root};
-use mascii::{latex, parse};
+use mascii::{ast, latex, parse};
 
 const USAGE: &str = "\
 usage: mascii                 interactive TUI editor
        mascii aa2tex   [FILE] AA formula (file or stdin) -> LaTeX
+       mascii tex2aa   [FILE] LaTeX math (file or stdin) -> AA, best effort
        mascii fmt      [FILE] AA formula -> canonical AA (normalize)";
 
 /// View state the editor itself does not own: the scroll offset of the
@@ -25,7 +26,7 @@ usage: mascii                 interactive TUI editor
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        Some(m @ ("aa2tex" | "fmt")) => {
+        Some(m @ ("aa2tex" | "tex2aa" | "fmt")) => {
             return convert(m, args.get(1).map(String::as_str));
         }
         Some(_) => {
@@ -71,12 +72,18 @@ fn main() -> std::io::Result<()> {
     result
 }
 
-/// aa2tex / fmt: read AA text (file or stdin), write to stdout.
+/// aa2tex / tex2aa / fmt: read text (file or stdin), write to stdout.
 fn convert(mode: &str, file: Option<&str>) -> std::io::Result<()> {
     let text = match file {
         Some(path) => fs::read_to_string(path)?,
         None => std::io::read_to_string(std::io::stdin())?,
     };
+    if mode == "tex2aa" {
+        let row = ast::normalize(&mascii::from_latex::row_from_latex(&text));
+        let block = render_root(&row, None, &RenderCtx::canonical());
+        println!("{}", block.to_text());
+        return Ok(());
+    }
     let row = match parse::parse(&text) {
         Ok(row) => row,
         Err(e) => {

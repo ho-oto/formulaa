@@ -124,6 +124,7 @@ Ctrl 系(`Ctrl+Z` undo など)はモード中もそのまま使えます。
 |---|---|
 | `\frac` | 分数(選択中はそれが分子に) |
 | `\sqrt` `\cbrt` `\qdrt` | √ ∛ ∜ |
+| `\tex` / `\latex` | LaTeX 入力ボックス: 打ち込むかペーストして Enter で確定(best-effort 読み込み。KaTeX/MathJax 方言、不明コマンドは無視) |
 | `\cancel` | 打ち消し(選択を包める) |
 | `\matrix` | 2×2 行列。`\matrix34` で 3行×4列 |
 | `\pmatrix` `\Bmatrix` `\vmatrix` `\cases` `\rcases` `\array` | 括弧違いの行列(同様に `\cases32` などサイズ指定可)。`\array` は裸の格子 |

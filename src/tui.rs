@@ -25,8 +25,12 @@ pub fn help_line(ed: &Editor) -> &'static str {
     if ed.minibuffer.is_some() {
         return "command: type at the cursor  Enter/Space execute  Esc cancel";
     }
-    if ed.op_entry.is_some() {
-        return "op name: letters/digits + Space (word pieces)  Enter/Tab commit  Esc cancel";
+    if let Some((kind, _)) = &ed.op_entry {
+        return if *kind == mascii::editor::BoxKind::Tex {
+            "latex: type or paste math (no $ needed)  Enter/Tab commit  Esc cancel"
+        } else {
+            "op name: letters/digits + Space (word pieces)  Enter/Tab commit  Esc cancel"
+        };
     }
     if ed.free.is_some() {
         return if ed.jump.is_some() {

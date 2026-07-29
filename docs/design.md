@@ -1035,7 +1035,13 @@
 - [x] WASM バインディング(`wasm/`)+ VSCode/Obsidian 拡張プロトタイプ
       (`editors/`, docs/editors.md)。次段: Obsidian CodeMirror6 ウィジェットで
       Live Preview 内インライン構造編集
-- [ ] LaTeX パーサ(LaTeX → AST → AA。往復の第2経路)
+- [x] LaTeX パーサ(LaTeX → AST → AA。往復の第2経路)— 2026-07 実装。
+      自前出力は完全往復(コーパス+ランダム木でテスト)、外部 LaTeX は
+      KaTeX/MathJax を正として best-effort(不明コマンド・再現不能物は
+      スキップ)。UI は `\tex`/`\latex` のその場ボックス、CLI は `tex2aa`。
+      往復のため出力側に2つの正準化を追加: スクリプトを吸収しうる
+      ノードの `{…}` 保護(`{\sum}_{i}` は横付き、`\sum_{i}` はバンド)と、
+      WideAccent の単独アクセント基底の二重ブレース(`\dot{{\hat{x}}}`)
 - [ ] MathML 出力(`<math>` ツリーは AST とほぼ同型)
 - [ ] AsciiMath 風の1行入力構文(`sum_(i=1)^n 1/i^2` → AST)
 - [ ] 大型演算子の複数行グリフ(⎲⎳ / ⌠⌡)オプション

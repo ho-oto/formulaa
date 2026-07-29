@@ -218,6 +218,9 @@ impl Editor {
             Key::Char('\\') if !ctrl && kind == BoxKind::Text => self.op_escape = true,
             Key::Char('"') if !ctrl && kind == BoxKind::Text => self.op_commit(),
             Key::Char(c) if !ctrl && kind == BoxKind::Text && text_char(c) => self.op_type(c),
+            // The \tex box takes any printable input (LaTeX is pasted
+            // into it verbatim; Enter commits).
+            Key::Char(c) if !ctrl && kind == BoxKind::Tex && !c.is_control() => self.op_type(c),
             Key::Char(c) if !ctrl && kind != BoxKind::Text && name_char(c) => self.op_type(c),
             Key::Enter | Key::Tab | Key::Char(' ') => self.op_commit(),
             _ => {

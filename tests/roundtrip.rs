@@ -152,6 +152,15 @@ fn roundtrip(name: &str, row: &Row) {
     if !expected.is_empty() {
         assert!(!row_to_latex(&expected).is_empty());
     }
+    // The LaTeX we emit reads back to the tree it came from (the
+    // second road: AST -> LaTeX -> AST), spacers excepted.
+    let tex = row_to_latex(&expected);
+    let from_tex = normalize(&mascii::from_latex::row_from_latex(&tex));
+    assert_eq!(
+        from_tex, expected,
+        "[{}] LaTeX roundtrip mismatch\n--- LaTeX ---\n{}",
+        name, tex
+    );
     // The export form (⬚ slot marks blanked when safe) reads back to
     // the same tree — over the whole corpus and the random trees.
     let exported = mascii::render::export_aa(&row);
