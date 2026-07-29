@@ -50,7 +50,7 @@ TUI エディタ(`cargo run` / `mascii`)の全キー・全コマンドのリフ�
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | コピー / カット / ペースト |
 | `←` / `→`(選択中) | 選択を解除して左端 / 右端へ |
 | `Backspace` / `Delete`(選択中) | 選択範囲を削除 |
-| 構造キー(選択中) | `^` `_` `(` `[` `{` `\frac` `\sqrt` `\cancel` は選択を包む |
+| 構造キー(選択中) | `^` `_` `(` `[` `{` `\frac` `\sqrt`(`\cbrt` `\qdrt` も) `\cancel` は選択を包む |
 
 ## undo / redo
 

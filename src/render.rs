@@ -1681,7 +1681,7 @@ mod tests {
     fn sqrt_single_line() {
         let root = vec![Node::Sqrt {
             arg: sym_row("2"),
-            index: crate::ast::Radical::Sqrt,
+            index: crate::symbols::Radical::Sqrt,
         }];
         assert_eq!(plain(&root), vec!["┌─", "√2"]);
     }

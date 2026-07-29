@@ -245,7 +245,7 @@ mod tests {
             },
             Node::Sqrt {
                 arg: vec![Node::Sym('x')],
-                index: crate::ast::Radical::Cbrt,
+                index: crate::symbols::Radical::Cbrt,
             },
         ];
         assert_eq!(

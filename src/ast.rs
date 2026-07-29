@@ -69,7 +69,7 @@ pub enum Node {
     /// index 2 = √, 3 = ∛, 4 = ∜ (the only radical glyphs Unicode has).
     Sqrt {
         arg: Row,
-        index: Radical,
+        index: crate::symbols::Radical,
     },
     Sup {
         arg: Row,
@@ -145,52 +145,6 @@ pub enum Node {
     Cancel {
         arg: Row,
     },
-}
-
-/// Which root sign a `Sqrt` draws.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Radical {
-    /// √ — the square root, drawn without an index.
-    Sqrt,
-    /// ∛
-    Cbrt,
-    /// ∜
-    Qdrt,
-}
-
-/// Everything about one root sign, in one row — `info` is the single
-/// match, so a variant's whole story reads in one place.
-pub struct RadicalInfo {
-    /// The root glyph, which is also how the picture spells the index.
-    pub glyph: char,
-    /// The LaTeX index (`\sqrt[3]`); the square root has none.
-    pub latex_index: Option<u8>,
-}
-
-impl Radical {
-    pub const ALL: [Radical; 3] = [Radical::Sqrt, Radical::Cbrt, Radical::Qdrt];
-
-    /// The one row that says everything about this root sign.
-    #[rustfmt::skip]
-    pub const fn info(self) -> &'static RadicalInfo {
-        match self {
-            Radical::Sqrt => &RadicalInfo { glyph: '√', latex_index: None },
-            Radical::Cbrt => &RadicalInfo { glyph: '∛', latex_index: Some(3) },
-            Radical::Qdrt => &RadicalInfo { glyph: '∜', latex_index: Some(4) },
-        }
-    }
-
-    pub fn glyph(self) -> char {
-        self.info().glyph
-    }
-
-    pub fn of_glyph(c: char) -> Option<Radical> {
-        Radical::ALL.into_iter().find(|r| r.glyph() == c)
-    }
-
-    pub fn latex_index(self) -> Option<u8> {
-        self.info().latex_index
-    }
 }
 
 /// Identifies one editable slot inside a structure node.

@@ -108,6 +108,21 @@ fn wrap_keys_wrap_the_selection() {
 }
 
 #[test]
+fn every_radical_wraps_the_selection() {
+    // \qdrt used to insert instead of wrap — the roots are uniform now.
+    for (cmd, want) in [
+        ("sqrt", "\\sqrt{a+b}"),
+        ("cbrt", "\\sqrt[3]{a+b}"),
+        ("qdrt", "\\sqrt[4]{a+b}"),
+    ] {
+        let mut ed = Editor::new();
+        type_script(&mut ed, r"a + b S-Left S-Left S-Left");
+        ed.execute(cmd);
+        assert_eq!(latex(&ed), want, "\\{}", cmd);
+    }
+}
+
+#[test]
 fn ctrl_keys_return_host_effects() {
     let mut ed = Editor::new();
     assert_eq!(ed.input(Key::Char('q'), false, true), Effect::Quit);

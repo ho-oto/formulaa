@@ -2,7 +2,7 @@
 //! pairs from the root row plus a column inside the innermost row —
 //! the same model LyX uses for math insets.
 
-use crate::ast::{Field, Node, Radical, Row, row_at, row_at_mut};
+use crate::ast::{Field, Node, Row, row_at, row_at_mut};
 
 /// A cursor position: path into nested rows plus a column.
 pub type CursorPos = (Vec<(usize, Field)>, usize);

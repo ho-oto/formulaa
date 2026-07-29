@@ -20,8 +20,8 @@ use crate::render::{
 const LATTICE_LEFT: &[char] = &['┌', '├', '└']; // U+250C/251C/2514
 const LATTICE_TOP: &[char] = &['┌', '┬', '┐'];
 
-fn radical_index(c: char) -> Option<crate::ast::Radical> {
-    crate::ast::Radical::of_glyph(c)
+fn radical_index(c: char) -> Option<crate::symbols::Radical> {
+    crate::symbols::Radical::of_glyph(c)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2256,11 +2256,11 @@ mod tests {
         }]);
         roundtrip(&vec![Node::Sqrt {
             arg: syms("2"),
-            index: crate::ast::Radical::Sqrt,
+            index: crate::symbols::Radical::Sqrt,
         }]);
         roundtrip(&vec![Node::Sqrt {
             arg: syms("x+1"),
-            index: crate::ast::Radical::Cbrt,
+            index: crate::symbols::Radical::Cbrt,
         }]);
         roundtrip(&vec![Node::Accent {
             overs: vec![Accent::Hat],

@@ -55,6 +55,7 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 | ├ `atoms.rs` | **全記号語彙のテーブル2枚**(どちらも phf・手書き): 出力側 `ATOMS`(char → LaTeX 綴り+`kind` Sym/BigOp)と入力側 `NAMES`(綴り → char、別綴り・ASCII 絵文字綴りは `\|` で併記。コマンド別綴りは `resolve` の match パターン)・予約グリフ・`is_atom`。**入力できる原子は必ず LaTeX 綴りを持つ**(gap=0 をテストが固定) |
 | ├ `funcs.rs` | 立体関数 `FUNCS`(limits/spaced)。∑系は `ATOMS` の kind に統合 |
 | ├ `accents.rs` | `Accent` enum: 入力 `ACCENT_NAMES`(phf, 綴り→variant)+`info()`(variant→全属性の1 match) |
+| ├ `radicals.rs` | `Radical` enum: 入力 `RADICAL_NAMES`(phf)+`info()`(グリフ・LaTeX 指数) |
 | ├ `delims.rs` | `Delim` enum(ペア種8つ): `info()` の1 match に仕様文字・1行/縦グリフ・LaTeX を集約+`\lr` 名の `DELIM_NAMES`(phf)。parse/render/latex がここを引く |
 | ├ `arrows.rs` | `Arrow` enum: 入力 `ARROW_NAMES`(phf, 綴り→variant)+`info()`(variant→全属性の1 match) |
 | ├ `scripts.rs` | インライン上付き/下付きの双射表 |

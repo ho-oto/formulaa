@@ -21,6 +21,7 @@ pub mod arrows;
 pub mod atoms;
 pub mod delims;
 pub mod funcs;
+pub mod radicals;
 pub mod scripts;
 
 pub use accents::*;
@@ -28,6 +29,7 @@ pub use arrows::*;
 pub use atoms::*;
 pub use delims::*;
 pub use funcs::*;
+pub use radicals::*;
 
 /// Resolve an input spelling to its character: the input table
 /// (`NAMES`, canonical spellings and their aliases alike), then the

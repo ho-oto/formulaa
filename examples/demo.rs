@@ -1,9 +1,10 @@
 //! Prints a few formulas rendered by the layout engine, without the TUI.
 //! Run with: cargo run --example demo
 
-use mascii::ast::{Node, Radical, Row};
+use mascii::ast::{Node, Row};
 use mascii::latex;
 use mascii::render::{RenderCtx, render_row};
+use mascii::symbols::Radical;
 
 fn syms(s: &str) -> Row {
     s.chars().map(Node::Sym).collect()

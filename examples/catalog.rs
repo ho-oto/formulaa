@@ -3,9 +3,10 @@
 //! (Formula definitions mirror tests/roundtrip.rs.)
 
 #![allow(dead_code)]
-use mascii::ast::{Node, Radical, Row, normalize};
+use mascii::ast::{Node, Row, normalize};
 use mascii::latex::row_to_latex;
 use mascii::render::{RenderCtx, render_row};
+use mascii::symbols::Radical;
 use mascii::symbols::{Accent, Arrow};
 
 // ----- tiny DSL for building formulas -----

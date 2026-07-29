@@ -5,7 +5,7 @@
 
 use super::*;
 
-use crate::symbols::{Arrow, Delim};
+use crate::symbols::{Arrow, Delim, Radical};
 
 impl Editor {
     /// Open the `\op` operator-name box at the cursor.
@@ -250,18 +250,6 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
             num: vec![],
             den: vec![],
         }),
-        "sqrt" => wrap(Node::Sqrt {
-            arg: vec![],
-            index: Radical::Sqrt,
-        }),
-        "cbrt" | "sqrt3" => wrap(Node::Sqrt {
-            arg: vec![],
-            index: Radical::Cbrt,
-        }),
-        "qdrt" | "sqrt4" => ins(Node::Sqrt {
-            arg: vec![],
-            index: Radical::Qdrt,
-        }),
         "cancel" => wrap(Node::Cancel { arg: vec![] }),
         "norm" | "Vert" => ins(Node::Norm { arg: vec![] }),
         "overbrace" | "underbrace" => wrap(Node::Brace {
@@ -289,7 +277,10 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
         "rm" => Some(Edit::OpenBox(BoxKind::Rm)),
         "text" => Some(Edit::OpenBox(BoxKind::Text)),
         _ => {
-            if let Some(op) = Arrow::of_name(cmd) {
+            if let Some(index) = Radical::of_name(cmd) {
+                // The root signs (\sqrt \cbrt \qdrt) wrap a selection.
+                wrap(Node::Sqrt { arg: vec![], index })
+            } else if let Some(op) = Arrow::of_name(cmd) {
                 // The stretchy labeled arrows (\xto and friends).
                 ins(Node::Arrow {
                     op,

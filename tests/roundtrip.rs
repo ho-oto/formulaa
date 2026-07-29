@@ -10,10 +10,11 @@
 //! "Three famous mathematical formulas" (Cardano, Cauchy–Schwarz,
 //! Vandermonde determinant).
 
-use mascii::ast::{Node, Radical, Row, normalize, strip_spacers};
+use mascii::ast::{Node, Row, normalize, strip_spacers};
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
 use mascii::render::{RenderCtx, render_root};
+use mascii::symbols::Radical;
 use mascii::symbols::{Accent, Arrow};
 
 // ----- tiny DSL for building formulas -----
