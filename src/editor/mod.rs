@@ -31,9 +31,9 @@ pub struct Editor {
     /// Pending backslash escape inside the \text box (the next key is
     /// typed literally, so \" enters a quote).
     pub op_escape: bool,
-    /// Grid edit mode (^O inside a matrix): arrows move cells, r/R c/C
-    /// add rows/columns, d/D delete them.
-    pub grid_mode: bool,
+    /// Grid edit mode (^O inside a matrix): cell-unit selection, with
+    /// column/row lane sub-modes (see `GridSel`).
+    pub grid: Option<GridSel>,
     /// Undo/redo stacks of snapshots. Pushed by `input` whenever a key
     /// changes the formula; cursor-only motion is not a history step
     /// (but the cursor is restored with the formula it belonged to).
@@ -69,8 +69,9 @@ pub struct Editor {
     /// while the cursor stays in that row (leaving the row would make the
     /// anchor point into a different — possibly shorter — row).
     select_path: Vec<(usize, Field)>,
-    /// Editor-internal clipboard (^C/^X/^V), a sibling-node slice.
-    clip: Row,
+    /// Editor-internal clipboard (^C/^X/^V): a sibling-node slice, or
+    /// a rectangle of grid cells.
+    clip: Clip,
 }
 
 /// Label keys for jump mode, most reachable first.
@@ -88,6 +89,9 @@ pub const BLK_CLOSE: char = '\u{E0F2}';
 /// mode ends, so re-entering ^G does not shift the layout. No label,
 /// no box — just the slot.
 pub const SLOT_GHOST: char = '\u{E0F3}';
+/// Grid lane-gap cursor: marks the ghost lane previewing an insertion
+/// (painted as the green insert cursor).
+pub const GRID_GAP: char = '\u{E0F4}';
 /// Jump markers encode their rank as JUMP_RANK_BASE + rank (rank 0 =
 /// label 'a'; ranks beyond the label alphabet display as unlabeled
 /// highlights, reachable via arrow-key selection).
@@ -126,6 +130,47 @@ pub enum BoxKind {
     Text,
     /// \tex / \latex: LaTeX math, read best-effort into nodes.
     Tex,
+}
+
+/// Grid edit mode (^O): what the mode's cursor is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridSel {
+    /// Cell-unit cursor (the cell the edit cursor is parked in), with
+    /// an optional rectangle anchor (Shift+arrows).
+    Cells { anchor: Option<usize> },
+    /// Lane mode (`c`/`|` for columns, `r`/`-` for rows): the cursor
+    /// alternates gap, lane, gap, … — `pos` is `2*i` for the gap left
+    /// of/above lane `i` (up to `2*n` for the far edge) and `2*i + 1`
+    /// for lane `i` itself. Enter on a gap inserts a lane there;
+    /// Delete on a lane removes it. `ext` extends a lane selection
+    /// (Shift along the axis) to the other end lane.
+    Lanes {
+        cols: bool,
+        pos: usize,
+        ext: Option<usize>,
+    },
+}
+
+/// The editor clipboard: ordinary sibling nodes, or a rectangle of
+/// grid cells (copied from cell selection; pasted over cells when the
+/// cursor is in a grid, or as a bare Array node anywhere else).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Clip {
+    Nodes(Row),
+    Cells {
+        rows: usize,
+        cols: usize,
+        cells: Vec<Row>,
+    },
+}
+
+impl Clip {
+    fn is_empty(&self) -> bool {
+        match self {
+            Clip::Nodes(r) => r.is_empty(),
+            Clip::Cells { cells, .. } => cells.is_empty(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -304,7 +349,7 @@ impl Editor {
             minibuffer: None,
             op_entry: None,
             op_escape: false,
-            grid_mode: false,
+            grid: None,
             undo: Vec::new(),
             redo: Vec::new(),
             message: String::new(),
@@ -317,7 +362,7 @@ impl Editor {
             ghost: Vec::new(),
             select_anchor: None,
             select_path: Vec::new(),
-            clip: Vec::new(),
+            clip: Clip::Nodes(Vec::new()),
         }
     }
 
@@ -881,25 +926,48 @@ impl Editor {
         });
     }
 
-    /// Insert an empty row above the cursor's row (grid mode `R`).
-    pub fn add_row_above(&mut self) {
+    /// Insert an empty lane (column when `cols_mode`, row otherwise)
+    /// at gap `g` (0..=n), parking the cursor in the new lane.
+    pub fn lane_insert(&mut self, cols_mode: bool, g: usize) {
         self.edit_array(|rows, cols, cells, c| {
-            let r = c / cols;
-            for j in 0..cols {
-                cells.insert(r * cols + j, vec![]);
+            if cols_mode {
+                for r in (0..rows).rev() {
+                    cells.insert(r * cols + g.min(cols), vec![]);
+                }
+                Some((rows, cols + 1, (c / cols) * (cols + 1) + g.min(cols)))
+            } else {
+                for j in 0..cols {
+                    cells.insert(g.min(rows) * cols + j, vec![]);
+                }
+                Some((rows + 1, cols, g.min(rows) * cols + c % cols))
             }
-            Some((rows + 1, cols, r * cols + c % cols))
         });
     }
 
-    /// Insert an empty column left of the cursor's column (grid mode `C`).
-    pub fn add_col_left(&mut self) {
+    /// Delete lanes `lo..=hi` (columns when `cols_mode`); refuses to
+    /// delete every lane of the axis.
+    pub fn lane_delete(&mut self, cols_mode: bool, lo: usize, hi: usize) {
         self.edit_array(|rows, cols, cells, c| {
-            let j = c % cols;
-            for r in (0..rows).rev() {
-                cells.insert(r * cols + j, vec![]);
+            let n = hi - lo + 1;
+            if cols_mode {
+                if n >= cols {
+                    return None;
+                }
+                for r in (0..rows).rev() {
+                    cells.drain(r * cols + lo..r * cols + hi + 1);
+                }
+                let j = c % cols;
+                let j = if j > hi { j - n } else { j.min(cols - n - 1) };
+                Some((rows, cols - n, (c / cols) * (cols - n) + j))
+            } else {
+                if n >= rows {
+                    return None;
+                }
+                cells.drain(lo * cols..(hi + 1) * cols);
+                let r = c / cols;
+                let r = if r > hi { r - n } else { r.min(rows - n - 1) };
+                Some((rows - n, cols, r * cols + c % cols))
             }
-            Some((rows, cols + 1, (c / cols) * (cols + 1) + j))
         });
     }
 
@@ -919,6 +987,103 @@ impl Editor {
         self.path.truncate(k);
         self.path.push((i, Field::Cell(r * cols + j)));
         self.col = self.cur_row().len();
+    }
+
+    /// The enclosing array's shape: (path index, node index, rows,
+    /// cols, cursor cell).
+    pub(crate) fn grid_info(&self) -> Option<(usize, usize, usize, usize, usize)> {
+        let (k, i, c) = self.enclosing_array()?;
+        let Node::Array { rows, cols, .. } = &row_at(&self.root, &self.path[..k])[i] else {
+            unreachable!()
+        };
+        Some((k, i, *rows, *cols, c))
+    }
+
+    /// The selected cell rectangle in grid mode: (r0, c0, r1, c1),
+    /// inclusive — the current cell alone when no anchor is set.
+    pub fn grid_rect(&self) -> Option<(usize, usize, usize, usize)> {
+        let (_, _, _, cols, c) = self.grid_info()?;
+        let Some(GridSel::Cells { anchor }) = self.grid else {
+            return None;
+        };
+        let a = anchor.unwrap_or(c);
+        let (r0, r1) = ((a / cols).min(c / cols), (a / cols).max(c / cols));
+        let (j0, j1) = ((a % cols).min(c % cols), (a % cols).max(c % cols));
+        Some((r0, j0, r1, j1))
+    }
+
+    /// Clear the contents of the selected cells (grid-mode Backspace:
+    /// the cells stay, their contents go).
+    pub fn grid_clear_cells(&mut self) {
+        let Some((r0, j0, r1, j1)) = self.grid_rect() else {
+            return;
+        };
+        self.edit_array(|rows, cols, cells, c| {
+            for r in r0..=r1.min(rows - 1) {
+                for j in j0..=j1.min(cols - 1) {
+                    cells[r * cols + j].clear();
+                }
+            }
+            Some((rows, cols, c))
+        });
+        self.grid = Some(GridSel::Cells { anchor: None });
+    }
+
+    /// Copy the selected cell rectangle into the clipboard.
+    pub fn grid_copy_cells(&mut self) {
+        let Some((r0, j0, r1, j1)) = self.grid_rect() else {
+            return;
+        };
+        let Some((k, i, _, cols, _)) = self.grid_info() else {
+            return;
+        };
+        let Node::Array { cells, .. } = &row_at(&self.root, &self.path[..k])[i] else {
+            unreachable!()
+        };
+        let (ch, cw) = (r1 - r0 + 1, j1 - j0 + 1);
+        let mut out = Vec::with_capacity(ch * cw);
+        for r in r0..=r1 {
+            for j in j0..=j1 {
+                out.push(cells[r * cols + j].clone());
+            }
+        }
+        self.clip = Clip::Cells {
+            rows: ch,
+            cols: cw,
+            cells: out,
+        };
+        self.message = format!("copied {}×{} cell(s)", ch, cw);
+    }
+
+    /// Cut = copy + clear.
+    pub fn grid_cut_cells(&mut self) {
+        self.grid_copy_cells();
+        if matches!(self.clip, Clip::Cells { .. }) {
+            self.grid_clear_cells();
+        }
+    }
+
+    /// Paste a cell rectangle at the current cell, overwriting; the
+    /// grid grows to fit an overhanging block (^Z undoes the lot).
+    pub fn grid_paste_cells(&mut self, ch: usize, cw: usize, clip: Vec<Row>) {
+        self.edit_array(|rows, cols, cells, c| {
+            let (r0, j0) = (c / cols, c % cols);
+            let (nr, nc) = ((r0 + ch).max(rows), (j0 + cw).max(cols));
+            let mut grown = vec![Vec::new(); nr * nc];
+            for r in 0..rows {
+                for j in 0..cols {
+                    grown[r * nc + j] = std::mem::take(&mut cells[r * cols + j]);
+                }
+            }
+            for r in 0..ch {
+                for j in 0..cw {
+                    grown[(r0 + r) * nc + (j0 + j)] = clip[r * cw + j].clone();
+                }
+            }
+            *cells = grown;
+            Some((nr, nc, r0 * nc + j0))
+        });
+        self.grid = Some(GridSel::Cells { anchor: None });
     }
 
     /// `\mid`: split the current Delim segment at the cursor, inserting a
@@ -1048,7 +1213,7 @@ impl Editor {
     pub fn copy_selection(&mut self) {
         match self.selection() {
             Some((lo, hi)) => {
-                self.clip = self.cur_row()[lo..hi].to_vec();
+                self.clip = Clip::Nodes(self.cur_row()[lo..hi].to_vec());
                 self.message = format!("copied {} node(s)", hi - lo);
             }
             None => self.message = "nothing selected (⇧←/→ or ⇧↑)".into(),
@@ -1060,7 +1225,7 @@ impl Editor {
         match self.take_selection() {
             Some(content) => {
                 self.message = format!("cut {} node(s)", content.len());
-                self.clip = content;
+                self.clip = Clip::Nodes(content);
             }
             None => self.message = "nothing selected (⇧←/→ or ⇧↑)".into(),
         }
@@ -1073,11 +1238,26 @@ impl Editor {
             return;
         }
         self.select_anchor = None;
-        let clip = self.clip.clone();
-        let col = self.col;
-        let row = self.cur_row_mut();
-        row.splice(col..col, clip.iter().cloned());
-        self.col += clip.len();
+        match self.clip.clone() {
+            Clip::Nodes(clip) => {
+                let col = self.col;
+                let row = self.cur_row_mut();
+                row.splice(col..col, clip.iter().cloned());
+                self.col += clip.len();
+            }
+            // A cell rectangle pastes over cells in grid mode, and as
+            // a bare Array node anywhere else.
+            Clip::Cells { rows, cols, cells } => {
+                if self.grid.is_some() && self.enclosing_array().is_some() {
+                    self.grid_paste_cells(rows, cols, cells);
+                } else {
+                    let node = Node::Array { rows, cols, cells };
+                    let col = self.col;
+                    self.cur_row_mut().insert(col, node);
+                    self.col += 1;
+                }
+            }
+        }
     }
 
     /// Widen the selection to the enclosing structure (Shift+↑): select

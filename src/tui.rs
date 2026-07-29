@@ -39,8 +39,18 @@ pub fn help_line(ed: &Editor) -> &'static str {
             "free move: ←→↑↓ cells  ^G markers  Enter snap  Esc cancel"
         };
     }
-    if ed.grid_mode {
-        return "grid mode: ←→↑↓ move cells  r/R add row below/above  c/C add col right/left  d/D delete row/col  Esc/^O exit";
+    if let Some(gs) = ed.grid {
+        return match gs {
+            mascii::editor::GridSel::Cells { .. } => {
+                "grid: ←→↑↓ cells  ⇧ select (past the edge = lane)  c/| columns  r/- rows  ^C/^X/^V cells  ⌫ clear  Enter edit  Esc/^O exit"
+            }
+            mascii::editor::GridSel::Lanes { cols: true, .. } => {
+                "columns: ←→ gap/column  Enter on gap = insert here  ⌫ delete column  ⇧←→ extend  ↑↓ cells  Esc back"
+            }
+            mascii::editor::GridSel::Lanes { cols: false, .. } => {
+                "rows: ↑↓ gap/row  Enter on gap = insert here  ⌫ delete row  ⇧↑↓ extend  ←→ cells  Esc back"
+            }
+        };
     }
     match ed.path.last() {
         Some((_, Field::Cell(_))) => {
@@ -221,33 +231,46 @@ fn marker_boxes(
 
     let mut bg: Vec<Vec<Option<Color>>> = grid.iter().map(|row| vec![None; row.len()]).collect();
     // Boxes: pair opens (selection start, ^B label) with closes within
-    // each row, nesting by position.
-    let mut boxes: Vec<(usize, usize, usize, Color)> = Vec::new(); // (row, open, close, color) sorted later
+    // each row, nesting by position. Selection pairs consume extents in
+    // encounter order (rows top-down, columns left-right) — the same
+    // order the editor lists them in (one per grid cell, or one).
+    let mut boxes: Vec<(usize, usize, usize, Color, usize, usize)> = Vec::new();
     let mut order: Vec<usize> = Vec::new(); // paint order key: depth
     let mut by_row: std::collections::BTreeMap<usize, Vec<(usize, char)>> =
         std::collections::BTreeMap::new();
     for &(y, x, c) in marks {
         by_row.entry(y).or_default().push((x, c));
     }
+    let mut sel_seq = 0usize;
     for (y, mut row_marks) in by_row.clone() {
         row_marks.sort_unstable();
         let mut stack: Vec<(usize, char)> = Vec::new();
         for (x, c) in row_marks {
             if c == SEL_CLOSE || c == BLK_CLOSE {
                 if let Some((o, oc)) = stack.pop() {
-                    let (color, depth) = if oc == SEL_OPEN {
-                        (theme::SELECTION_BG, 0)
+                    let (color, depth, ext) = if oc == SEL_OPEN {
+                        let e = extents.get(sel_seq);
+                        sel_seq += 1;
+                        (theme::SELECTION_BG, 0, e)
                     } else {
                         let idx = (oc as u32 - JUMP_CHAR_BASE) as usize;
-                        let d = extents.get(idx).map_or(0, |&(_, _, d)| d);
+                        let e = extents.get(idx);
+                        let d = e.map_or(0, |&(_, _, d)| d);
                         let c = if block_selected == Some(idx) {
                             theme::SELECTED_BG
                         } else {
                             theme::DEPTH_BG[d % theme::DEPTH_BG.len()]
                         };
-                        (c, d)
+                        (c, d, e)
                     };
-                    boxes.push((y, o, x, color));
+                    let (t, b) = match ext {
+                        Some(&(above, below, _)) => (
+                            y.saturating_sub(above),
+                            (y + below).min(grid.len().saturating_sub(1)),
+                        ),
+                        None => (y, y),
+                    };
+                    boxes.push((y, o, x, color, t, b));
                     order.push(depth);
                 }
             } else {
@@ -261,29 +284,7 @@ fn marker_boxes(
     let mut idx: Vec<usize> = (0..boxes.len()).collect();
     idx.sort_by_key(|&i| std::cmp::Reverse(order[i]));
     for i in idx {
-        let (oy, o, close, color) = boxes[i];
-        // Which extent? Selection has one entry; a ^B box finds its
-        // extent through its label char.
-        let ext = by_row
-            .get(&oy)
-            .and_then(|ms| ms.iter().find(|&&(x, _)| x == o))
-            .map(|&(_, c)| c)
-            .and_then(|c| {
-                if c == SEL_OPEN {
-                    extents.first()
-                } else if is_label(c) {
-                    extents.get((c as u32 - JUMP_CHAR_BASE) as usize)
-                } else {
-                    None
-                }
-            });
-        let (t, b) = match ext {
-            Some(&(above, below, _)) => (
-                oy.saturating_sub(above),
-                (oy + below).min(grid.len().saturating_sub(1)),
-            ),
-            None => (oy, oy),
-        };
+        let (_, o, close, color, t, b) = boxes[i];
         for row in bg.iter_mut().take(b + 1).skip(t) {
             for x in o..close {
                 if x < row.len() {
@@ -303,6 +304,15 @@ fn marker_boxes(
             .then(|| (u - JUMP_RANK_BASE) as usize)
     };
     for &(y, x, c) in marks {
+        // The grid lane-gap cursor paints its ghost cell green.
+        if c == mascii::editor::GRID_GAP {
+            if let Some(row) = bg.get_mut(y)
+                && x < row.len()
+            {
+                row[x] = Some(theme::GRID_INSERT_BG);
+            }
+            continue;
+        }
         let rank = rank_of(c);
         if !(is_label(c) || rank.is_some()) {
             continue;
@@ -572,6 +582,59 @@ mod tests {
             ed.block.is_some().then_some(ed.block_sel),
         );
         lines.into_iter().map(String::from_iter).collect()
+    }
+
+    /// The full grid-mode display pipeline: selected cells paint the
+    /// selection color at their own height, and a lane gap shows the
+    /// green ghost column.
+    #[test]
+    fn grid_mode_paints_cells_and_gaps() {
+        let bg_of = |ed: &Editor| {
+            let (root, cursor) = ed.decorated();
+            let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+            let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
+            let (_, bg, _) = marker_boxes(
+                &block.lines,
+                &ed.marker_extents(),
+                &block.marks,
+                block.caret,
+                None,
+                None,
+            );
+            bg
+        };
+        let mut ed = Editor::new();
+        for c in "\\matrix a".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        ed.input(Key::Char('o'), false, true); // ^O
+        // Cell cursor: the current (top-left) cell is painted.
+        let bg = bg_of(&ed);
+        let painted = bg
+            .iter()
+            .flatten()
+            .filter(|c| **c == Some(theme::SELECTION_BG))
+            .count();
+        assert!(painted > 0, "cell cursor paints its cell");
+        // Column mode on a gap: the green ghost lane appears.
+        ed.input(Key::Char('|'), false, false);
+        ed.input(Key::Left, false, false); // gap 0
+        let bg = bg_of(&ed);
+        let green = bg
+            .iter()
+            .flatten()
+            .filter(|c| **c == Some(theme::GRID_INSERT_BG))
+            .count();
+        assert!(green > 0, "gap cursor paints the ghost lane");
+        // Back on a column (purple), the selection paint returns.
+        ed.input(Key::Right, false, false);
+        let bg = bg_of(&ed);
+        let painted = bg
+            .iter()
+            .flatten()
+            .filter(|c| **c == Some(theme::SELECTION_BG))
+            .count();
+        assert!(painted > 0, "lane cursor paints its column");
     }
 
     #[test]

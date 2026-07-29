@@ -652,6 +652,48 @@ impl Editor {
                     extent(&row_at(&self.root, p)[i..i + 1], cur, rank)
                 })
                 .collect()
+        } else if let Some(gs) = self.grid
+            && let Some((k, i, rows, cols, c)) = self.grid_info()
+        {
+            // One extent per painted cell, in row-major (= mark
+            // encounter) order — marker_boxes pairs them up in kind.
+            let Node::Array { cells, .. } = &row_at(&self.root, &self.path[..k])[i] else {
+                unreachable!()
+            };
+            let sel: Vec<usize> = match gs {
+                GridSel::Cells { anchor } => {
+                    let a = anchor.unwrap_or(c);
+                    let (r0, r1) = ((a / cols).min(c / cols), (a / cols).max(c / cols));
+                    let (j0, j1) = ((a % cols).min(c % cols), (a % cols).max(c % cols));
+                    (r0..=r1)
+                        .flat_map(|r| (j0..=j1).map(move |j| r * cols + j))
+                        .collect()
+                }
+                GridSel::Lanes {
+                    cols: cmode,
+                    pos,
+                    ext,
+                } if pos % 2 == 1 => {
+                    let lane = pos / 2;
+                    let end = ext.unwrap_or(lane);
+                    let (lo, hi) = (lane.min(end), lane.max(end));
+                    (0..rows)
+                        .flat_map(|r| (0..cols).map(move |j| (r, j)))
+                        .filter(|&(r, j)| {
+                            if cmode {
+                                (lo..=hi).contains(&j)
+                            } else {
+                                (lo..=hi).contains(&r)
+                            }
+                        })
+                        .map(|(r, j)| r * cols + j)
+                        .collect()
+                }
+                _ => Vec::new(),
+            };
+            sel.iter()
+                .map(|&cell| extent(&cells[cell], None, 0))
+                .collect()
         } else if let Some((lo, hi)) = self.selection() {
             vec![extent(&self.cur_row()[lo..hi], None, 0)]
         } else {
@@ -752,6 +794,93 @@ impl Editor {
             }
             return (root, Some((path, col)));
         }
+        if let Some(gs) = self.grid
+            && let Some((k, i, rows, cols, c)) = self.grid_info()
+        {
+            let mut path = self.path.clone();
+            let mut col = self.col;
+            let parent_path = self.path[..k].to_vec();
+            let Node::Array {
+                rows: nr,
+                cols: nc,
+                cells,
+            } = &mut row_at_mut(&mut root, &parent_path)[i]
+            else {
+                unreachable!()
+            };
+            match gs {
+                GridSel::Cells { anchor } => {
+                    // Paint the selected rectangle (the bare cell
+                    // cursor is a 1×1 selection).
+                    let a = anchor.unwrap_or(c);
+                    let (r0, r1) = ((a / cols).min(c / cols), (a / cols).max(c / cols));
+                    let (j0, j1) = ((a % cols).min(c % cols), (a % cols).max(c % cols));
+                    for r in r0..=r1 {
+                        for j in j0..=j1 {
+                            let cell = &mut cells[r * cols + j];
+                            let hi = cell.len();
+                            cell.insert(hi, Node::Sym(SEL_CLOSE));
+                            cell.insert(0, Node::Sym(SEL_OPEN));
+                            if r * cols + j == c {
+                                // The cursor lives in this cell: the
+                                // open mark at 0 shifts it right once.
+                                if path.len() > k + 1 {
+                                    path[k + 1].0 += 1;
+                                } else {
+                                    col += 1;
+                                }
+                            }
+                        }
+                    }
+                    return (root, Some((path, col)));
+                }
+                GridSel::Lanes {
+                    cols: cmode,
+                    pos,
+                    ext,
+                } => {
+                    if pos % 2 == 1 {
+                        // Selected lane(s): paint every cell.
+                        let lane = pos / 2;
+                        let end = ext.unwrap_or(lane);
+                        let (lo, hi) = (lane.min(end), lane.max(end));
+                        for r in 0..rows {
+                            for j in 0..cols {
+                                let sel = if cmode {
+                                    (lo..=hi).contains(&j)
+                                } else {
+                                    (lo..=hi).contains(&r)
+                                };
+                                if sel {
+                                    let cell = &mut cells[r * cols + j];
+                                    let e = cell.len();
+                                    cell.insert(e, Node::Sym(SEL_CLOSE));
+                                    cell.insert(0, Node::Sym(SEL_OPEN));
+                                }
+                            }
+                        }
+                    } else {
+                        // Gap cursor: a ghost lane previews the insert
+                        // (a Spacer cell painted by the GRID_GAP mark).
+                        let g = pos / 2;
+                        let ghost = || vec![Node::Sym(GRID_GAP), Node::Spacer];
+                        if cmode {
+                            for r in (0..rows).rev() {
+                                cells.insert(r * cols + g.min(cols), ghost());
+                            }
+                            *nc = cols + 1;
+                        } else {
+                            for j in 0..cols {
+                                cells.insert(g.min(rows) * cols + j, ghost());
+                            }
+                            *nr = rows + 1;
+                        }
+                    }
+                    // The caret is meaningless while lanes are selected.
+                    return (root, None);
+                }
+            }
+        }
         let mut path = self.path.clone();
         let mut col = self.col;
         // Deepest rows first: inserting into an ancestor row would shift
@@ -798,13 +927,192 @@ impl Editor {
 
     /// Toggle grid edit mode (only meaningful inside a matrix).
     pub fn grid_mode_toggle(&mut self) {
-        if self.grid_mode {
-            self.grid_mode = false;
+        if self.grid.is_some() {
+            self.grid = None;
         } else if self.enclosing_array().is_some() {
-            self.grid_mode = true;
+            self.grid = Some(GridSel::Cells { anchor: None });
             self.select_anchor = None;
         } else {
             self.message = "^O works inside a matrix/array".into();
+        }
+    }
+
+    // ----- grid mode flow (cell rectangle / lane sub-modes) -----
+
+    /// Plain arrow in cell state: move the cell cursor, drop the anchor.
+    pub fn grid_cell_move(&mut self, dr: isize, dc: isize) {
+        self.grid = Some(GridSel::Cells { anchor: None });
+        self.grid_move(dr, dc);
+    }
+
+    /// Shift+arrow in cell state: extend the rectangle; pushing past
+    /// the edge with a full-axis selection promotes to lane selection
+    /// (the same "widen past the boundary = climb to the structure"
+    /// grammar as Shift+↑).
+    pub fn grid_select_move(&mut self, dr: isize, dc: isize) {
+        let Some((_, _, rows, cols, c)) = self.grid_info() else {
+            return;
+        };
+        let Some(GridSel::Cells { anchor }) = self.grid else {
+            return;
+        };
+        let a = anchor.unwrap_or(c);
+        let (r, j) = (c / cols, c % cols);
+        let (ar, aj) = (a / cols, a % cols);
+        if dr != 0 {
+            let full = ar.min(r) == 0 && ar.max(r) == rows - 1;
+            let at_edge = (dr < 0 && r == 0) || (dr > 0 && r == rows - 1);
+            if full && at_edge {
+                let (lo, hi) = (aj.min(j), aj.max(j));
+                self.grid = Some(GridSel::Lanes {
+                    cols: true,
+                    pos: 2 * lo + 1,
+                    ext: (lo != hi).then_some(hi),
+                });
+                return;
+            }
+        }
+        if dc != 0 {
+            let full = aj.min(j) == 0 && aj.max(j) == cols - 1;
+            let at_edge = (dc < 0 && j == 0) || (dc > 0 && j == cols - 1);
+            if full && at_edge {
+                let (lo, hi) = (ar.min(r), ar.max(r));
+                self.grid = Some(GridSel::Lanes {
+                    cols: false,
+                    pos: 2 * lo + 1,
+                    ext: (lo != hi).then_some(hi),
+                });
+                return;
+            }
+        }
+        self.grid = Some(GridSel::Cells { anchor: Some(a) });
+        self.grid_move(dr, dc);
+    }
+
+    /// Enter lane mode (`c`/`|` = columns, `r`/`-` = rows) on the
+    /// cursor's lane.
+    pub fn grid_lanes(&mut self, cols_mode: bool) {
+        let Some((_, _, _, cols, c)) = self.grid_info() else {
+            return;
+        };
+        let lane = if cols_mode { c % cols } else { c / cols };
+        self.grid = Some(GridSel::Lanes {
+            cols: cols_mode,
+            pos: 2 * lane + 1,
+            ext: None,
+        });
+    }
+
+    /// Arrow along the lane axis: step the alternating gap/lane cursor.
+    pub fn lane_step(&mut self, delta: isize) {
+        let Some(GridSel::Lanes { cols, pos, .. }) = self.grid else {
+            return;
+        };
+        let Some((_, _, rows, ncols, _)) = self.grid_info() else {
+            return;
+        };
+        let n = if cols { ncols } else { rows };
+        let pos = pos.saturating_add_signed(delta).min(2 * n);
+        self.grid = Some(GridSel::Lanes {
+            cols,
+            pos,
+            ext: None,
+        });
+    }
+
+    /// Shift+arrow along the axis: extend the lane selection; from a
+    /// gap it just steps onto the neighbouring lane.
+    pub fn lane_extend(&mut self, delta: isize) {
+        let Some(GridSel::Lanes { cols, pos, ext }) = self.grid else {
+            return;
+        };
+        let Some((_, _, rows, ncols, _)) = self.grid_info() else {
+            return;
+        };
+        let n = if cols { ncols } else { rows };
+        if pos % 2 == 0 {
+            return self.lane_step(delta);
+        }
+        let end = ext.unwrap_or(pos / 2);
+        let end = end.saturating_add_signed(delta).min(n - 1);
+        self.grid = Some(GridSel::Lanes {
+            cols,
+            pos,
+            ext: (end != pos / 2).then_some(end),
+        });
+    }
+
+    /// The selected lane range (lo..=hi), when the cursor is on a lane.
+    fn lane_range(&self) -> Option<(bool, usize, usize)> {
+        let Some(GridSel::Lanes { cols, pos, ext }) = self.grid else {
+            return None;
+        };
+        if pos % 2 == 0 {
+            return None;
+        }
+        let lane = pos / 2;
+        let end = ext.unwrap_or(lane);
+        Some((cols, lane.min(end), lane.max(end)))
+    }
+
+    /// Enter in lane mode: on a gap, insert a lane there (and land on
+    /// it); on a lane, drop back to cell selection of that lane.
+    pub fn lane_commit(&mut self) {
+        let Some(GridSel::Lanes { cols, pos, .. }) = self.grid else {
+            return;
+        };
+        if pos % 2 == 0 {
+            self.lane_insert(cols, pos / 2);
+            self.grid = Some(GridSel::Lanes {
+                cols,
+                pos: pos + 1,
+                ext: None,
+            });
+        } else {
+            self.lane_demote();
+        }
+    }
+
+    /// Delete in lane mode: remove the selected lane(s).
+    pub fn lane_delete_sel(&mut self) {
+        let Some((cols, lo, hi)) = self.lane_range() else {
+            return;
+        };
+        self.lane_delete(cols, lo, hi);
+        if let Some((_, _, rows, ncols, _)) = self.grid_info() {
+            let n = if cols { ncols } else { rows };
+            self.grid = Some(GridSel::Lanes {
+                cols,
+                pos: 2 * lo.min(n - 1) + 1,
+                ext: None,
+            });
+        }
+    }
+
+    /// Cross-axis arrow / Enter on a lane: back to cell selection —
+    /// the lane(s) become a full-axis cell rectangle.
+    pub fn lane_demote(&mut self) {
+        let Some((k, i, rows, ncols, c)) = self.grid_info() else {
+            return;
+        };
+        match self.lane_range() {
+            Some((cols, lo, hi)) => {
+                let (anchor, cursor) = if cols {
+                    (lo, (rows - 1) * ncols + hi)
+                } else {
+                    (lo * ncols, (hi + 1) * ncols - 1)
+                };
+                self.path.truncate(k);
+                self.path.push((i, Field::Cell(cursor)));
+                self.col = self.cur_row().len();
+                self.grid = Some(GridSel::Cells {
+                    anchor: Some(anchor),
+                });
+            }
+            None => {
+                let _ = c;
+                self.grid = Some(GridSel::Cells { anchor: None });
+            }
         }
     }
 

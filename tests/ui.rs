@@ -192,7 +192,7 @@ fn ctrl_e_jumps_to_the_end_outside_grids() {
     // ^E is the end jump even inside a grid cell (grid mode is ^O).
     let mut ed = Editor::new();
     type_script(&mut ed, r"\matrix x C-o");
-    assert!(ed.grid_mode);
+    assert!(ed.grid.is_some());
 }
 
 #[test]
@@ -384,44 +384,89 @@ fn enter_on_empty_formula_does_not_crash() {
 
 #[test]
 fn grid_edit_mode() {
-    // ^E inside a matrix: arrows move cells, d/D delete row/col,
-    // r/R c/C add, Esc leaves the mode.
+    // ^O: cell-unit cursor; Enter leaves the mode to edit that cell.
     let mut ed = Editor::new();
     type_script(
         &mut ed,
-        r"\matrix a C-o Right Esc b C-o Down Left Esc c C-o Right Esc d",
+        r"\matrix a C-o Right Enter b C-o Down Left Enter c C-o Right Enter d",
     );
     assert_eq!(
         latex(&ed),
         "\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}"
     );
-    // Delete the bottom row (was: awkward \delrow minibuffer command).
-    type_script(&mut ed, "C-o d");
+    // Row lanes: r selects the cursor's row (purple), ⌫ deletes it.
+    type_script(&mut ed, "C-o r Backspace");
     assert_eq!(latex(&ed), "\\begin{bmatrix} a & b \\end{bmatrix}");
-    // Delete the second column; a 1x1 grid inside brackets normalizes
-    // to plain content.
-    type_script(&mut ed, "D");
+    // Column lanes from row mode: c switches axis; ⌫ deletes the
+    // column; a 1x1 grid inside brackets normalizes to plain content.
+    type_script(&mut ed, "c Backspace");
     assert_eq!(latex(&ed), "\\left[a\\right]");
-    // Add row above / col left (\matrix starts 2x2 -> 3x3); typing goes
-    // back to normal keys after Esc, into the new top-left cell.
+    // Gap insert: | enters column mode, ← steps onto the left gap
+    // (green), Enter inserts a column there and lands on it; a
+    // cross-axis arrow drops back to cell selection of that lane.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\matrix x C-o R C Esc y");
+    type_script(&mut ed, r"\matrix x C-o | Left Enter Up Enter y");
     assert_eq!(
         latex(&ed),
-        "\\begin{bmatrix} y &  &  \\\\  & x &  \\\\  &  &  \\end{bmatrix}"
+        "\\begin{bmatrix}  & x &  \\\\ y &  &  \\end{bmatrix}"
     );
     // Undo works inside grid mode (row deletion is one step).
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\matrix a Down b C-o d C-z");
+    type_script(&mut ed, r"\matrix a Down b C-o r Backspace C-z");
     assert!(
         latex(&ed).contains("\\\\"),
         "undo restored the row: {}",
         latex(&ed)
     );
-    // ^E outside a grid only reports.
+    // ^O outside a grid only reports.
     let mut ed = Editor::new();
     type_script(&mut ed, "x C-o d");
     assert_eq!(latex(&ed), "xd");
+}
+
+#[test]
+fn grid_selection_promotes_and_clears() {
+    // Backspace on a full-column CELL selection clears the contents…
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\matrix a Down b C-o S-Up Backspace");
+    assert_eq!(latex(&ed), "\\begin{bmatrix}  &  \\\\  &  \\end{bmatrix}");
+    // …while pushing the selection past the edge promotes it to the
+    // column itself, where Backspace deletes the column.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\matrix a Down b C-o S-Up S-Up");
+    assert!(
+        matches!(
+            ed.grid,
+            Some(mascii::editor::GridSel::Lanes {
+                cols: true,
+                pos: 1,
+                ..
+            })
+        ),
+        "{:?}",
+        ed.grid
+    );
+    type_script(&mut ed, "Backspace");
+    assert_eq!(latex(&ed), "\\begin{bmatrix}  \\\\  \\end{bmatrix}");
+}
+
+#[test]
+fn grid_cells_copy_paste() {
+    // Copy a 2x1 block, paste at the far corner: overwrite semantics,
+    // and the grid grows to fit the overhang.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\matrix a Down b C-o S-Up C-c Down Right C-v");
+    assert_eq!(
+        latex(&ed),
+        "\\begin{bmatrix} a &  \\\\ b & a \\\\  & b \\end{bmatrix}"
+    );
+    // Outside a grid, the same cell clipboard pastes as a bare Array.
+    type_script(&mut ed, "Esc Tab Tab C-v");
+    assert!(
+        latex(&ed).ends_with("\\begin{matrix} a \\\\ b \\end{matrix}"),
+        "{}",
+        latex(&ed)
+    );
 }
 
 #[test]

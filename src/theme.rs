@@ -39,6 +39,9 @@ pub const LABEL_BG: Color = Color::Yellow;
 pub const UNLABELED_BG: Color = Color::Indexed(238);
 /// The arrow-selected jump / block marker.
 pub const SELECTED_BG: Color = Color::Indexed(172);
+/// Grid lane-gap cursor: the ghost lane previewing an insertion
+/// (Enter inserts here).
+pub const GRID_INSERT_BG: Color = Color::Indexed(22);
 
 /// Background palette for ^B ancestor boxes: a blue→cyan gradient from
 /// the innermost parent outward, cycling if the nesting runs deeper.
