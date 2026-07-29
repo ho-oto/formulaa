@@ -368,14 +368,28 @@ fn marker_boxes(
             .contains(&u)
             .then(|| (u - JUMP_RANK_BASE) as usize)
     };
-    for &(y, x, c) in marks {
-        // The grid lane-gap cursor paints its ghost cell green.
-        if c == mascii::editor::GRID_GAP {
-            if let Some(row) = bg.get_mut(y)
-                && x < row.len()
-            {
-                row[x] = Some(theme::GRID_INSERT_BG);
+    // The grid lane-gap cursor: fill the union rectangle of its ghost
+    // cells, so the green bar runs unbroken through the lattice rows.
+    let gaps: Vec<(usize, usize)> = marks
+        .iter()
+        .filter(|&&(_, _, c)| c == mascii::editor::GRID_GAP)
+        .map(|&(y, x, _)| (y, x))
+        .collect();
+    if !gaps.is_empty() {
+        let t = gaps.iter().map(|&(y, _)| y).min().unwrap();
+        let b = gaps.iter().map(|&(y, _)| y).max().unwrap();
+        let x0 = gaps.iter().map(|&(_, x)| x).min().unwrap();
+        let x1 = gaps.iter().map(|&(_, x)| x).max().unwrap() + 1;
+        for row in bg.iter_mut().take(b + 1).skip(t) {
+            for x in x0..x1 {
+                if x < row.len() {
+                    row[x] = Some(theme::GRID_INSERT_BG);
+                }
             }
+        }
+    }
+    for &(y, x, c) in marks {
+        if c == mascii::editor::GRID_GAP {
             continue;
         }
         let rank = rank_of(c);
@@ -540,9 +554,12 @@ fn decorate_line(
             spans.push(Span::styled(label.to_string(), style));
         } else if frame.is_some_and(|(o, close, t, b)| {
             // The edited grid's lattice frame recolors while grid mode
-            // is on (one cell of slack sideways so a fused matrix's
-            // delimiter columns count as its frame).
-            (t..=b).contains(&y) && (o.saturating_sub(1)..=close).contains(&i) && is_frame_glyph(c)
+            // is on. One cell of slack on both sides: a fused matrix's
+            // markers sit just *inside* its delimiter columns, so the
+            // columns themselves are one step beyond the pair.
+            (t..=b).contains(&y)
+                && (o.saturating_sub(1)..=close + 1).contains(&i)
+                && is_frame_glyph(c)
         }) {
             flush(&mut buf, buf_bg, &mut spans);
             let mut style = Style::default().fg(theme::GRID_FRAME_FG);
@@ -740,6 +757,70 @@ mod tests {
             None,
         );
         assert!(frame.is_some(), "grid mode reports its frame rect");
+        // The gap's green bar runs unbroken through the lattice rows:
+        // every display row between the first and last green cell has
+        // green in it (a 2-row matrix has a separator row between).
+        ed.input(Key::Left, false, false); // back to gap 0
+        let bg = bg_of(&ed);
+        let green_rows: Vec<usize> = bg
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.contains(&Some(theme::GRID_INSERT_BG)))
+            .map(|(y, _)| y)
+            .collect();
+        assert!(green_rows.len() >= 3, "green spans rows: {:?}", green_rows);
+        let (lo, hi) = (green_rows[0], *green_rows.last().unwrap());
+        assert_eq!(
+            green_rows.len(),
+            hi - lo + 1,
+            "no holes in the gap bar: {:?}",
+            green_rows
+        );
+    }
+
+    /// A fused matrix (pmatrix/bmatrix) recolors BOTH delimiter
+    /// columns as its frame — the markers sit just inside them.
+    #[test]
+    fn fused_frame_recolors_both_delimiters() {
+        let mut ed = Editor::new();
+        for c in r"\pmatrix a".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        ed.input(Key::Char('o'), false, true); // ^O
+        let (root, cursor) = ed.decorated();
+        let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+        let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
+        let (lines, bg, _, frame) = marker_boxes(
+            &block.lines,
+            &ed.marker_extents(),
+            &block.marks,
+            block.caret,
+            None,
+            None,
+        );
+        let (o, close, t, b) = frame.expect("frame rect");
+        // Walk every framed row and collect which columns the draw
+        // pass would tint; the leftmost and rightmost delimiter pieces
+        // must both be inside the scan range.
+        let mut tinted = std::collections::HashSet::new();
+        for line in lines.iter().take(b + 1).skip(t) {
+            for (i, &c) in line.iter().enumerate() {
+                if (o.saturating_sub(1)..=close + 1).contains(&i) && is_frame_glyph(c) {
+                    tinted.insert(c);
+                }
+            }
+        }
+        let _ = bg;
+        assert!(
+            tinted.iter().any(|c| "⎛⎜⎝(".contains(*c)),
+            "left paren column tinted: {:?}",
+            tinted
+        );
+        assert!(
+            tinted.iter().any(|c| "⎞⎟⎠)".contains(*c)),
+            "right paren column tinted: {:?}",
+            tinted
+        );
     }
 
     #[test]
