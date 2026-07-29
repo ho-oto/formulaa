@@ -810,11 +810,19 @@ impl Editor {
             let mut col = self.col;
             let parent_path = self.path[..k].to_vec();
             // The frame pair around the Array node lets the display
-            // recolor its lattice — the "grid mode is on" signal.
+            // recolor its lattice — the "grid mode is on" signal. A
+            // fused matrix's frame IS its delimiter columns, so it
+            // gets the FUSED pair (wider display scan).
+            let fused = self.fused_in_delim(&parent_path, i);
             {
+                let (op, cl) = if fused {
+                    (FRAME_FUSED_OPEN, FRAME_FUSED_CLOSE)
+                } else {
+                    (FRAME_OPEN, FRAME_CLOSE)
+                };
                 let prow = row_at_mut(&mut root, &parent_path);
-                prow.insert(i + 1, Node::Sym(FRAME_CLOSE));
-                prow.insert(i, Node::Sym(FRAME_OPEN));
+                prow.insert(i + 1, Node::Sym(cl));
+                prow.insert(i, Node::Sym(op));
             }
             if path.len() > k {
                 path[k].0 += 1;

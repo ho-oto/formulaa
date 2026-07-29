@@ -451,6 +451,13 @@ fn grid_selection_promotes_and_clears() {
 }
 
 #[test]
+fn esc_exits_grid_mode_from_lane_mode() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\matrix x C-o c Esc");
+    assert!(ed.grid.is_none(), "{:?}", ed.grid);
+}
+
+#[test]
 fn vmatrix_wraps_a_grid_in_a_norm() {
     let mut ed = Editor::new();
     ed.execute("Vmatrix");

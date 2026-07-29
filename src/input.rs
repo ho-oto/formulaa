@@ -309,20 +309,18 @@ impl Editor {
                             Key::Backspace | Key::Delete | Key::Char('d') => self.lane_delete_sel(),
                             Key::Char('c') | Key::Char('|') if !cols => self.grid_lanes(true),
                             Key::Char('r') | Key::Char('-') if cols => self.grid_lanes(false),
-                            Key::Esc
-                            | Key::Tab
-                            | Key::Char('c')
-                            | Key::Char('|')
-                            | Key::Char('r')
-                            | Key::Char('-') => {
+                            // Esc leaves grid mode altogether; the
+                            // same-axis letter drops back to cells.
+                            Key::Esc | Key::Tab => self.grid = None,
+                            Key::Char('c') | Key::Char('|') | Key::Char('r') | Key::Char('-') => {
                                 self.grid = Some(crate::editor::GridSel::Cells { anchor: None })
                             }
                             _ => {
                                 self.message = if cols {
-                                    "columns: ←→ gap/column  Enter on gap = insert  ⌫ delete  ⇧←→ extend  ↑↓ back to cells  Esc back"
+                                    "columns: ←→ gap/column  Enter on gap = insert  ⌫ delete  ⇧←→ extend  ↑↓ back to cells  Esc exit"
                                         .into()
                                 } else {
-                                    "rows: ↑↓ gap/row  Enter on gap = insert  ⌫ delete  ⇧↑↓ extend  ←→ back to cells  Esc back"
+                                    "rows: ↑↓ gap/row  Enter on gap = insert  ⌫ delete  ⇧↑↓ extend  ←→ back to cells  Esc exit"
                                         .into()
                                 };
                             }
