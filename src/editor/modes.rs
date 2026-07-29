@@ -896,7 +896,8 @@ impl Editor {
                         // Gap cursor: a ghost lane previews the insert
                         // (a Spacer cell painted by the GRID_GAP mark).
                         let g = pos / 2;
-                        let ghost = || vec![Node::Sym(GRID_GAP), Node::Spacer];
+                        let mark = if cmode { GRID_GAP } else { GRID_GAP_ROW };
+                        let ghost = || vec![Node::Sym(mark), Node::Spacer];
                         if cmode {
                             for r in (0..rows).rev() {
                                 cells.insert(r * cols + g.min(cols), ghost());

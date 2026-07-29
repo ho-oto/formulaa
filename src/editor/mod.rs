@@ -90,8 +90,11 @@ pub const BLK_CLOSE: char = '\u{E0F2}';
 /// no box — just the slot.
 pub const SLOT_GHOST: char = '\u{E0F3}';
 /// Grid lane-gap cursor: marks the ghost lane previewing an insertion
-/// (painted as the green insert cursor).
+/// (painted as the green insert band, same shape as a lane selection).
+/// Column and row gaps use separate chars so the display knows which
+/// axis to stretch along.
 pub const GRID_GAP: char = '\u{E0F4}';
+pub const GRID_GAP_ROW: char = '\u{E0FF}';
 /// Grid lane selection markers: like SEL_OPEN/SEL_CLOSE per cell, but
 /// the display fills the union rectangle of all pairs — a whole-lane
 /// band including the lattice gaps, not per-cell patches.

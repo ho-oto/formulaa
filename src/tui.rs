@@ -432,18 +432,32 @@ fn marker_boxes(
             .contains(&u)
             .then(|| (u - JUMP_RANK_BASE) as usize)
     };
-    // The grid lane-gap cursor: fill the union rectangle of its ghost
-    // cells, so the green bar runs unbroken through the lattice rows.
-    let gaps: Vec<(usize, usize)> = marks
-        .iter()
-        .filter(|&&(_, _, c)| c == mascii::editor::GRID_GAP)
-        .map(|&(y, x, _)| (y, x))
-        .collect();
-    if !gaps.is_empty() {
+    // The grid lane-gap cursor: the ghost lane paints with exactly the
+    // lane-selection geometry (edge-to-edge along its axis, slot
+    // padding sideways for columns), just in the insert green.
+    for (mark, is_col) in [
+        (mascii::editor::GRID_GAP, true),
+        (mascii::editor::GRID_GAP_ROW, false),
+    ] {
+        let gaps: Vec<(usize, usize)> = marks
+            .iter()
+            .filter(|&&(_, _, c)| c == mark)
+            .map(|&(y, x, _)| (y, x))
+            .collect();
+        if gaps.is_empty() {
+            continue;
+        }
         let t = gaps.iter().map(|&(y, _)| y).min().unwrap();
         let b = gaps.iter().map(|&(y, _)| y).max().unwrap();
         let x0 = gaps.iter().map(|&(_, x)| x).min().unwrap();
         let x1 = gaps.iter().map(|&(_, x)| x).max().unwrap() + 1;
+        let (x0, x1, t, b) = if is_col {
+            let (t, b) = frame.map_or((t, b), |(_, _, ft, fb)| (ft, fb));
+            (x0.saturating_sub(1), x1 + 1, t, b)
+        } else {
+            let (x0, x1) = frame.map_or((x0, x1), |(fo, fc, _, _)| (fo, fc + 1));
+            (x0, x1, t, b)
+        };
         for row in bg.iter_mut().take(b + 1).skip(t) {
             for x in x0..x1 {
                 if x < row.len() {
