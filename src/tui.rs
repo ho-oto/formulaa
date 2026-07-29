@@ -409,9 +409,12 @@ fn marker_boxes(
     }
     if !lane_boxes.is_empty() {
         let (x0, x1, t, b) = bbox(&lane_boxes);
-        // Columns: top-to-bottom edge of the matrix region.
+        // Columns: top-to-bottom edge of the matrix region, and one
+        // cell of slot padding sideways — a fused matrix has no extra
+        // rows above its cells, so the extra width is what keeps the
+        // column band tellable from a full-column cell selection.
         let (t, b) = frame.map_or((t, b), |(_, _, ft, fb)| (ft, fb));
-        fill(x0, x1, t, b);
+        fill(x0.saturating_sub(1), x1 + 1, t, b);
     }
     if !row_lane_boxes.is_empty() {
         let (x0, x1, t, b) = bbox(&row_lane_boxes);
@@ -834,6 +837,35 @@ mod tests {
             hi - lo + 1,
             "no holes in the gap bar: {:?}",
             green_rows
+        );
+        // The column band is strictly wider than the same column's
+        // cell selection: it claims the slot padding, which is what
+        // keeps "the column itself" visible as such in a fused matrix.
+        let width_at = |bg: &Vec<Vec<Option<Color>>>, y: usize| {
+            bg[y]
+                .iter()
+                .filter(|c| **c == Some(theme::SELECTION_BG))
+                .count()
+        };
+        ed.input(Key::Right, false, false); // gap 0 -> column 0
+        let bg = bg_of(&ed);
+        let lane_row = bg
+            .iter()
+            .position(|row| row.contains(&Some(theme::SELECTION_BG)))
+            .unwrap();
+        let lane_w = width_at(&bg, lane_row);
+        ed.input(Key::Up, false, false); // demote: full-column cells
+        let bg = bg_of(&ed);
+        let cells_row = bg
+            .iter()
+            .position(|row| row.contains(&Some(theme::SELECTION_BG)))
+            .unwrap();
+        let cells_w = width_at(&bg, cells_row);
+        assert!(
+            lane_w > cells_w,
+            "lane band wider than cell band: {} vs {}",
+            lane_w,
+            cells_w
         );
     }
 
