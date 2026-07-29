@@ -53,20 +53,6 @@ pub struct AccentInfo {
     pub drawn: DrawnForm,
 }
 
-/// One row, positionally: (name, latex, wide_latex, under, drawn).
-/// A macro rather than a const fn so the `&` still promotes to 'static.
-macro_rules! mark {
-    ($name:literal, $latex:literal, $wide:literal, $under:literal, $drawn:expr) => {
-        &AccentInfo {
-            name: $name,
-            latex: $latex,
-            wide_latex: $wide,
-            under: $under,
-            drawn: $drawn,
-        }
-    };
-}
-
 /// The input direction, same shape as the symbol `NAMES` table:
 /// spelling -> variant, canonical first, aliases or-ed on (the LaTeX
 /// spelling where it differs from the editor's name).
@@ -98,23 +84,82 @@ impl Accent {
     ];
 
     /// The one row that says everything about this mark.
-    #[rustfmt::skip]
     pub const fn info(self) -> &'static AccentInfo {
         match self {
             // Drawn glyphs: ˰ U+02F0 LOW UP ARROWHEAD, ˯ U+02EF LOW
             // DOWN ARROWHEAD, ˳ U+02F3 LOW RING, ․ U+2024 LEADER (not
             // the '.' atom), ￫ halfwidth U+FFEB (not the → atom),
             // ˷ U+02F7 LOW TILDE, ˜ U+02DC SMALL TILDE.
-            Accent::Hat       => mark!("hat", "hat", "widehat", false, DrawnForm::Center('˰')),
-            Accent::Tilde     => mark!("tilde", "tilde", "widetilde", false, DrawnForm::Fill('˷')),
-            Accent::Bar       => mark!("bar", "bar", "overline", false, DrawnForm::Fill('_')),
-            Accent::Vec       => mark!("vec", "vec", "overrightarrow", false, DrawnForm::Center('￫')),
-            Accent::Dot       => mark!("dot", "dot", "dot", false, DrawnForm::Center('․')),
-            Accent::Ddot      => mark!("ddot", "ddot", "ddot", false, DrawnForm::Dots),
-            Accent::Check     => mark!("check", "check", "widecheck", false, DrawnForm::Center('˯')),
-            Accent::Ring      => mark!("ring", "mathring", "mathring", false, DrawnForm::Center('˳')),
-            Accent::Underline => mark!("underline", "underline", "underline", true, DrawnForm::Fill('¯')),
-            Accent::Utilde    => mark!("utilde", "utilde", "utilde", true, DrawnForm::Fill('˜')),
+            Accent::Hat => &AccentInfo {
+                name: "hat",
+                latex: "hat",
+                wide_latex: "widehat",
+                under: false,
+                drawn: DrawnForm::Center('˰'),
+            },
+            Accent::Tilde => &AccentInfo {
+                name: "tilde",
+                latex: "tilde",
+                wide_latex: "widetilde",
+                under: false,
+                drawn: DrawnForm::Fill('˷'),
+            },
+            Accent::Bar => &AccentInfo {
+                name: "bar",
+                latex: "bar",
+                wide_latex: "overline",
+                under: false,
+                drawn: DrawnForm::Fill('_'),
+            },
+            Accent::Vec => &AccentInfo {
+                name: "vec",
+                latex: "vec",
+                wide_latex: "overrightarrow",
+                under: false,
+                drawn: DrawnForm::Center('￫'),
+            },
+            Accent::Dot => &AccentInfo {
+                name: "dot",
+                latex: "dot",
+                wide_latex: "dot",
+                under: false,
+                drawn: DrawnForm::Center('․'),
+            },
+            Accent::Ddot => &AccentInfo {
+                name: "ddot",
+                latex: "ddot",
+                wide_latex: "ddot",
+                under: false,
+                drawn: DrawnForm::Dots,
+            },
+            Accent::Check => &AccentInfo {
+                name: "check",
+                latex: "check",
+                wide_latex: "widecheck",
+                under: false,
+                drawn: DrawnForm::Center('˯'),
+            },
+            Accent::Ring => &AccentInfo {
+                name: "ring",
+                latex: "mathring",
+                wide_latex: "mathring",
+                under: false,
+                drawn: DrawnForm::Center('˳'),
+            },
+            Accent::Underline => &AccentInfo {
+                name: "underline",
+                latex: "underline",
+                wide_latex: "underline",
+                under: true,
+                drawn: DrawnForm::Fill('¯'),
+            },
+            Accent::Utilde => &AccentInfo {
+                name: "utilde",
+                latex: "utilde",
+                wide_latex: "utilde",
+                under: true,
+                drawn: DrawnForm::Fill('˜'),
+            },
         }
     }
 

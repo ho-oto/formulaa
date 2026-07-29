@@ -151,6 +151,41 @@ fn roundtrip(name: &str, row: &Row) {
     if !expected.is_empty() {
         assert!(!row_to_latex(&expected).is_empty());
     }
+    // The export form (⬚ slot marks blanked when safe) reads back to
+    // the same tree — over the whole corpus and the random trees.
+    let exported = mascii::render::export_aa(&row);
+    let reparsed = parse(&exported).unwrap_or_else(|e| {
+        panic!(
+            "[{}] export parse failed: {}\n--- AA ---\n{}",
+            name, e, exported
+        )
+    });
+    assert_eq!(
+        reparsed, expected,
+        "[{}] export mismatch\n--- AA ---\n{}",
+        name, exported
+    );
+}
+
+/// A formula with holes exports the holes as holes: the ⬚ marks blank
+/// out when other ink carries the structure, and stay put when they
+/// are the only thing making the picture readable.
+#[test]
+fn export_blanks_slot_marks_when_safe() {
+    use mascii::render::export_aa;
+    // The fraction bar carries the structure: ⬚ blanks away.
+    let row = vec![frac(vec![], s("2"))];
+    let ex = export_aa(&row);
+    assert!(!ex.contains('⬚'), "{}", ex);
+    assert_eq!(parse(&ex).unwrap(), normalize(&row));
+    // A complete formula never contains ⬚ in the first place.
+    assert!(!export_aa(&s("x+1")).contains('⬚'));
+    // A bare tall script's base ⬚ is the only ink on the baseline —
+    // blanking it would leave nothing to read, so it stays.
+    let row = vec![sup(n(frac(s("1"), s("2"))))];
+    let ex = export_aa(&row);
+    assert!(ex.contains('⬚'), "{}", ex);
+    assert_eq!(parse(&ex).unwrap(), normalize(&row));
 }
 
 /// Hand-written input stacking non-accent content directly above/below a

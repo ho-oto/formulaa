@@ -669,6 +669,35 @@ pub fn render_row(
 /// Top-level entry: a root row may contain `Node::Break`s splitting the
 /// formula into display lines. Lines are stacked left-aligned with one
 /// blank row between them; every continuation line carries the `┈ `
+/// The canonical AA of `row`, with the ⬚ empty-slot cells blanked —
+/// the export form (clipboard, document write-back). The slot marks
+/// are editor chrome, not content: a formula with holes exports the
+/// holes as holes. Blanking keeps every cell in place, so the geometry
+/// is untouched, and the blanked text is used only when it still
+/// parses back to the same tree; when a ⬚ is a picture's only ink on
+/// its baseline (a bare tall script, say), the canonical text is
+/// returned unchanged rather than exporting something unreadable.
+pub fn export_aa(row: &Row) -> String {
+    let row = crate::ast::normalize(row);
+    let canonical = render_root(&row, None, &RenderCtx::canonical()).to_text();
+    if !canonical.contains(PLACEHOLDER) {
+        return canonical;
+    }
+    let blanked: String = canonical
+        .lines()
+        .map(|l| l.replace(PLACEHOLDER, " "))
+        .map(|l| l.trim_end().to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    match (
+        crate::parse::parse(&blanked),
+        crate::parse::parse(&canonical),
+    ) {
+        (Ok(b), Ok(c)) if b == c => blanked,
+        _ => canonical,
+    }
+}
+
 /// marker at its baseline (col 0) — a lone ┈ has no other reading, and
 /// it hands the parser the line's baseline for free. Rows without
 /// Breaks render exactly as render_row.

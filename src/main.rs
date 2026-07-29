@@ -13,7 +13,7 @@ mod tui;
 use mascii::editor::Editor;
 use mascii::input::{Effect, Key};
 use mascii::render::{RenderCtx, render_root};
-use mascii::{ast, latex, parse};
+use mascii::{latex, parse};
 
 const USAGE: &str = "\
 usage: mascii                 interactive TUI editor
@@ -133,8 +133,7 @@ fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers) -> bool {
         Effect::Quit => return true,
         // Yank: canonical AA to the system clipboard.
         Effect::CopyAa => {
-            let row = ast::normalize(&ed.root);
-            let aa = render_root(&row, None, &RenderCtx::canonical()).to_text();
+            let aa = mascii::render::export_aa(&ed.root);
             ed.message = match copy_to_clipboard(&aa) {
                 Ok(()) => "copied AA to clipboard".into(),
                 Err(e) => format!("copy failed: {}", e),

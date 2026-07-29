@@ -521,62 +521,6 @@ pub fn named_char(name: &str) -> Option<char> {
     NAMES.get(name).copied()
 }
 
-/// Structure-reserved glyphs: never valid as atoms (see docs/aa-spec.md §2).
-/// `symbol_by_name` filters these so no symbol table entry can inject one.
-/// Accent marks, the √ overline `_`, and the inline super/subscript
-/// codepoints are reserved too — they read back as structure, not atoms.
-#[rustfmt::skip]
-pub fn is_reserved_glyph(c: char) -> bool {
-    matches!(
-        c,
-        // Rules and bands
-        '─'                     // U+2500 BOX DRAWINGS LIGHT HORIZONTAL: fraction bar / arrow body
-        | '┈'                   // U+2508 LIGHT QUADRUPLE DASH HORIZONTAL: op band / accent band / break row
-        | '═'                   // U+2550 BOX DRAWINGS DOUBLE HORIZONTAL: double-arrow body
-        // Radicals
-        | '√' | '∛' | '∜'       // U+221A/221B/221C SQUARE/CUBE/FOURTH ROOT
-        | '│'                   // U+2502 LIGHT VERTICAL: radical stem / delimiter middle / fused round column
-        | '_'                   // U+005F LOW LINE: sqrt overline / drawn over-bar
-        // Parentheses (U+239B-23A0 pieces)
-        | '(' | ')' | '⎛' | '⎜' | '⎝' | '⎞' | '⎟' | '⎠'
-        // Square brackets (U+23A1-23A6 pieces); ceil/floor reuse them
-        | '[' | ']' | '⎡' | '⎢' | '⎣' | '⎤' | '⎥' | '⎦'
-        | '⌈' | '⌉' | '⌊' | '⌋' // U+2308/2309/230A/230B CEILING / FLOOR
-        // Curly braces (U+23A7-23AD pieces; min height 3 when tall)
-        | '{' | '}' | '⎧' | '⎨' | '⎩' | '⎪' | '⎫' | '⎬' | '⎭'
-        // Angles: U+27E8/27E9 one-line; arms U+2571/2572 diagonals
-        | '⟨' | '⟩' | '╱' | '╲'
-        // (the vertical bar \abs reuses the bracket extensions ⎢ ⎥;
-        // ⎸ ⎹ U+23B8/23B9 are no longer part of the format)
-        | '‖'                   // U+2016 DOUBLE VERTICAL LINE: norm (stacked when tall)
-        | '┆'                   // U+2506 LIGHT TRIPLE DASH VERTICAL: null delimiter left
-        | '┊'                   // U+250A LIGHT QUADRUPLE DASH VERTICAL: null delimiter right
-        // Lattice markers (U+250C..2518 crossings) + fused junctions
-        // (├ ┤ double as the fused-grid row junctions dug into
-        // delimiter columns)
-        | '┌' | '┬' | '┐' | '├' | '┼' | '┤' | '└' | '┴' | '┘'
-        // Arcs U+256D/256E/2570/256F: brace range rows + fused round columns
-        | '╭' | '╮' | '╰' | '╯'
-        // Format spellings
-        | '⬚'                   // U+2B1A DOTTED SQUARE: empty slot / script base
-        | '▌'                   // U+258C LEFT HALF BLOCK: cursor (view layer only)
-        | '"'                   // U+0022: \text quotes
-        | '\''                  // U+0027: \mathrm quotes (the prime atom is ′ U+2032)
-        // Drawn accent glyphs (the only accent chars that appear in
-        // AA; the AST mark chars ^ ˇ ˜ ˙ ¨ ˚ ⇀ ‗ ˷ are internal
-        // identifiers and NOT reserved)
-        | '¯'                   // U+00AF MACRON: drawn under bar
-        | '˜'                   // U+02DC SMALL TILDE: drawn under tilde
-        | '˷'                   // U+02F7 LOW TILDE: drawn over tilde
-        | '˰'                   // U+02F0 MODIFIER LETTER LOW UP ARROWHEAD: hat
-        | '˯'                   // U+02EF MODIFIER LETTER LOW DOWN ARROWHEAD: check
-        | '˳'                   // U+02F3 MODIFIER LETTER LOW RING: ring
-        | '․'                   // U+2024 ONE DOT LEADER: dot / ddot (․․)
-        | '￫' // U+FFEB HALFWIDTH RIGHTWARDS ARROW: vec
-    ) || crate::render::unsuperscript_char(c).is_some()
-        || crate::render::unsubscript_char(c).is_some()
-}
-
 /// Every character the format accepts as an atom. Derived from the
 /// tables themselves — a char is an atom exactly when some `\name`
 /// produces it (or it is plain ASCII, which the keyboard types
@@ -591,14 +535,18 @@ pub fn is_atom(c: char) -> bool {
     use std::sync::OnceLock;
     static ATOM_SET: OnceLock<std::collections::HashSet<char>> = OnceLock::new();
     if c.is_ascii() {
-        // ASCII the keyboard types directly, minus the reserved glyphs
-        // and the four that LaTeX would misread as syntax with no
-        // sensible atom meaning (`^` `~` `` ` `` `\` — the symbols are
-        // \sim, \backslash …). `# $ % &` stay: they are ordinary
-        // characters that the serializer escapes.
+        // ASCII the keyboard types directly, minus the glyphs the
+        // format reserves for drawing/quoting (( ) [ ] { } _ " ') and
+        // the four LaTeX would misread as syntax with no sensible atom
+        // meaning (`^` `~` `` ` `` `\` — the symbols are \sim,
+        // \backslash …). `# $ % &` stay: they are ordinary characters
+        // that the serializer escapes. The test pins this set against
+        // the full reserved-glyph table.
         return c.is_ascii_graphic()
-            && !is_reserved_glyph(c)
-            && !matches!(c, '^' | '~' | '`' | '\\');
+            && !matches!(
+                c,
+                '(' | ')' | '[' | ']' | '{' | '}' | '_' | '"' | '\'' | '^' | '~' | '`' | '\\'
+            );
     }
     ATOM_SET
         .get_or_init(|| {
@@ -613,7 +561,6 @@ pub fn is_atom(c: char) -> bool {
                             alphabets::alphabet_char(&format!("{}{}", a.prefixes[0], l))
                         })
                 }))
-                .filter(|&c| !is_reserved_glyph(c))
                 .collect()
         })
         .contains(&c)
@@ -622,6 +569,99 @@ pub fn is_atom(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::symbols::*;
+    /// Structure-reserved glyphs: never valid as atoms (see
+    /// docs/aa-spec.md §2). Accent marks, the √ overline `_`, and the
+    /// inline super/subscript codepoints are reserved too — they read
+    /// back as structure, not atoms. The tables are static, so this is
+    /// a test predicate rather than a runtime filter: the test below
+    /// proves no table can hand one out, and `is_atom` needs no check.
+    #[rustfmt::skip]
+    fn is_reserved_glyph(c: char) -> bool {
+        matches!(
+            c,
+            // Rules and bands
+            '─'                     // U+2500 BOX DRAWINGS LIGHT HORIZONTAL: fraction bar / arrow body
+            | '┈'                   // U+2508 LIGHT QUADRUPLE DASH HORIZONTAL: op band / accent band / break row
+            | '═'                   // U+2550 BOX DRAWINGS DOUBLE HORIZONTAL: double-arrow body
+            // Radicals
+            | '√' | '∛' | '∜'       // U+221A/221B/221C SQUARE/CUBE/FOURTH ROOT
+            | '│'                   // U+2502 LIGHT VERTICAL: radical stem / delimiter middle / fused round column
+            | '_'                   // U+005F LOW LINE: sqrt overline / drawn over-bar
+            // Parentheses (U+239B-23A0 pieces)
+            | '(' | ')' | '⎛' | '⎜' | '⎝' | '⎞' | '⎟' | '⎠'
+            // Square brackets (U+23A1-23A6 pieces); ceil/floor reuse them
+            | '[' | ']' | '⎡' | '⎢' | '⎣' | '⎤' | '⎥' | '⎦'
+            | '⌈' | '⌉' | '⌊' | '⌋' // U+2308/2309/230A/230B CEILING / FLOOR
+            // Curly braces (U+23A7-23AD pieces; min height 3 when tall)
+            | '{' | '}' | '⎧' | '⎨' | '⎩' | '⎪' | '⎫' | '⎬' | '⎭'
+            // Angles: U+27E8/27E9 one-line; arms U+2571/2572 diagonals
+            | '⟨' | '⟩' | '╱' | '╲'
+            // (the vertical bar \abs reuses the bracket extensions ⎢ ⎥;
+            // ⎸ ⎹ U+23B8/23B9 are no longer part of the format)
+            | '‖'                   // U+2016 DOUBLE VERTICAL LINE: norm (stacked when tall)
+            | '┆'                   // U+2506 LIGHT TRIPLE DASH VERTICAL: null delimiter left
+            | '┊'                   // U+250A LIGHT QUADRUPLE DASH VERTICAL: null delimiter right
+            // Lattice markers (U+250C..2518 crossings) + fused junctions
+            // (├ ┤ double as the fused-grid row junctions dug into
+            // delimiter columns)
+            | '┌' | '┬' | '┐' | '├' | '┼' | '┤' | '└' | '┴' | '┘'
+            // Arcs U+256D/256E/2570/256F: brace range rows + fused round columns
+            | '╭' | '╮' | '╰' | '╯'
+            // Format spellings
+            | '⬚'                   // U+2B1A DOTTED SQUARE: empty slot / script base
+            | '▌'                   // U+258C LEFT HALF BLOCK: cursor (view layer only)
+            | '"'                   // U+0022: \text quotes
+            | '\''                  // U+0027: \mathrm quotes (the prime atom is ′ U+2032)
+            // Drawn accent glyphs (the only accent chars that appear in
+            // AA; the AST mark chars ^ ˇ ˜ ˙ ¨ ˚ ⇀ ‗ ˷ are internal
+            // identifiers and NOT reserved)
+            | '¯'                   // U+00AF MACRON: drawn under bar
+            | '˜'                   // U+02DC SMALL TILDE: drawn under tilde
+            | '˷'                   // U+02F7 LOW TILDE: drawn over tilde
+            | '˰'                   // U+02F0 MODIFIER LETTER LOW UP ARROWHEAD: hat
+            | '˯'                   // U+02EF MODIFIER LETTER LOW DOWN ARROWHEAD: check
+            | '˳'                   // U+02F3 MODIFIER LETTER LOW RING: ring
+            | '․'                   // U+2024 ONE DOT LEADER: dot / ddot (․․)
+            | '￫' // U+FFEB HALFWIDTH RIGHTWARDS ARROW: vec
+        ) || crate::render::unsuperscript_char(c).is_some()
+            || crate::render::unsubscript_char(c).is_some()
+    }
+
+    /// Every character the tables hand out is an honest atom: no
+    /// symbol name, styled family or ASCII key can produce a reserved
+    /// glyph, and the `is_atom` ASCII gate matches the reserved table
+    /// exactly.
+    #[test]
+    fn reserved_glyphs_stay_out_of_the_tables() {
+        for (&name, &ch) in NAMES.entries() {
+            assert!(
+                !is_reserved_glyph(ch),
+                "\\{} hands out a reserved glyph",
+                name
+            );
+        }
+        for fam in alphabets::ALPHABETS {
+            for l in ('A'..='Z').chain('a'..='z').chain('0'..='9') {
+                if let Some(c) = alphabets::alphabet_char(&format!("{}{}", fam.prefixes[0], l)) {
+                    assert!(!is_reserved_glyph(c), "{:?}", c);
+                }
+            }
+        }
+        // The ASCII gate is the reserved table, spelled inline.
+        for c in (0u8..=127).map(char::from) {
+            let expect = c.is_ascii_graphic()
+                && !is_reserved_glyph(c)
+                && !matches!(c, '^' | '~' | '`' | '\\');
+            assert_eq!(is_atom(c), expect, "{:?}", c);
+        }
+        // …and no reserved glyph anywhere is an atom.
+        for c in (1..=0x2FFFFu32).filter_map(char::from_u32) {
+            if is_reserved_glyph(c) {
+                assert!(!is_atom(c), "{:?}", c);
+            }
+        }
+    }
+
     /// The two hand-written tables mirror each other: every atom's
     /// canonical `latex` spelling is claimed by exactly one char and
     /// types it back through `NAMES` itself (not the ext fallback) —

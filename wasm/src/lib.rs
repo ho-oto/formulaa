@@ -151,10 +151,11 @@ impl MasciiEditor {
         self.ed.click(x, y);
     }
 
-    /// Canonical AA (what should be written back into the document).
+    /// Export AA (what should be written back into the document):
+    /// canonical, with the ⬚ slot marks blanked where that reads back
+    /// identically.
     pub fn aa(&self) -> String {
-        let row = normalize(&self.ed.root);
-        render_root(&row, None, &RenderCtx::canonical()).to_text()
+        mascii::render::export_aa(&self.ed.root)
     }
 
     pub fn latex(&self) -> String {

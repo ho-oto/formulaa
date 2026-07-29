@@ -31,11 +31,11 @@ pub use funcs::*;
 
 /// Resolve an input spelling to its character: the input table
 /// (`NAMES`, canonical spellings and their aliases alike), then the
-/// styled families (\bbR).
+/// styled families (\bbR). No reserved-glyph filtering is needed —
+/// the tables are static and the atoms test proves they never hand
+/// out a structural glyph.
 pub fn symbol_by_name(name: &str) -> Option<char> {
-    named_char(name)
-        .or_else(|| alphabets::styled_char(name))
-        .filter(|&c| !is_reserved_glyph(c))
+    named_char(name).or_else(|| alphabets::styled_char(name))
 }
 
 /// Is this char a ∑-class operator (band-promotable)?

@@ -24,7 +24,8 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
    (`render(parse(aa)) == aa` は要求ではない — AA はソースコードで、
    受理は正準形より広い。fmt が整える)
 2. 新しい描画グリフを導入するときは docs/aa-spec.md の予約グリフ表を更新し、
-   `symbols/atoms.rs`(is_reserved_glyph / `NAMES`)に原子として同じ文字が存在しないことを確認。
+   `symbols/atoms.rs` のテスト `reserved_glyphs_stay_out_of_the_tables` の
+   予約表(`is_reserved_glyph`)に追加する(原子テーブルとの衝突はテストが検出)。
 3. `normalize`(ast.rs)は**冪等**でなければならない(合流後の再正規化)。
 4. 機能追加はまず `tests/roundtrip.rs` に実式を足してから実装する。
    キー操作の変更は `tests/ui.rs`(キースクリプト)に足す。キーの意味は
