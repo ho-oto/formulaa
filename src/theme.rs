@@ -42,10 +42,6 @@ pub const SELECTED_BG: Color = Color::Indexed(172);
 /// Grid lane-gap cursor: the ghost lane previewing an insertion
 /// (Enter inserts here).
 pub const GRID_INSERT_BG: Color = Color::Indexed(22);
-/// Grid lane selection (the column/row *itself*, deletable as a
-/// structure) — deliberately a different purple than SELECTION_BG so
-/// it never reads as a mere content selection.
-pub const LANE_BG: Color = Color::Indexed(97);
 /// The edited matrix's lattice frame while grid mode is active — the
 /// "you are in grid mode" signal (the ordinary "OK" green for now,
 /// pending the palette pass).

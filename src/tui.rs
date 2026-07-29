@@ -251,13 +251,24 @@ fn marker_boxes(
     // reads its extent from the end of the extents list.
     let mut cell_boxes: Vec<(usize, usize, usize, usize)> = Vec::new(); // (o, close, t, b)
     let mut lane_boxes: Vec<(usize, usize, usize, usize)> = Vec::new();
+    let mut row_lane_boxes: Vec<(usize, usize, usize, usize)> = Vec::new();
     let mut frame: Option<(usize, usize, usize, usize)> = None;
     for (y, mut row_marks) in by_row.clone() {
         row_marks.sort_unstable();
         let mut stack: Vec<(usize, char)> = Vec::new();
         for (x, c) in row_marks {
+            // A close mark pops its *matching* open — standalone marks
+            // (jump ranks, gap ghosts) must never satisfy a pair.
+            let pop_matching = |stack: &mut Vec<(usize, char)>,
+                                ok: &dyn Fn(char) -> bool|
+             -> Option<(usize, char)> {
+                let at = stack.iter().rposition(|&(_, c)| ok(c))?;
+                Some(stack.remove(at))
+            };
             if c == mascii::editor::FRAME_CLOSE || c == mascii::editor::FRAME_FUSED_CLOSE {
-                if let Some((o, _)) = stack.pop() {
+                if let Some((o, _)) = pop_matching(&mut stack, &|c| {
+                    c == mascii::editor::FRAME_OPEN || c == mascii::editor::FRAME_FUSED_OPEN
+                }) {
                     let (t, b) = match extents.last() {
                         Some(&(above, below, _)) => (
                             y.saturating_sub(above),
@@ -279,8 +290,16 @@ fn marker_boxes(
                 }
                 continue;
             }
-            if c == mascii::editor::LANE_CLOSE || c == mascii::editor::CELLS_CLOSE {
-                if let Some((o, _)) = stack.pop() {
+            if c == mascii::editor::LANE_CLOSE
+                || c == mascii::editor::ROWLANE_CLOSE
+                || c == mascii::editor::CELLS_CLOSE
+            {
+                let open_of = match c {
+                    mascii::editor::LANE_CLOSE => mascii::editor::LANE_OPEN,
+                    mascii::editor::ROWLANE_CLOSE => mascii::editor::ROWLANE_OPEN,
+                    _ => mascii::editor::CELLS_OPEN,
+                };
+                if let Some((o, _)) = pop_matching(&mut stack, &|k| k == open_of) {
                     let (t, b) = match extents.get(sel_seq) {
                         Some(&(above, below, _)) => (
                             y.saturating_sub(above),
@@ -292,16 +311,24 @@ fn marker_boxes(
                     // An empty cell's pair is zero-width: keep one
                     // cell so the selection stays visible.
                     let entry = (o, x.max(o + 1), t, b);
-                    if c == mascii::editor::LANE_CLOSE {
+                    if c == mascii::editor::CELLS_CLOSE {
+                        cell_boxes.push(entry);
+                    } else if c == mascii::editor::LANE_CLOSE {
                         lane_boxes.push(entry);
                     } else {
-                        cell_boxes.push(entry);
+                        row_lane_boxes.push(entry);
                     }
                 }
                 continue;
             }
             if c == SEL_CLOSE || c == BLK_CLOSE {
-                if let Some((o, oc)) = stack.pop() {
+                if let Some((o, oc)) = pop_matching(&mut stack, &|k| {
+                    if c == SEL_CLOSE {
+                        k == SEL_OPEN
+                    } else {
+                        is_label(k)
+                    }
+                }) {
                     let (color, depth, ext) = if oc == SEL_OPEN {
                         let e = extents.get(sel_seq);
                         sel_seq += 1;
@@ -327,7 +354,14 @@ fn marker_boxes(
                     boxes.push((y, o, x, color, t, b));
                     order.push(depth);
                 }
-            } else {
+            } else if c == SEL_OPEN
+                || c == mascii::editor::LANE_OPEN
+                || c == mascii::editor::ROWLANE_OPEN
+                || c == mascii::editor::CELLS_OPEN
+                || c == mascii::editor::FRAME_OPEN
+                || c == mascii::editor::FRAME_FUSED_OPEN
+                || is_label(c)
+            {
                 stack.push((x, c));
             }
         }
@@ -347,26 +381,43 @@ fn marker_boxes(
             }
         }
     }
-    // The grid selections: one solid rectangle over every marked cell,
-    // per kind (cell rectangle = contents, lane = the structure).
-    for (group, color) in [
-        (&cell_boxes, theme::SELECTION_BG),
-        (&lane_boxes, theme::LANE_BG),
-    ] {
-        if group.is_empty() {
-            continue;
-        }
-        let x0 = group.iter().map(|&(o, ..)| o).min().unwrap();
-        let x1 = group.iter().map(|&(_, c, ..)| c).max().unwrap();
-        let t = group.iter().map(|&(.., t, _)| t).min().unwrap();
-        let b = group.iter().map(|&(.., b)| b).max().unwrap();
+    // The grid selections paint one solid rectangle in the selection
+    // color. A cell rectangle hugs the union of its slots; a lane
+    // stretches along its axis to the matrix region's far edges (that
+    // reach is what tells "the column itself" from "every cell of the
+    // column").
+    let mut fill = |x0: usize, x1: usize, t: usize, b: usize| {
         for row in bg.iter_mut().take(b + 1).skip(t) {
             for x in x0..x1 {
                 if x < row.len() {
-                    row[x] = Some(color);
+                    row[x] = Some(theme::SELECTION_BG);
                 }
             }
         }
+    };
+    let bbox = |g: &Vec<(usize, usize, usize, usize)>| {
+        (
+            g.iter().map(|&(o, ..)| o).min().unwrap(),
+            g.iter().map(|&(_, c, ..)| c).max().unwrap(),
+            g.iter().map(|&(.., t, _)| t).min().unwrap(),
+            g.iter().map(|&(.., b)| b).max().unwrap(),
+        )
+    };
+    if !cell_boxes.is_empty() {
+        let (x0, x1, t, b) = bbox(&cell_boxes);
+        fill(x0, x1, t, b);
+    }
+    if !lane_boxes.is_empty() {
+        let (x0, x1, t, b) = bbox(&lane_boxes);
+        // Columns: top-to-bottom edge of the matrix region.
+        let (t, b) = frame.map_or((t, b), |(_, _, ft, fb)| (ft, fb));
+        fill(x0, x1, t, b);
+    }
+    if !row_lane_boxes.is_empty() {
+        let (x0, x1, t, b) = bbox(&row_lane_boxes);
+        // Rows: left-to-right edge of the matrix region.
+        let (x0, x1) = frame.map_or((x0, x1), |(fo, fc, _, _)| (fo, fc + 1));
+        fill(x0, x1, t, b);
     }
     // Labels overlay the glyph at their position. Jump markers carry
     // their rank: within the label alphabet they show the label letter,
@@ -734,22 +785,23 @@ mod tests {
             .filter(|c| **c == Some(theme::GRID_INSERT_BG))
             .count();
         assert!(green > 0, "gap cursor paints the ghost lane");
-        // Back on a column: the lane paints in its OWN color — "the
-        // column itself" must never look like a cell-content selection.
+        // Back on a column: the lane band stretches to the matrix
+        // region's top and bottom edges — the reach (not a second
+        // color) is what tells "the column itself" apart from a
+        // cell selection.
         ed.input(Key::Right, false, false);
         let bg = bg_of(&ed);
-        let lane = bg
+        let sel_rows: Vec<usize> = bg
             .iter()
-            .flatten()
-            .filter(|c| **c == Some(theme::LANE_BG))
-            .count();
-        let cellsel = bg
-            .iter()
-            .flatten()
-            .filter(|c| **c == Some(theme::SELECTION_BG))
-            .count();
-        assert!(lane > 0, "lane cursor paints its column in LANE_BG");
-        assert_eq!(cellsel, 0, "no cell-selection color while on a lane");
+            .enumerate()
+            .filter(|(_, row)| row.contains(&Some(theme::SELECTION_BG)))
+            .map(|(y, _)| y)
+            .collect();
+        assert!(
+            sel_rows.len() >= 3,
+            "column lane spans every display row: {:?}",
+            sel_rows
+        );
         // The frame rect is reported while grid mode is on (the draw
         // path recolors the lattice glyphs inside it).
         let (root, cursor) = ed.decorated();
@@ -783,6 +835,34 @@ mod tests {
             "no holes in the gap bar: {:?}",
             green_rows
         );
+    }
+
+    /// The frame survives a gap cursor on the matrix's baseline row:
+    /// the gap's ghost marks share that row with the frame pair, and
+    /// pairing must not let a ghost mark satisfy the frame close.
+    #[test]
+    fn frame_survives_a_middle_row_gap() {
+        let mut ed = Editor::new();
+        for c in r"\matrix a".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        ed.input(Key::Char('o'), false, true);
+        ed.input(Key::Char('r'), false, false);
+        ed.input(Key::Down, false, false); // the gap between the rows
+        let (root, cursor) = ed.decorated();
+        let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+        let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
+        let (_, _, _, frame) = marker_boxes(
+            &block.lines,
+            &ed.marker_extents(),
+            &block.marks,
+            block.caret,
+            None,
+            None,
+        );
+        let (o, close, t, b) = frame.expect("frame rect survives the gap row");
+        assert!(close - o >= 6, "full-width frame: {:?}", (o, close));
+        assert!(b - t >= 2, "full-height frame: {:?}", (t, b));
     }
 
     /// A fused matrix (pmatrix/bmatrix) recolors BOTH delimiter

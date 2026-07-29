@@ -114,6 +114,11 @@ pub const FRAME_OPEN: char = '\u{E0F9}';
 pub const FRAME_CLOSE: char = '\u{E0FA}';
 pub const FRAME_FUSED_OPEN: char = '\u{E0FB}';
 pub const FRAME_FUSED_CLOSE: char = '\u{E0FC}';
+/// Row-lane selection markers (LANE_* marks columns): the display
+/// stretches a lane band to the matrix region's far edges along its
+/// axis, so it needs to know which axis that is.
+pub const ROWLANE_OPEN: char = '\u{E0FD}';
+pub const ROWLANE_CLOSE: char = '\u{E0FE}';
 /// Jump markers encode their rank as JUMP_RANK_BASE + rank (rank 0 =
 /// label 'a'; ranks beyond the label alphabet display as unlabeled
 /// highlights, reachable via arrow-key selection).

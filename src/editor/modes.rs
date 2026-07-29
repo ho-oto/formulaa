@@ -880,10 +880,15 @@ impl Editor {
                                     (lo..=hi).contains(&r)
                                 };
                                 if sel {
+                                    let (op, cl) = if cmode {
+                                        (LANE_OPEN, LANE_CLOSE)
+                                    } else {
+                                        (ROWLANE_OPEN, ROWLANE_CLOSE)
+                                    };
                                     let cell = &mut cells[r * cols + j];
                                     let e = cell.len();
-                                    cell.insert(e, Node::Sym(LANE_CLOSE));
-                                    cell.insert(0, Node::Sym(LANE_OPEN));
+                                    cell.insert(e, Node::Sym(cl));
+                                    cell.insert(0, Node::Sym(op));
                                 }
                             }
                         }
