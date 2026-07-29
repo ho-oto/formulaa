@@ -107,7 +107,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
     let (root, cursor) = ed.decorated();
     let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
     let block = render_root(&root, cursor_ref, &ctx);
-    let (lines, mut bg, mut cursor_cell) = marker_boxes(
+    let (lines, mut bg, mut cursor_cell, frame) = marker_boxes(
         &block.lines,
         &ed.marker_extents(),
         &block.marks,
@@ -192,6 +192,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
             ccol,
             ed.free.is_some(),
             view.scroll_x,
+            frame,
         ));
         text.push(Line::from(spans));
     }
@@ -218,6 +219,7 @@ fn marker_boxes(
     Vec<Vec<char>>,
     Vec<Vec<Option<Color>>>,
     Option<(usize, usize)>,
+    Option<(usize, usize, usize, usize)>,
 ) {
     // Cell coordinates throughout — cancel strikes (combining U+0338)
     // are a separate channel applied at span emission, so a struck cell
@@ -242,10 +244,52 @@ fn marker_boxes(
         by_row.entry(y).or_default().push((x, c));
     }
     let mut sel_seq = 0usize;
+    // Grid selection pairs: filled as one union rectangle (lattice
+    // gaps included), not per-cell patches. Cell rectangles (contents)
+    // and lanes (the column/row itself) collect separately — they
+    // paint in different colors. The frame pair (whole edited array)
+    // reads its extent from the end of the extents list.
+    let mut cell_boxes: Vec<(usize, usize, usize, usize)> = Vec::new(); // (o, close, t, b)
+    let mut lane_boxes: Vec<(usize, usize, usize, usize)> = Vec::new();
+    let mut frame: Option<(usize, usize, usize, usize)> = None;
     for (y, mut row_marks) in by_row.clone() {
         row_marks.sort_unstable();
         let mut stack: Vec<(usize, char)> = Vec::new();
         for (x, c) in row_marks {
+            if c == mascii::editor::FRAME_CLOSE {
+                if let Some((o, _)) = stack.pop() {
+                    let (t, b) = match extents.last() {
+                        Some(&(above, below, _)) => (
+                            y.saturating_sub(above),
+                            (y + below).min(grid.len().saturating_sub(1)),
+                        ),
+                        None => (y, y),
+                    };
+                    frame = Some((o, x, t, b));
+                }
+                continue;
+            }
+            if c == mascii::editor::LANE_CLOSE || c == mascii::editor::CELLS_CLOSE {
+                if let Some((o, _)) = stack.pop() {
+                    let (t, b) = match extents.get(sel_seq) {
+                        Some(&(above, below, _)) => (
+                            y.saturating_sub(above),
+                            (y + below).min(grid.len().saturating_sub(1)),
+                        ),
+                        None => (y, y),
+                    };
+                    sel_seq += 1;
+                    // An empty cell's pair is zero-width: keep one
+                    // cell so the selection stays visible.
+                    let entry = (o, x.max(o + 1), t, b);
+                    if c == mascii::editor::LANE_CLOSE {
+                        lane_boxes.push(entry);
+                    } else {
+                        cell_boxes.push(entry);
+                    }
+                }
+                continue;
+            }
             if c == SEL_CLOSE || c == BLK_CLOSE {
                 if let Some((o, oc)) = stack.pop() {
                     let (color, depth, ext) = if oc == SEL_OPEN {
@@ -287,6 +331,27 @@ fn marker_boxes(
         let (_, o, close, color, t, b) = boxes[i];
         for row in bg.iter_mut().take(b + 1).skip(t) {
             for x in o..close {
+                if x < row.len() {
+                    row[x] = Some(color);
+                }
+            }
+        }
+    }
+    // The grid selections: one solid rectangle over every marked cell,
+    // per kind (cell rectangle = contents, lane = the structure).
+    for (group, color) in [
+        (&cell_boxes, theme::SELECTION_BG),
+        (&lane_boxes, theme::LANE_BG),
+    ] {
+        if group.is_empty() {
+            continue;
+        }
+        let x0 = group.iter().map(|&(o, ..)| o).min().unwrap();
+        let x1 = group.iter().map(|&(_, c, ..)| c).max().unwrap();
+        let t = group.iter().map(|&(.., t, _)| t).min().unwrap();
+        let b = group.iter().map(|&(.., b)| b).max().unwrap();
+        for row in bg.iter_mut().take(b + 1).skip(t) {
+            for x in x0..x1 {
                 if x < row.len() {
                     row[x] = Some(color);
                 }
@@ -346,7 +411,7 @@ fn marker_boxes(
         }
         (y, x)
     });
-    (grid, bg, cursor_cell)
+    (grid, bg, cursor_cell, frame)
 }
 
 /// Draw the open minibuffer as an overlay at the caret cell: the typed
@@ -390,6 +455,12 @@ fn overlay_minibuffer(
 /// backgrounds from `marker_boxes` are applied to plain glyphs. A
 /// struck cell gets its combining U+0338 appended *inside* its span,
 /// so the ligature is never split across style boundaries.
+/// Lattice / delimiter glyphs a grid-mode frame recolors.
+fn is_frame_glyph(c: char) -> bool {
+    "┌┬┐├┼┤└┴┘╭╮╰╯│⎡⎢⎣⎤⎥⎦⎛⎜⎝⎞⎟⎠⎧⎪⎨⎩⎫⎬⎭‖┆┊".contains(c)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn decorate_line(
     line: &[char],
     y: usize,
@@ -398,6 +469,7 @@ fn decorate_line(
     cursor: Option<usize>,
     free_caret: bool,
     scroll_x: usize,
+    frame: Option<(usize, usize, usize, usize)>,
 ) -> Vec<Span<'static>> {
     // The ordinary caret is terminal-style reverse video; the free
     // cursor is a solid colored block instead (reverse video would swap
@@ -466,6 +538,18 @@ fn decorate_line(
                 None => label_style,
             };
             spans.push(Span::styled(label.to_string(), style));
+        } else if frame.is_some_and(|(o, close, t, b)| {
+            // The edited grid's lattice frame recolors while grid mode
+            // is on (one cell of slack sideways so a fused matrix's
+            // delimiter columns count as its frame).
+            (t..=b).contains(&y) && (o.saturating_sub(1)..=close).contains(&i) && is_frame_glyph(c)
+        }) {
+            flush(&mut buf, buf_bg, &mut spans);
+            let mut style = Style::default().fg(theme::GRID_FRAME_FG);
+            if let Some(color) = cell_bg {
+                style = style.bg(color);
+            }
+            spans.push(Span::styled(cell, style));
         } else {
             if cell_bg != buf_bg {
                 flush(&mut buf, buf_bg, &mut spans);
@@ -536,7 +620,7 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let (lines, bg, _) = marker_boxes(
+        let (lines, bg, _, _) = marker_boxes(
             &block.lines,
             &ed.marker_extents(),
             &block.marks,
@@ -573,7 +657,7 @@ mod tests {
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let ctx = RenderCtx { italic: true };
         let block = render_root(&root, cursor_ref, &ctx);
-        let (lines, _, _) = marker_boxes(
+        let (lines, _, _, _) = marker_boxes(
             &block.lines,
             &ed.marker_extents(),
             &block.marks,
@@ -593,7 +677,7 @@ mod tests {
             let (root, cursor) = ed.decorated();
             let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
             let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-            let (_, bg, _) = marker_boxes(
+            let (_, bg, _, _) = marker_boxes(
                 &block.lines,
                 &ed.marker_extents(),
                 &block.marks,
@@ -626,15 +710,36 @@ mod tests {
             .filter(|c| **c == Some(theme::GRID_INSERT_BG))
             .count();
         assert!(green > 0, "gap cursor paints the ghost lane");
-        // Back on a column (purple), the selection paint returns.
+        // Back on a column: the lane paints in its OWN color — "the
+        // column itself" must never look like a cell-content selection.
         ed.input(Key::Right, false, false);
         let bg = bg_of(&ed);
-        let painted = bg
+        let lane = bg
+            .iter()
+            .flatten()
+            .filter(|c| **c == Some(theme::LANE_BG))
+            .count();
+        let cellsel = bg
             .iter()
             .flatten()
             .filter(|c| **c == Some(theme::SELECTION_BG))
             .count();
-        assert!(painted > 0, "lane cursor paints its column");
+        assert!(lane > 0, "lane cursor paints its column in LANE_BG");
+        assert_eq!(cellsel, 0, "no cell-selection color while on a lane");
+        // The frame rect is reported while grid mode is on (the draw
+        // path recolors the lattice glyphs inside it).
+        let (root, cursor) = ed.decorated();
+        let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+        let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
+        let (_, _, _, frame) = marker_boxes(
+            &block.lines,
+            &ed.marker_extents(),
+            &block.marks,
+            block.caret,
+            None,
+            None,
+        );
+        assert!(frame.is_some(), "grid mode reports its frame rect");
     }
 
     #[test]
@@ -649,7 +754,7 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let (mut lines, mut bg, mut cursor_cell) = marker_boxes(
+        let (mut lines, mut bg, mut cursor_cell, _) = marker_boxes(
             &block.lines,
             &ed.marker_extents(),
             &block.marks,
@@ -693,7 +798,7 @@ mod tests {
             let struck: std::collections::HashSet<(usize, usize)> =
                 block.cancel.iter().copied().collect();
             assert!(!struck.is_empty(), "cancel present");
-            let (lines, bg, cursor_cell) = marker_boxes(
+            let (lines, bg, cursor_cell, _) = marker_boxes(
                 &block.lines,
                 &ed.marker_extents(),
                 &block.marks,
@@ -702,7 +807,7 @@ mod tests {
                 None,
             );
             let (y, x) = cursor_cell.expect("caret visible");
-            let spans = decorate_line(&lines[y], y, &struck, &bg[y], Some(x), false, 0);
+            let spans = decorate_line(&lines[y], y, &struck, &bg[y], Some(x), false, 0, None);
             let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
             // Every struck glyph is still there, followed by its strike.
             for &(r, c) in &block.cancel {
@@ -740,7 +845,7 @@ mod tests {
     fn selection_box_paints_without_touching_the_text() {
         let lines: Vec<Vec<char>> = vec![" ab ".chars().collect()];
         let marks = [(0, 1, SEL_OPEN), (0, 3, SEL_CLOSE)];
-        let (out, bg, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None, None, None);
+        let (out, bg, _, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None, None, None);
         assert_eq!(out, lines, "text must be untouched");
         assert_eq!(
             bg[0],
@@ -764,9 +869,9 @@ mod tests {
             " 2 ".chars().collect(),
         ];
         let marks = [(1, 0, SEL_OPEN), (1, 3, SEL_CLOSE)];
-        let (_, bg, _) = marker_boxes(&lines, &[(1, 1, 0)], &marks, None, None, None);
+        let (_, bg, _, _) = marker_boxes(&lines, &[(1, 1, 0)], &marks, None, None, None);
         assert!(bg.iter().all(|row| row.iter().all(|c| c.is_some())));
-        let (_, bg, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None, None, None);
+        let (_, bg, _, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None, None, None);
         assert!(
             bg[2].iter().all(|c| c.is_none()),
             "extent must bound the box"
@@ -777,7 +882,7 @@ mod tests {
     fn labels_overlay_and_caret_pads() {
         let label = char::from_u32(JUMP_CHAR_BASE).unwrap();
         let lines: Vec<Vec<char>> = vec!["xy".chars().collect()];
-        let (out, _, cursor) =
+        let (out, _, cursor, _) =
             marker_boxes(&lines, &[], &[(0, 0, label)], Some((0, 2)), None, None);
         let chars: Vec<char> = out[0].clone();
         assert_eq!(chars[0], label, "label over the glyph");

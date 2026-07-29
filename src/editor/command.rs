@@ -178,11 +178,12 @@ impl Editor {
             Edit::Sym(c) => self.insert_sym(c),
             Edit::Accent(mark) => self.apply_accent(mark),
             Edit::Delim { left, right, mids } => self.insert_delim(left, right, mids),
-            Edit::Grid { delims, rows, cols } => match delims {
-                Some((l, r)) => self.insert_grid(l, r, rows, cols),
+            Edit::Grid { wrap, rows, cols } => match wrap {
+                GridWrap::Pair(l, r) => self.insert_grid(l, r, rows, cols),
                 // A bare grid is a self-delimiting lattice: an Array
                 // node, entered at its first cell like any template.
-                None => self.insert_and_enter(Node::Array {
+                GridWrap::Norm => self.insert_norm_grid(rows, cols),
+                GridWrap::Bare => self.insert_and_enter(Node::Array {
                     rows,
                     cols,
                     cells: vec![vec![]; rows * cols],
@@ -222,9 +223,10 @@ pub enum Edit {
         right: crate::symbols::Delim,
         mids: usize,
     },
-    /// A rows × cols grid, delimited (`\matrix34`) or bare (`\array`).
+    /// A rows × cols grid, wrapped (`\matrix34`, `\Vmatrix`) or
+    /// bare (`\array`).
     Grid {
-        delims: GridDelims,
+        wrap: GridWrap,
         rows: usize,
         cols: usize,
     },
@@ -298,8 +300,8 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
                     over: vec![],
                     under: vec![],
                 })
-            } else if let Some((delims, rows, cols)) = grid_command(cmd) {
-                Some(Edit::Grid { delims, rows, cols })
+            } else if let Some((wrap, rows, cols)) = grid_command(cmd) {
+                Some(Edit::Grid { wrap, rows, cols })
             } else if let Some((l, r, mids)) = lr_spec(cmd) {
                 delim(l, r, mids)
             } else if crate::symbols::func_takes_limits(cmd) {

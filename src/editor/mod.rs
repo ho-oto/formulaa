@@ -92,6 +92,21 @@ pub const SLOT_GHOST: char = '\u{E0F3}';
 /// Grid lane-gap cursor: marks the ghost lane previewing an insertion
 /// (painted as the green insert cursor).
 pub const GRID_GAP: char = '\u{E0F4}';
+/// Grid lane selection markers: like SEL_OPEN/SEL_CLOSE per cell, but
+/// the display fills the union rectangle of all pairs — a whole-lane
+/// band including the lattice gaps, not per-cell patches.
+pub const LANE_OPEN: char = '\u{E0F5}';
+pub const LANE_CLOSE: char = '\u{E0F6}';
+/// Cell-rectangle selection markers (contents, not structure): same
+/// union-fill display as the lane pairs, painted in the ordinary
+/// selection color so "every cell of the column" and "the column
+/// itself" stay tellable apart.
+pub const CELLS_OPEN: char = '\u{E0F7}';
+pub const CELLS_CLOSE: char = '\u{E0F8}';
+/// Grid-mode frame markers: wrap the edited Array node so the display
+/// can recolor its lattice frame (the mode signal).
+pub const FRAME_OPEN: char = '\u{E0F9}';
+pub const FRAME_CLOSE: char = '\u{E0FA}';
 /// Jump markers encode their rank as JUMP_RANK_BASE + rank (rank 0 =
 /// label 'a'; ranks beyond the label alphabet display as unlabeled
 /// highlights, reachable via arrow-key selection).
@@ -305,22 +320,29 @@ fn lr_spec(cmd: &str) -> Option<(Delim, Delim, usize)> {
     Some((left, right, mids.len()))
 }
 
-/// Delimiter pair of a grid command (None = bare lattice array).
-type GridDelims = Option<(Delim, Delim)>;
+/// How a grid command wraps its lattice: a delimiter pair, the ‖ ‖
+/// norm (\Vmatrix), or nothing (bare \array).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridWrap {
+    Bare,
+    Pair(Delim, Delim),
+    Norm,
+}
 
 /// Grid minibuffer commands with an optional RxC digit suffix
 /// (`matrix34` = 3 rows × 4 cols; bare name = 2×2). Returns the delimiter
 /// pair and the dimensions.
-fn grid_command(cmd: &str) -> Option<(GridDelims, usize, usize)> {
-    const GRIDS: &[(&str, GridDelims)] = &[
-        ("matrix", Some((Delim::Bracket, Delim::Bracket))),
-        ("bmatrix", Some((Delim::Bracket, Delim::Bracket))),
-        ("pmatrix", Some((Delim::Paren, Delim::Paren))),
-        ("Bmatrix", Some((Delim::Brace, Delim::Brace))),
-        ("vmatrix", Some((Delim::Bar, Delim::Bar))),
-        ("cases", Some((Delim::Brace, Delim::Null))),
-        ("rcases", Some((Delim::Null, Delim::Brace))),
-        ("array", None),
+fn grid_command(cmd: &str) -> Option<(GridWrap, usize, usize)> {
+    const GRIDS: &[(&str, GridWrap)] = &[
+        ("matrix", GridWrap::Pair(Delim::Bracket, Delim::Bracket)),
+        ("bmatrix", GridWrap::Pair(Delim::Bracket, Delim::Bracket)),
+        ("pmatrix", GridWrap::Pair(Delim::Paren, Delim::Paren)),
+        ("Bmatrix", GridWrap::Pair(Delim::Brace, Delim::Brace)),
+        ("vmatrix", GridWrap::Pair(Delim::Bar, Delim::Bar)),
+        ("Vmatrix", GridWrap::Norm),
+        ("cases", GridWrap::Pair(Delim::Brace, Delim::Null)),
+        ("rcases", GridWrap::Pair(Delim::Null, Delim::Brace)),
+        ("array", GridWrap::Bare),
     ];
     for &(name, delims) in GRIDS {
         let Some(rest) = cmd.strip_prefix(name) else {
@@ -832,6 +854,22 @@ impl Editor {
             mids: 0,
             segs: vec![vec![array]],
         };
+        let col = self.col;
+        self.cur_row_mut().insert(col, node);
+        self.path.push((col, Field::Seg(0)));
+        self.path.push((0, Field::Cell(0)));
+        self.col = 0;
+    }
+
+    /// Insert a rows×cols grid inside a ‖ ‖ norm (\Vmatrix) and put
+    /// the cursor into the first cell.
+    pub fn insert_norm_grid(&mut self, rows: usize, cols: usize) {
+        let array = Node::Array {
+            rows,
+            cols,
+            cells: vec![vec![]; rows * cols],
+        };
+        let node = Node::Norm { arg: vec![array] };
         let col = self.col;
         self.cur_row_mut().insert(col, node);
         self.path.push((col, Field::Seg(0)));

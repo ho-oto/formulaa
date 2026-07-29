@@ -451,6 +451,14 @@ fn grid_selection_promotes_and_clears() {
 }
 
 #[test]
+fn vmatrix_wraps_a_grid_in_a_norm() {
+    let mut ed = Editor::new();
+    ed.execute("Vmatrix");
+    type_script(&mut ed, "a Right b");
+    assert_eq!(latex(&ed), "\\begin{Vmatrix} a & b \\\\  &  \\end{Vmatrix}");
+}
+
+#[test]
 fn grid_cells_copy_paste() {
     // Copy a 2x1 block, paste at the far corner: overwrite semantics,
     // and the grid grows to fit the overhang.

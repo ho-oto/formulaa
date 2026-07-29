@@ -691,9 +691,18 @@ impl Editor {
                 }
                 _ => Vec::new(),
             };
-            sel.iter()
+            let mut v: Vec<(usize, usize, usize)> = sel
+                .iter()
                 .map(|&cell| extent(&cells[cell], None, 0))
-                .collect()
+                .collect();
+            // The frame box (whole-array extent) rides last; the
+            // display reads it from the end.
+            v.push(extent(
+                &row_at(&self.root, &self.path[..k])[i..i + 1],
+                None,
+                0,
+            ));
+            v
         } else if let Some((lo, hi)) = self.selection() {
             vec![extent(&self.cur_row()[lo..hi], None, 0)]
         } else {
@@ -800,6 +809,17 @@ impl Editor {
             let mut path = self.path.clone();
             let mut col = self.col;
             let parent_path = self.path[..k].to_vec();
+            // The frame pair around the Array node lets the display
+            // recolor its lattice — the "grid mode is on" signal.
+            {
+                let prow = row_at_mut(&mut root, &parent_path);
+                prow.insert(i + 1, Node::Sym(FRAME_CLOSE));
+                prow.insert(i, Node::Sym(FRAME_OPEN));
+            }
+            if path.len() > k {
+                path[k].0 += 1;
+            }
+            let i = i + 1;
             let Node::Array {
                 rows: nr,
                 cols: nc,
@@ -819,8 +839,8 @@ impl Editor {
                         for j in j0..=j1 {
                             let cell = &mut cells[r * cols + j];
                             let hi = cell.len();
-                            cell.insert(hi, Node::Sym(SEL_CLOSE));
-                            cell.insert(0, Node::Sym(SEL_OPEN));
+                            cell.insert(hi, Node::Sym(CELLS_CLOSE));
+                            cell.insert(0, Node::Sym(CELLS_OPEN));
                             if r * cols + j == c {
                                 // The cursor lives in this cell: the
                                 // open mark at 0 shifts it right once.
@@ -854,8 +874,8 @@ impl Editor {
                                 if sel {
                                     let cell = &mut cells[r * cols + j];
                                     let e = cell.len();
-                                    cell.insert(e, Node::Sym(SEL_CLOSE));
-                                    cell.insert(0, Node::Sym(SEL_OPEN));
+                                    cell.insert(e, Node::Sym(LANE_CLOSE));
+                                    cell.insert(0, Node::Sym(LANE_OPEN));
                                 }
                             }
                         }
