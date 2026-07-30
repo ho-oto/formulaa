@@ -240,7 +240,7 @@ impl Editor {
                     "usage: \\lr<left>[|s]<right> in visual order, e.g. \\lr(] \\lr{|} \\lr\\langle||\\rangle"
                         .into();
             }
-            None => self.message = format!("unknown command: \\{}", cmd),
+            None => self.error(format!("unknown command: \\{}", cmd)),
         }
     }
 

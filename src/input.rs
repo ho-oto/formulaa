@@ -103,7 +103,7 @@ impl Editor {
                     if let Some(targets) = self.jump.take() {
                         self.keep_ghosts(&targets);
                     }
-                    self.message.clear();
+                    self.clear_message();
                 }
             }
             Effect::None
@@ -285,7 +285,7 @@ impl Editor {
             if self.enclosing_array().is_none() {
                 self.grid = None;
             } else {
-                self.message.clear();
+                self.clear_message();
                 match gs {
                     crate::editor::GridSel::Cells { .. } => match key {
                         Key::Left if shift => self.grid_select_move(0, -1),
@@ -331,13 +331,12 @@ impl Editor {
                                 self.grid = Some(crate::editor::GridSel::Cells { anchor: None })
                             }
                             _ => {
-                                self.message = if cols {
+                                self.info(if cols {
                                     "columns: ←→ gap/column  Enter on gap = insert  ⌫ delete  ⇧←→ extend  ↑↓ back to cells  Esc exit"
                                         .into()
                                 } else {
                                     "rows: ↑↓ gap/row  Enter on gap = insert  ⌫ delete  ⇧↑↓ extend  ←→ back to cells  Esc exit"
-                                        .into()
-                                };
+                                });
                             }
                         }
                     }
@@ -346,7 +345,7 @@ impl Editor {
             }
         }
 
-        self.message.clear();
+        self.clear_message();
         match key {
             Key::Left if shift => self.select_move(false),
             Key::Right if shift => self.select_move(true),

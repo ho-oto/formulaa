@@ -186,6 +186,11 @@ impl MasciiEditor {
         self.ed.message.clone()
     }
 
+    /// True when the current message is an error (hosts paint it red).
+    pub fn message_is_error(&self) -> bool {
+        self.ed.message_error
+    }
+
     /// Current minibuffer content, or null when closed.
     pub fn minibuffer(&self) -> Option<String> {
         self.ed.minibuffer.clone()

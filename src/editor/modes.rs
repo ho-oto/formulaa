@@ -19,7 +19,7 @@ impl Editor {
             snap: start.0,
             snap_at: start.1,
         });
-        self.message.clear();
+        self.clear_message();
     }
 
     /// The cursor's own display cell (in the display frame).
@@ -132,7 +132,7 @@ impl Editor {
         if let Some(f) = self.free.take() {
             self.path = f.snap.0;
             self.col = f.snap.1;
-            self.message.clear();
+            self.clear_message();
         }
     }
 
@@ -141,7 +141,7 @@ impl Editor {
         self.jump = None;
         self.select_anchor = None;
         self.ghost.clear();
-        self.message.clear();
+        self.clear_message();
     }
 
     /// ^G in free mode: toggle the jump markers.
@@ -160,7 +160,7 @@ impl Editor {
             self.keep_ghosts(&t);
         }
         self.free_reanchor();
-        self.message.clear();
+        self.clear_message();
     }
 
     /// A jump label pressed while markers are up: move there and drop
@@ -190,7 +190,7 @@ impl Editor {
         self.path = p;
         self.col = c;
         self.free_reanchor();
-        self.message.clear();
+        self.clear_message();
     }
 
     /// Re-anchor the free cursor onto the cursor's current display cell.
@@ -346,11 +346,11 @@ impl Editor {
         let positions: Vec<&CursorPos> = cands.iter().map(|c| &c.pos).collect();
         let coords = self.position_coords(&positions);
         let Some(cur_i) = cands.iter().position(|c| c.is_cursor) else {
-            self.message = "no jump targets".into();
+            self.info("no jump targets");
             return;
         };
         let Some((cy, cx)) = coords[cur_i] else {
-            self.message = "no jump targets".into();
+            self.info("no jump targets");
             return;
         };
         let dist2 =
@@ -441,7 +441,7 @@ impl Editor {
             chosen.push(i);
         }
         if chosen.is_empty() {
-            self.message = "no jump targets".into();
+            self.info("no jump targets");
             return;
         }
         // Ranks = selection order; markers need document order.
@@ -452,7 +452,7 @@ impl Editor {
             .collect();
         picked.sort_by_key(|&(rank, _)| chosen[rank]);
         let _ = Reverse(0); // (kept for potential ordering tweaks)
-        self.message = "jump: label key / arrows + Enter (Esc cancels)".into();
+        self.info("jump: label key / arrows + Enter (Esc cancels)");
         self.jump = Some(picked);
         self.jump_selected = 0;
     }
@@ -488,7 +488,7 @@ impl Editor {
                 self.path = p.clone();
                 self.col = *c;
             }
-            self.message.clear();
+            self.clear_message();
         }
     }
 
@@ -534,7 +534,7 @@ impl Editor {
                 self.path = p.clone();
                 self.col = *c;
             }
-            self.message.clear();
+            self.clear_message();
         }
     }
 
@@ -557,17 +557,17 @@ impl Editor {
         }
         let targets = self.block_targets();
         if targets.is_empty() {
-            self.message = "no enclosing block (cursor is at the top level)".into();
+            self.info("no enclosing block (cursor is at the top level)");
             return;
         }
         self.block_sel = 0;
         self.block = Some(targets);
-        self.message = "block: ↑/→ wider  ↓/← narrower  Enter/label select  ^B/Esc cancel".into();
+        self.info("block: ↑/→ wider  ↓/← narrower  Enter/label select  ^B/Esc cancel");
     }
 
     pub fn block_cancel(&mut self) {
         self.block = None;
-        self.message.clear();
+        self.clear_message();
     }
 
     /// Move the highlighted ancestor outward (↑/→) or inward (↓/←).
@@ -592,7 +592,7 @@ impl Editor {
             self.select_path = p.clone();
             self.col = i + 1;
         }
-        self.message.clear();
+        self.clear_message();
     }
 
     /// Select the ancestor behind a label key directly.
@@ -924,7 +924,7 @@ impl Editor {
             self.grid = Some(GridSel::Cells { anchor: None });
             self.select_anchor = None;
         } else {
-            self.message = "^O works inside a matrix/array".into();
+            self.info("^O works inside a matrix/array");
         }
     }
 
@@ -1128,7 +1128,7 @@ impl Editor {
 
     pub fn undo(&mut self) {
         let Some((root, path, col)) = self.undo.pop() else {
-            self.message = "nothing to undo".into();
+            self.info("nothing to undo");
             return;
         };
         self.select_anchor = None;
@@ -1145,7 +1145,7 @@ impl Editor {
 
     pub fn redo(&mut self) {
         let Some((root, path, col)) = self.redo.pop() else {
-            self.message = "nothing to redo".into();
+            self.info("nothing to redo");
             return;
         };
         self.select_anchor = None;

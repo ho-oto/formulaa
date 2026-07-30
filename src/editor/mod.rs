@@ -45,6 +45,9 @@ pub struct Editor {
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
     pub message: String,
+    /// The status line's severity: errors paint red, everything else
+    /// in the ordinary message color. Set through `info`/`error`.
+    pub message_error: bool,
     pub italic: bool,
     /// EasyMotion-style jump: Some(targets) while waiting for a label
     /// key. Document-ordered (needed for marker insertion); each entry
@@ -395,6 +398,7 @@ impl Editor {
             undo: Vec::new(),
             redo: Vec::new(),
             message: String::new(),
+            message_error: false,
             italic: true,
             jump: None,
             jump_selected: 0,
@@ -406,6 +410,24 @@ impl Editor {
             select_path: Vec::new(),
             clip: Clip::Nodes(Vec::new()),
         }
+    }
+
+    /// Set an informational status message.
+    pub fn info(&mut self, m: impl Into<String>) {
+        self.message = m.into();
+        self.message_error = false;
+    }
+
+    /// Set an error status message (the display paints it red).
+    pub fn error(&mut self, m: impl Into<String>) {
+        self.message = m.into();
+        self.message_error = true;
+    }
+
+    /// Clear the status line (and its severity).
+    pub fn clear_message(&mut self) {
+        self.message.clear();
+        self.message_error = false;
     }
 
     pub fn cur_row(&self) -> &Row {
@@ -885,7 +907,7 @@ impl Editor {
     /// mismatched-pair scan inside any delimiter would misread it.
     pub fn close_paren(&mut self) {
         if !self.close_delim(Delim::Paren) {
-            self.message = "not inside a ( ) inset (( inserts one)".into();
+            self.info("not inside a ( ) inset (( inserts one)");
         }
     }
 
@@ -898,14 +920,14 @@ impl Editor {
             self.path.truncate(k);
             self.col = i + 1;
         } else {
-            self.message = "not inside a [ ] block ([ inserts one; \\matrix for grids)".into();
+            self.info("not inside a [ ] block ([ inserts one; \\matrix for grids)");
         }
     }
 
     /// `}` leaves the innermost { … } block.
     pub fn close_brace(&mut self) {
         if !self.close_delim(Delim::Brace) {
-            self.message = "not inside a { } block ({ inserts one)".into();
+            self.info("not inside a { } block ({ inserts one)");
         }
     }
 
@@ -966,7 +988,7 @@ impl Editor {
         op: impl FnOnce(usize, usize, &mut Vec<Row>, usize) -> Option<(usize, usize, usize)>,
     ) {
         let Some((k, i, c)) = self.enclosing_array() else {
-            self.message = "not inside a matrix/array".into();
+            self.info("not inside a matrix/array");
             return;
         };
         let parent_path = self.path[..k].to_vec();
@@ -975,7 +997,7 @@ impl Editor {
             unreachable!()
         };
         let Some((nr, nc, ncell)) = op(*rows, *cols, cells, c) else {
-            self.message = "cannot remove the last row/column".into();
+            self.error("cannot remove the last row/column");
             return;
         };
         *rows = nr;
@@ -1181,7 +1203,7 @@ impl Editor {
     /// Copy the selected cell rectangle (or lane) into the clipboard.
     pub fn grid_copy_cells(&mut self) {
         let Some((r0, j0, r1, j1)) = self.grid_rect() else {
-            self.message = "nothing to copy here (a gap has no cells)".into();
+            self.info("nothing to copy here (a gap has no cells)");
             return;
         };
         let Some((k, i, rows, cols, _)) = self.grid_info() else {
@@ -1203,7 +1225,7 @@ impl Editor {
             cols: cw,
             cells: out,
         };
-        self.message = format!("copied {}×{} cell(s)", ch, cw);
+        self.info(format!("copied {}×{} cell(s)", ch, cw));
     }
 
     /// Cut = copy + clear.
@@ -1241,7 +1263,7 @@ impl Editor {
     /// │ middle; the cursor lands at the start of the new segment.
     pub fn insert_mid(&mut self) {
         let Some(&(i, Field::Seg(k))) = self.path.last() else {
-            self.message = "\\mid works directly inside a delimiter block".into();
+            self.info("\\mid works directly inside a delimiter block");
             return;
         };
         let col = self.col;
@@ -1281,7 +1303,7 @@ impl Editor {
             return;
         }
         if self.col == 0 {
-            self.message = "accent needs a base character before the cursor".into();
+            self.info("accent needs a base character before the cursor");
             return;
         }
         let col = self.col;
@@ -1312,7 +1334,7 @@ impl Editor {
             // Stack onto a wide accent, the same way a compact one
             // stacks (the extra band rides outside the existing ones).
             Node::WideAccent { overs, unders, .. } => if under { unders } else { overs }.push(mark),
-            _ => self.message = "accents apply to a single character".into(),
+            _ => self.info("accents apply to a single character"),
         }
     }
 
@@ -1365,9 +1387,9 @@ impl Editor {
         match self.selection() {
             Some((lo, hi)) => {
                 self.clip = Clip::Nodes(self.cur_row()[lo..hi].to_vec());
-                self.message = format!("copied {} node(s)", hi - lo);
+                self.info(format!("copied {} node(s)", hi - lo));
             }
-            None => self.message = "nothing selected (⇧←/→ or ⇧↑)".into(),
+            None => self.info("nothing selected (⇧←/→ or ⇧↑)"),
         }
     }
 
@@ -1375,17 +1397,17 @@ impl Editor {
     pub fn cut_selection(&mut self) {
         match self.take_selection() {
             Some(content) => {
-                self.message = format!("cut {} node(s)", content.len());
+                self.info(format!("cut {} node(s)", content.len()));
                 self.clip = Clip::Nodes(content);
             }
-            None => self.message = "nothing selected (⇧←/→ or ⇧↑)".into(),
+            None => self.info("nothing selected (⇧←/→ or ⇧↑)"),
         }
     }
 
     /// Paste the editor clipboard at the cursor.
     pub fn paste(&mut self) {
         if self.clip.is_empty() {
-            self.message = "clipboard is empty (^C copies, ^X cuts)".into();
+            self.info("clipboard is empty (^C copies, ^X cuts)");
             return;
         }
         self.select_anchor = None;

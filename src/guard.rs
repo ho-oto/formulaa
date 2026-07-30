@@ -45,8 +45,8 @@ impl RoundtripGuard {
         }
         self.reported = Some(aa.clone());
         match write_report(&kind, &aa, &row, parsed.as_ref()) {
-            Ok(path) => ed.message = format!("⚠ roundtrip bug — report: {}", path),
-            Err(e) => ed.message = format!("⚠ roundtrip bug (report failed: {})", e),
+            Ok(path) => ed.error(format!("⚠ roundtrip bug — report: {}", path)),
+            Err(e) => ed.error(format!("⚠ roundtrip bug (report failed: {})", e)),
         }
     }
 }

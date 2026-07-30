@@ -38,7 +38,7 @@ fn main() -> std::io::Result<()> {
     let mut terminal = ratatui::init();
     let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
     let mut ed = Editor::new();
-    ed.message = "mascii — LyX-like math editor".into();
+    ed.info("mascii — LyX-like math editor");
 
     let mut guard = guard::RoundtripGuard::default();
     let mut origin = (0u16, 0u16);
@@ -141,10 +141,10 @@ fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers) -> bool {
         // Yank: canonical AA to the system clipboard.
         Effect::CopyAa => {
             let aa = mascii::render::export_aa(&ed.root);
-            ed.message = match copy_to_clipboard(&aa) {
-                Ok(()) => "copied AA to clipboard".into(),
-                Err(e) => format!("copy failed: {}", e),
-            };
+            match copy_to_clipboard(&aa) {
+                Ok(()) => ed.info("copied AA to clipboard"),
+                Err(e) => ed.error(format!("copy failed: {}", e)),
+            }
         }
         Effect::None => {}
     }

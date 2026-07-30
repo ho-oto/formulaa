@@ -80,9 +80,14 @@ pub fn draw(f: &mut Frame, ed: &Editor, view: &mut View) -> (u16, u16) {
     // One bottom line: messages overlay the usage line when present
     // (the minibuffer itself shows in-place at the cursor).
     let bottom = if !ed.message.is_empty() {
+        let fg = if ed.message_error {
+            theme::MESSAGE_ERR_FG
+        } else {
+            theme::MESSAGE_FG
+        };
         Line::from(Span::styled(
             format!(" {}", ed.message),
-            Style::default().fg(theme::MESSAGE_FG),
+            Style::default().fg(fg),
         ))
     } else {
         Line::from(Span::styled(
