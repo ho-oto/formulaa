@@ -28,8 +28,11 @@ pub struct Editor {
     /// Some(text) while the `\command` minibuffer is open.
     pub minibuffer: Option<String>,
     /// Some((kind, content)) while an in-place name box (\op \op* \rm
-    /// \text) is open.
+    /// \text \tex) is open.
     pub op_entry: Option<(BoxKind, String)>,
+    /// Caret inside the open box, as a char index into its content
+    /// (←/→ move it; stepping past either edge commits the box).
+    pub op_cursor: usize,
     /// Pending backslash escape inside the \text box (the next key is
     /// typed literally, so \" enters a quote).
     pub op_escape: bool,
@@ -386,6 +389,7 @@ impl Editor {
             col: 0,
             minibuffer: None,
             op_entry: None,
+            op_cursor: 0,
             op_escape: false,
             grid: None,
             undo: Vec::new(),

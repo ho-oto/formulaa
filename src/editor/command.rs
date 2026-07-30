@@ -12,20 +12,62 @@ impl Editor {
     pub fn op_start(&mut self, kind: BoxKind) {
         self.select_anchor = None;
         self.op_entry = Some((kind, String::new()));
+        self.op_cursor = 0;
+    }
+
+    /// The byte offset of char index `i` in the open box's content.
+    fn op_byte(buf: &str, i: usize) -> usize {
+        buf.char_indices().nth(i).map_or(buf.len(), |(b, _)| b)
     }
 
     pub fn op_type(&mut self, c: char) {
+        let cur = self.op_cursor;
         if let Some((_, buf)) = &mut self.op_entry {
-            buf.push(c);
+            let at = Self::op_byte(buf, cur);
+            buf.insert(at, c);
+            self.op_cursor += 1;
         }
     }
 
-    /// Backspace in the box; an empty box cancels it.
+    /// Backspace in the box: delete before the caret; an empty box
+    /// cancels it.
     pub fn op_backspace(&mut self) {
+        let cur = self.op_cursor;
+        if let Some((_, buf)) = &mut self.op_entry {
+            if buf.is_empty() {
+                self.op_entry = None;
+            } else if cur > 0 {
+                let at = Self::op_byte(buf, cur - 1);
+                buf.remove(at);
+                self.op_cursor -= 1;
+            }
+        }
+    }
+
+    /// Delete at the caret.
+    pub fn op_delete(&mut self) {
+        let cur = self.op_cursor;
         if let Some((_, buf)) = &mut self.op_entry
-            && buf.pop().is_none()
+            && cur < buf.chars().count()
         {
-            self.op_entry = None;
+            let at = Self::op_byte(buf, cur);
+            buf.remove(at);
+        }
+    }
+
+    /// Move the box caret; false when the step would leave the box
+    /// (the key layer commits then).
+    pub fn op_move(&mut self, delta: isize) -> bool {
+        let Some((_, buf)) = &self.op_entry else {
+            return false;
+        };
+        let len = buf.chars().count();
+        match self.op_cursor.checked_add_signed(delta) {
+            Some(c) if c <= len => {
+                self.op_cursor = c;
+                true
+            }
+            _ => false,
         }
     }
 

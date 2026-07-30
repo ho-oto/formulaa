@@ -123,6 +123,31 @@ fn every_radical_wraps_the_selection() {
 }
 
 #[test]
+fn box_caret_moves_and_edge_commits() {
+    // ←/→ edit inside the box: type "ac", step left, insert "b".
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\rm a c Left b Enter");
+    assert_eq!(latex(&ed), "\\operatorname{abc}");
+    // Stepping past the right edge commits and the arrow then acts on
+    // the formula (here: nothing left to move over).
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\rm a b Right");
+    assert!(ed.op_entry.is_none(), "right edge committed the box");
+    assert_eq!(latex(&ed), "\\operatorname{ab}");
+    // …and past the left edge likewise, with the cursor stepping left
+    // of the freshly committed run.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\rm a b Left Left Left");
+    assert!(ed.op_entry.is_none(), "left edge committed the box");
+    assert_eq!(latex(&ed), "\\operatorname{ab}");
+    assert_eq!(ed.col, 0, "the exiting ← still moved the cursor");
+    // Delete works at the caret; Home/End jump.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\rm a b c Home Delete End d Enter");
+    assert_eq!(latex(&ed), "\\operatorname{bcd}");
+}
+
+#[test]
 fn tex_box_reads_latex_in_place() {
     // \tex opens a box; typing (or pasting) LaTeX and committing
     // splices the parsed nodes at the cursor.

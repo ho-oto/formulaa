@@ -217,6 +217,18 @@ impl Editor {
         match key {
             Key::Esc => self.op_entry = None,
             Key::Backspace => self.op_backspace(),
+            Key::Delete => self.op_delete(),
+            Key::Home => while self.op_move(-1) {},
+            Key::End => while self.op_move(1) {},
+            // ←/→ move inside the box; stepping past either edge
+            // commits it and lets the arrow act on the formula.
+            Key::Left | Key::Right => {
+                let delta = if key == Key::Left { -1 } else { 1 };
+                if !self.op_move(delta) {
+                    self.op_commit();
+                    return None;
+                }
+            }
             Key::Char(' ') if kind != BoxKind::Op => self.op_type(' '),
             Key::Char('\\') if !ctrl && kind == BoxKind::Text => self.op_escape = true,
             Key::Char('"') if !ctrl && kind == BoxKind::Text => self.op_commit(),
