@@ -333,7 +333,6 @@ impl Editor {
                             _ => {
                                 self.info(if cols {
                                     "columns: ←→ gap/column  Enter on gap = insert  ⌫ delete  ⇧←→ extend  ↑↓ back to cells  Esc exit"
-                                        .into()
                                 } else {
                                     "rows: ↑↓ gap/row  Enter on gap = insert  ⌫ delete  ⇧↑↓ extend  ←→ back to cells  Esc exit"
                                 });
