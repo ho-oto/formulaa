@@ -115,7 +115,8 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
         ed.jump.is_some().then_some(ed.jump_selected),
         ed.block.is_some().then_some(ed.block_sel),
     );
-    let struck: std::collections::HashSet<(usize, usize)> = block.cancel.iter().copied().collect();
+    let mut struck: std::collections::HashSet<(usize, usize)> =
+        block.cancel.iter().copied().collect();
     let mut lines = lines;
     // ^F: the free cursor itself gets the prominent caret style; the
     // snap preview is the subtler colored cell.
@@ -139,7 +140,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
         }
     }
 
-    overlay_minibuffer(ed, &mut lines, &mut bg, &mut cursor_cell);
+    overlay_minibuffer(ed, &mut lines, &mut bg, &mut struck, &mut cursor_cell);
 
     let width = (block.width() as u16).max(lines.iter().map(|l| l.len() as u16).max().unwrap_or(0));
     let height = lines.len() as u16;
@@ -504,6 +505,7 @@ fn overlay_minibuffer(
     ed: &Editor,
     lines: &mut Vec<Vec<char>>,
     bg: &mut Vec<Vec<Option<Color>>>,
+    struck: &mut std::collections::HashSet<(usize, usize)>,
     cursor_cell: &mut Option<(usize, usize)>,
 ) {
     let Some(buf) = &ed.minibuffer else { return };
@@ -529,25 +531,33 @@ fn overlay_minibuffer(
         bg[cy][cx + i] = Some(color);
     }
     // The command previews what committing would insert, as a small
-    // floating box right under the typed name — a symbol as its one
-    // character, a structure (\frac, \pmatrix …) with its empty ⬚
-    // slots.
+    // box right under the typed name — a symbol as its one character,
+    // a structure (\frac, \pmatrix …) with its empty ⬚ slots. The box
+    // gets rows of its own: everything below the caret row shifts down
+    // by the preview's height (backgrounds and cancel strikes ride
+    // along), so the preview never hides the formula it points into.
     if let Some(row) = ed.command_preview_row() {
         use mascii::render::{RenderCtx, render_root};
         let block = render_root(&row, None, &RenderCtx::canonical());
+        let h = block.height();
+        let at = cy + 1;
+        while lines.len() < at {
+            lines.push(Vec::new());
+            bg.push(Vec::new());
+        }
+        for _ in 0..h {
+            lines.insert(at, Vec::new());
+            bg.insert(at, Vec::new());
+        }
+        *struck = struck
+            .iter()
+            .map(|&(y, x)| if y >= at { (y + h, x) } else { (y, x) })
+            .collect();
         for (dy, bline) in block.lines.iter().enumerate() {
-            let y = cy + 1 + dy;
-            // The preview may hang below the formula: grow the canvas
-            // (display-only overlay space).
-            while y >= lines.len() {
-                lines.push(Vec::new());
-                bg.push(Vec::new());
-            }
+            let y = at + dy;
             let need = cx + bline.len();
-            if lines[y].len() < need {
-                lines[y].resize(need, ' ');
-                bg[y].resize(need, None);
-            }
+            lines[y].resize(need, ' ');
+            bg[y].resize(need, None);
             for (dx, &ch) in bline.iter().enumerate() {
                 lines[y][cx + dx] = ch;
                 bg[y][cx + dx] = Some(theme::PREVIEW_BG);
@@ -1136,7 +1146,8 @@ mod tests {
             None,
             None,
         );
-        overlay_minibuffer(&ed, &mut lines, &mut bg, &mut cursor_cell);
+        let mut struck = std::collections::HashSet::new();
+        overlay_minibuffer(&ed, &mut lines, &mut bg, &mut struck, &mut cursor_cell);
         let (cy, _) = cursor_cell.unwrap();
         let below: String = lines[cy + 1..].iter().flatten().collect();
         assert!(below.contains('α'), "symbol previews below: {:?}", below);
@@ -1162,7 +1173,8 @@ mod tests {
             None,
             None,
         );
-        overlay_minibuffer(&ed, &mut lines, &mut bg, &mut cursor_cell);
+        let mut struck = std::collections::HashSet::new();
+        overlay_minibuffer(&ed, &mut lines, &mut bg, &mut struck, &mut cursor_cell);
         let below: String = lines[1..].iter().flatten().collect();
         assert!(
             below.contains('─'),
@@ -1180,6 +1192,45 @@ mod tests {
             .filter(|c| **c == Some(theme::PREVIEW_BG))
             .count();
         assert!(previewed > 0, "preview box painted");
+    }
+
+    /// A preview opened INSIDE a structure shifts the rows below it
+    /// instead of painting over them: the fraction bar survives.
+    #[test]
+    fn preview_shifts_rows_instead_of_hiding_them() {
+        let mut ed = Editor::new();
+        // 1/(2) with the cursor back in the numerator, then \alpha.
+        for c in "1/2".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        ed.input(Key::Up, false, false); // into the numerator
+        let bars_before = {
+            let (root, cursor) = ed.decorated();
+            let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+            let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
+            block.lines.iter().filter(|l| l.contains(&'─')).count()
+        };
+        for c in "\\alpha".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        let (root, cursor) = ed.decorated();
+        let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+        let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
+        let (mut lines, mut bg, mut cursor_cell, _) = marker_boxes(
+            &block.lines,
+            &ed.marker_extents(),
+            &block.marks,
+            block.caret,
+            None,
+            None,
+        );
+        let mut struck = std::collections::HashSet::new();
+        overlay_minibuffer(&ed, &mut lines, &mut bg, &mut struck, &mut cursor_cell);
+        // The α preview is present AND every fraction bar still is.
+        let all: String = lines.iter().flatten().collect();
+        assert!(all.contains('α'), "{}", all);
+        let bars_after = lines.iter().filter(|l| l.contains(&'─')).count();
+        assert_eq!(bars_after, bars_before, "the bar was not painted over");
     }
 
     #[test]
@@ -1203,7 +1254,8 @@ mod tests {
             None,
         );
         let (cy, cx) = cursor_cell.unwrap();
-        overlay_minibuffer(&ed, &mut lines, &mut bg, &mut cursor_cell);
+        let mut struck = std::collections::HashSet::new();
+        overlay_minibuffer(&ed, &mut lines, &mut bg, &mut struck, &mut cursor_cell);
         // The overlay covers the glyphs to the right of the cursor in
         // place: same height, and the cells left of the cursor are
         // untouched.
