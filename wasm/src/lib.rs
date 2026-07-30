@@ -135,9 +135,10 @@ impl MasciiEditor {
                     x += 1;
                 }
                 put(&mut lines, r, x, CURSOR_CHAR);
-                // Symbol-command preview: the char a commit would give.
+                // Symbol-command preview: the char a commit would
+                // give, right under the typed name.
                 if let Some(p) = self.ed.command_preview() {
-                    put(&mut lines, r, x + 1, p);
+                    put(&mut lines, r + 1, c, p);
                 }
             } else {
                 put(&mut lines, r, c, CURSOR_CHAR);

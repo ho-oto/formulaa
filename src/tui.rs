@@ -528,13 +528,11 @@ fn overlay_minibuffer(
         lines[cy][cx + i] = ch;
         bg[cy][cx + i] = Some(color);
     }
-    // The command previews what committing would insert: a symbol as
-    // a ghost cell at the caret, a structure (\frac, \pmatrix …) as a
-    // small floating box under the caret with its empty ⬚ slots.
-    if let Some(c) = ed.command_preview() {
-        lines[cy][end] = c;
-        bg[cy][end] = Some(theme::PREVIEW_BG);
-    } else if let Some(row) = ed.command_preview_row() {
+    // The command previews what committing would insert, as a small
+    // floating box right under the typed name — a symbol as its one
+    // character, a structure (\frac, \pmatrix …) with its empty ⬚
+    // slots.
+    if let Some(row) = ed.command_preview_row() {
         use mascii::render::{RenderCtx, render_root};
         let block = render_root(&row, None, &RenderCtx::canonical());
         for (dy, bline) in block.lines.iter().enumerate() {
@@ -1139,9 +1137,15 @@ mod tests {
             None,
         );
         overlay_minibuffer(&ed, &mut lines, &mut bg, &mut cursor_cell);
-        let (cy, cx) = cursor_cell.unwrap();
-        assert_eq!(lines[cy][cx], 'α', "symbol ghost at the caret");
-        assert_eq!(bg[cy][cx], Some(theme::PREVIEW_BG));
+        let (cy, _) = cursor_cell.unwrap();
+        let below: String = lines[cy + 1..].iter().flatten().collect();
+        assert!(below.contains('α'), "symbol previews below: {:?}", below);
+        let painted = bg[cy + 1..]
+            .iter()
+            .flatten()
+            .filter(|c| **c == Some(theme::PREVIEW_BG))
+            .count();
+        assert!(painted > 0, "preview cell painted");
         // Structural command: the template floats below the caret.
         let mut ed = Editor::new();
         for c in "x\\frac".chars() {
