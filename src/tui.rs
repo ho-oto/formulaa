@@ -252,7 +252,19 @@ fn marker_boxes(
     let mut cell_boxes: Vec<(usize, usize, usize, usize)> = Vec::new(); // (o, close, t, b)
     let mut lane_boxes: Vec<(usize, usize, usize, usize)> = Vec::new();
     let mut row_lane_boxes: Vec<(usize, usize, usize, usize)> = Vec::new();
-    let mut frame: Option<(usize, usize, usize, usize)> = None;
+    // The frame rectangle comes straight off its corner marks — the
+    // render places FRAME_OPEN on the framed block's top-left cell and
+    // FRAME_CLOSE on its bottom-right (delimiters included when fused).
+    let tl = marks
+        .iter()
+        .find(|&&(_, _, c)| c == mascii::editor::FRAME_OPEN);
+    let br = marks
+        .iter()
+        .find(|&&(_, _, c)| c == mascii::editor::FRAME_CLOSE);
+    let frame: Option<(usize, usize, usize, usize)> = match (tl, br) {
+        (Some(&(t, x0, _)), Some(&(b, x1, _))) => Some((x0, x1, t, b)),
+        _ => None,
+    };
     for (y, mut row_marks) in by_row {
         row_marks.sort_unstable();
         let mut stack: Vec<(usize, char)> = Vec::new();
@@ -265,29 +277,8 @@ fn marker_boxes(
                 let at = stack.iter().rposition(|&(_, c)| ok(c))?;
                 Some(stack.remove(at))
             };
-            if c == mascii::editor::FRAME_CLOSE || c == mascii::editor::FRAME_FUSED_CLOSE {
-                if let Some((o, _)) = pop_matching(&mut stack, &|c| {
-                    c == mascii::editor::FRAME_OPEN || c == mascii::editor::FRAME_FUSED_OPEN
-                }) {
-                    let (t, b) = match extents.last() {
-                        Some(&(above, below, _)) => (
-                            y.saturating_sub(above),
-                            (y + below).min(grid.len().saturating_sub(1)),
-                        ),
-                        None => (y, y),
-                    };
-                    // Final scan bounds: a fused matrix's markers sit
-                    // just inside its delimiter columns, so the scan
-                    // widens one cell to reach them; a bare array's
-                    // frame is exactly its own columns — an enclosing
-                    // \left( stays untinted.
-                    let (x0, x1) = if c == mascii::editor::FRAME_FUSED_CLOSE {
-                        (o.saturating_sub(1), x + 1)
-                    } else {
-                        (o, x.saturating_sub(1))
-                    };
-                    frame = Some((x0, x1, t, b));
-                }
+            if c == mascii::editor::FRAME_CLOSE || c == mascii::editor::FRAME_OPEN {
+                // Handled by the corner scan below the loop.
                 continue;
             }
             if c == mascii::editor::LANE_CLOSE
@@ -358,8 +349,6 @@ fn marker_boxes(
                 || c == mascii::editor::LANE_OPEN
                 || c == mascii::editor::ROWLANE_OPEN
                 || c == mascii::editor::CELLS_OPEN
-                || c == mascii::editor::FRAME_OPEN
-                || c == mascii::editor::FRAME_FUSED_OPEN
                 || is_label(c)
             {
                 stack.push((x, c));
@@ -547,9 +536,17 @@ fn overlay_minibuffer(
 /// backgrounds from `marker_boxes` are applied to plain glyphs. A
 /// struck cell gets its combining U+0338 appended *inside* its span,
 /// so the ligature is never split across style boundaries.
-/// Lattice / delimiter glyphs a grid-mode frame recolors.
-fn is_frame_glyph(c: char) -> bool {
-    "┌┬┐├┼┤└┴┘╭╮╰╯│⎡⎢⎣⎤⎥⎦⎛⎜⎝⎞⎟⎠⎧⎪⎨⎩⎫⎬⎭‖┆┊".contains(c)
+/// Lattice glyphs (the array's own frame and separators): recolored
+/// anywhere inside the frame rectangle.
+fn is_lattice_glyph(c: char) -> bool {
+    "┌┬┐├┼┤└┴┘".contains(c)
+}
+
+/// Delimiter pieces: recolored only on the rectangle's edge columns —
+/// a fused matrix's own parens sit exactly there, while a delimiter
+/// nested inside a cell does not.
+fn is_delim_piece(c: char) -> bool {
+    "()[]{}⌈⌉⌊⌋⟨⟩╱╲│╭╮╰╯⎡⎢⎣⎤⎥⎦⎛⎜⎝⎞⎟⎠⎧⎪⎨⎩⎫⎬⎭‖┆┊".contains(c)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -631,10 +628,14 @@ fn decorate_line(
             };
             spans.push(Span::styled(label.to_string(), style));
         } else if frame.is_some_and(|(o, close, t, b)| {
-            // The edited grid's lattice frame recolors while grid
-            // mode is on; the scan bounds come pre-widened (fused) or
-            // exact (bare) from marker_boxes.
-            (t..=b).contains(&y) && (o..=close).contains(&i) && is_frame_glyph(c)
+            // The edited grid's frame recolors while grid mode is on.
+            // The rectangle is exact (render-placed corners): lattice
+            // glyphs recolor anywhere inside it, delimiter pieces only
+            // on its edge columns — so a delimiter nested in a cell
+            // stays untinted, and a one-line pmatrix's parens tint.
+            (t..=b).contains(&y)
+                && ((is_lattice_glyph(c) && (o..=close).contains(&i))
+                    || (is_delim_piece(c) && (i == o || i == close)))
         }) {
             flush(&mut buf, buf_bg, &mut spans);
             let mut style = Style::default().fg(theme::GRID_FRAME_FG);
@@ -938,7 +939,9 @@ mod tests {
         let mut tinted = std::collections::HashSet::new();
         for line in lines.iter().take(b + 1).skip(t) {
             for (i, &c) in line.iter().enumerate() {
-                if (o..=close).contains(&i) && is_frame_glyph(c) {
+                if (is_lattice_glyph(c) && (o..=close).contains(&i))
+                    || (is_delim_piece(c) && (i == o || i == close))
+                {
                     tinted.insert(c);
                 }
             }
@@ -995,7 +998,9 @@ mod tests {
         let mut tinted = std::collections::HashSet::new();
         for line in lines.iter().take(b + 1).skip(t) {
             for (i, &c) in line.iter().enumerate() {
-                if (o..=close).contains(&i) && is_frame_glyph(c) {
+                if (is_lattice_glyph(c) && (o..=close).contains(&i))
+                    || (is_delim_piece(c) && (i == o || i == close))
+                {
                     tinted.insert(c);
                 }
             }
@@ -1008,6 +1013,51 @@ mod tests {
         assert!(
             !tinted.iter().any(|c| "⎛⎜⎝⎞⎟⎠()".contains(*c)),
             "outer parens must stay untinted: {:?}",
+            tinted
+        );
+    }
+
+    /// The exact corner-based frame: a matrix nested inside a cell
+    /// keeps its own delimiters untinted while the outer frame colors.
+    #[test]
+    fn frame_rect_is_exact() {
+        let mut ed = Editor::new();
+        for c in r"\matrix ".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        for c in r"\pmatrix x".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        ed.input(Key::Char('o'), false, true); // grid mode on the INNER grid
+        ed.input(Key::Esc, false, false);
+        ed.input(Key::Tab, false, false); // out of inner seg…
+        ed.input(Key::Tab, false, false); // …back into the outer cell
+        ed.input(Key::Char('o'), false, true); // grid mode on the OUTER grid
+        let (root, cursor) = ed.decorated();
+        let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+        let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
+        let (lines, _, _, frame) = marker_boxes(
+            &block.lines,
+            &ed.marker_extents(),
+            &block.marks,
+            block.caret,
+            None,
+            None,
+        );
+        let (o, close, t, b) = frame.expect("outer frame rect");
+        let mut tinted = std::collections::HashSet::new();
+        for line in lines.iter().take(b + 1).skip(t) {
+            for (i, &c) in line.iter().enumerate() {
+                if (is_lattice_glyph(c) && (o..=close).contains(&i))
+                    || (is_delim_piece(c) && (i == o || i == close))
+                {
+                    tinted.insert(c);
+                }
+            }
+        }
+        assert!(
+            !tinted.iter().any(|c| "⎛⎜⎝⎞⎟⎠()".contains(*c)),
+            "nested parens stay untinted: {:?}",
             tinted
         );
     }

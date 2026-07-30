@@ -107,16 +107,13 @@ pub const LANE_CLOSE: char = '\u{E0F6}';
 pub const CELLS_OPEN: char = '\u{E0F7}';
 pub const CELLS_CLOSE: char = '\u{E0F8}';
 /// Grid-mode frame markers: wrap the edited Array node so the display
-/// can recolor its lattice frame (the mode signal). The FUSED pair is
-/// used when the array is fused into its delimiter — the render pushes
-/// the markers just inside the delimiter columns, so the display
-/// widens its scan by one cell to reach them; the plain pair scans
-/// exactly the array's own columns (an enclosing \left( must NOT
-/// recolor).
+/// can recolor its lattice frame (the mode signal). The render owns
+/// the geometry: it converts the pair into the framed block's exact
+/// top-left / bottom-right corners (the fused branch uses the whole
+/// fused block, delimiters included), and the display reads the
+/// rectangle straight off the two marks.
 pub const FRAME_OPEN: char = '\u{E0F9}';
 pub const FRAME_CLOSE: char = '\u{E0FA}';
-pub const FRAME_FUSED_OPEN: char = '\u{E0FB}';
-pub const FRAME_FUSED_CLOSE: char = '\u{E0FC}';
 /// Row-lane selection markers (LANE_* marks columns): the display
 /// stretches a lane band to the matrix region's far edges along its
 /// axis, so it needs to know which axis that is.

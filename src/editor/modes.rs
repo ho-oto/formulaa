@@ -671,18 +671,10 @@ impl Editor {
                         .collect()
                 })
                 .unwrap_or_default();
-            let mut v: Vec<(usize, usize, usize)> = sel
-                .iter()
+            let _ = i;
+            sel.iter()
                 .map(|&cell| extent(&cells[cell], None, 0))
-                .collect();
-            // The frame box (whole-array extent) rides last; the
-            // display reads it from the end.
-            v.push(extent(
-                &row_at(&self.root, &self.path[..k])[i..i + 1],
-                None,
-                0,
-            ));
-            v
+                .collect()
         } else if let Some((lo, hi)) = self.selection() {
             vec![extent(&self.cur_row()[lo..hi], None, 0)]
         } else {
@@ -790,19 +782,13 @@ impl Editor {
             let mut col = self.col;
             let parent_path = self.path[..k].to_vec();
             // The frame pair around the Array node lets the display
-            // recolor its lattice — the "grid mode is on" signal. A
-            // fused matrix's frame IS its delimiter columns, so it
-            // gets the FUSED pair (wider display scan).
-            let fused = self.fused_in_delim(&parent_path, i);
+            // recolor its lattice — the "grid mode is on" signal. The
+            // render resolves the pair to the framed block's corners
+            // (fused or not), so one pair serves every layout.
             {
-                let (op, cl) = if fused {
-                    (FRAME_FUSED_OPEN, FRAME_FUSED_CLOSE)
-                } else {
-                    (FRAME_OPEN, FRAME_CLOSE)
-                };
                 let prow = row_at_mut(&mut root, &parent_path);
-                prow.insert(i + 1, Node::Sym(cl));
-                prow.insert(i, Node::Sym(op));
+                prow.insert(i + 1, Node::Sym(FRAME_CLOSE));
+                prow.insert(i, Node::Sym(FRAME_OPEN));
             }
             if path.len() > k {
                 path[k].0 += 1;

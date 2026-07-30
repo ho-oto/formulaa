@@ -556,6 +556,36 @@ pub fn render_row(
         }
         blocks.push((block, info));
     }
+    // A FRAME pair wraps a node whose frame the display recolors (grid
+    // mode). The render owns the geometry, so the pair converts to the
+    // node's exact corners here — the display reads the rectangle
+    // straight off the two marks, whatever later compositions do.
+    for m in 0..row.len() {
+        if !matches!(&row[m], Node::Sym(c) if *c == crate::editor::FRAME_OPEN) {
+            continue;
+        }
+        let Some(t) = (m + 1..row.len()).find(|&t| !is_marker_node(&row[t])) else {
+            continue;
+        };
+        let close = (t + 1..row.len())
+            .find(|&c| matches!(&row[c], Node::Sym(ch) if *ch == crate::editor::FRAME_CLOSE));
+        let Some(close) = close else { continue };
+        let (h, w) = (blocks[t].0.height(), blocks[t].0.width());
+        blocks[m]
+            .0
+            .marks
+            .retain(|&(_, _, c)| c != crate::editor::FRAME_OPEN);
+        blocks[close]
+            .0
+            .marks
+            .retain(|&(_, _, c)| c != crate::editor::FRAME_CLOSE);
+        blocks[t].0.marks.push((0, 0, crate::editor::FRAME_OPEN));
+        blocks[t].0.marks.push((
+            h.saturating_sub(1),
+            w.saturating_sub(1),
+            crate::editor::FRAME_CLOSE,
+        ));
+    }
     if let Some(col) = cursor_col {
         blocks.insert(
             col,
@@ -1164,17 +1194,24 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 };
                 if !matches!(seg_cursor, Some(([], _))) {
                     let mut b = render_fused_grid(*left, *right, *rows, *cols, cells, acur, ctx);
-                    // Seg-row markers overlay the delimiter columns.
-                    let (bl, w) = (b.baseline, b.width());
+                    // Seg-row markers overlay the delimiter columns;
+                    // the FRAME pair lands on the fused block's corners
+                    // (the delimiters ARE this matrix's frame).
+                    let (bl, w, h) = (b.baseline, b.width(), b.height());
                     for (i, n) in seg.iter().enumerate() {
                         if let Node::Sym(c) = n
                             && is_display_marker(*c)
                         {
-                            // Just inside the delimiter columns, so the
-                            // fused Array paints as its own (interior)
-                            // box distinct from the enclosing Delim.
-                            let x = if i < ai { 1 } else { w.saturating_sub(2) };
-                            b.marks.push((bl, x, *c));
+                            let (y, x) = if *c == crate::editor::FRAME_OPEN {
+                                (0, 0)
+                            } else if *c == crate::editor::FRAME_CLOSE {
+                                (h.saturating_sub(1), w.saturating_sub(1))
+                            } else if i < ai {
+                                (bl, 1)
+                            } else {
+                                (bl, w.saturating_sub(2))
+                            };
+                            b.marks.push((y, x, *c));
                         }
                     }
                     return b;
