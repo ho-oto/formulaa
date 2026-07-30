@@ -660,37 +660,17 @@ impl Editor {
             let Node::Array { cells, .. } = &row_at(&self.root, &self.path[..k])[i] else {
                 unreachable!()
             };
-            let sel: Vec<usize> = match gs {
-                GridSel::Cells { anchor } => {
-                    let a = anchor.unwrap_or(c);
-                    let (r0, r1) = ((a / cols).min(c / cols), (a / cols).max(c / cols));
-                    let (j0, j1) = ((a % cols).min(c % cols), (a % cols).max(c % cols));
+            let _ = (gs, rows, c);
+            // The same rectangle the ops edit and decorated() marks —
+            // one extent per cell, in the same row-major order.
+            let sel: Vec<usize> = self
+                .grid_rect()
+                .map(|(r0, j0, r1, j1)| {
                     (r0..=r1)
                         .flat_map(|r| (j0..=j1).map(move |j| r * cols + j))
                         .collect()
-                }
-                GridSel::Lanes {
-                    cols: cmode,
-                    pos,
-                    ext,
-                } if pos % 2 == 1 => {
-                    let lane = pos / 2;
-                    let end = ext.unwrap_or(lane);
-                    let (lo, hi) = (lane.min(end), lane.max(end));
-                    (0..rows)
-                        .flat_map(|r| (0..cols).map(move |j| (r, j)))
-                        .filter(|&(r, j)| {
-                            if cmode {
-                                (lo..=hi).contains(&j)
-                            } else {
-                                (lo..=hi).contains(&r)
-                            }
-                        })
-                        .map(|(r, j)| r * cols + j)
-                        .collect()
-                }
-                _ => Vec::new(),
-            };
+                })
+                .unwrap_or_default();
             let mut v: Vec<(usize, usize, usize)> = sel
                 .iter()
                 .map(|&cell| extent(&cells[cell], None, 0))
@@ -836,84 +816,71 @@ impl Editor {
             else {
                 unreachable!()
             };
-            match gs {
-                GridSel::Cells { anchor } => {
-                    // Paint the selected rectangle (the bare cell
-                    // cursor is a 1×1 selection).
-                    let a = anchor.unwrap_or(c);
-                    let (r0, r1) = ((a / cols).min(c / cols), (a / cols).max(c / cols));
-                    let (j0, j1) = ((a % cols).min(c % cols), (a % cols).max(c % cols));
-                    for r in r0..=r1 {
-                        for j in j0..=j1 {
-                            let cell = &mut cells[r * cols + j];
-                            let hi = cell.len();
-                            cell.insert(hi, Node::Sym(CELLS_CLOSE));
-                            cell.insert(0, Node::Sym(CELLS_OPEN));
-                            if r * cols + j == c {
-                                // The cursor lives in this cell: the
-                                // open mark at 0 shifts it right once.
-                                if path.len() > k + 1 {
-                                    path[k + 1].0 += 1;
-                                } else {
-                                    col += 1;
-                                }
-                            }
-                        }
-                    }
+            // The painted cells: the cell rectangle, or the full-axis
+            // rectangle of the selected lane(s) — one source of truth
+            // (`grid_rect`) shared with the editing ops.
+            let gap = matches!(gs, GridSel::Lanes { pos, .. } if pos % 2 == 0);
+            if !gap {
+                let Some((r0, j0, r1, j1)) = self.grid_rect() else {
                     return (root, Some((path, col)));
-                }
-                GridSel::Lanes {
-                    cols: cmode,
-                    pos,
-                    ext,
-                } => {
-                    if pos % 2 == 1 {
-                        // Selected lane(s): paint every cell.
-                        let lane = pos / 2;
-                        let end = ext.unwrap_or(lane);
-                        let (lo, hi) = (lane.min(end), lane.max(end));
-                        for r in 0..rows {
-                            for j in 0..cols {
-                                let sel = if cmode {
-                                    (lo..=hi).contains(&j)
-                                } else {
-                                    (lo..=hi).contains(&r)
-                                };
-                                if sel {
-                                    let (op, cl) = if cmode {
-                                        (LANE_OPEN, LANE_CLOSE)
-                                    } else {
-                                        (ROWLANE_OPEN, ROWLANE_CLOSE)
-                                    };
-                                    let cell = &mut cells[r * cols + j];
-                                    let e = cell.len();
-                                    cell.insert(e, Node::Sym(cl));
-                                    cell.insert(0, Node::Sym(op));
-                                }
+                };
+                let (op, cl) = match gs {
+                    GridSel::Cells { .. } => (CELLS_OPEN, CELLS_CLOSE),
+                    GridSel::Lanes { cols: true, .. } => (LANE_OPEN, LANE_CLOSE),
+                    GridSel::Lanes { cols: false, .. } => (ROWLANE_OPEN, ROWLANE_CLOSE),
+                };
+                for r in r0..=r1 {
+                    for j in j0..=j1 {
+                        let cell = &mut cells[r * cols + j];
+                        let hi = cell.len();
+                        cell.insert(hi, Node::Sym(cl));
+                        cell.insert(0, Node::Sym(op));
+                        if r * cols + j == c {
+                            // The cursor lives in this cell: the open
+                            // mark at 0 shifts it right once.
+                            if path.len() > k + 1 {
+                                path[k + 1].0 += 1;
+                            } else {
+                                col += 1;
                             }
-                        }
-                    } else {
-                        // Gap cursor: a ghost lane previews the insert
-                        // (a Spacer cell painted by the GRID_GAP mark).
-                        let g = pos / 2;
-                        let mark = if cmode { GRID_GAP } else { GRID_GAP_ROW };
-                        let ghost = || vec![Node::Sym(mark), Node::Spacer];
-                        if cmode {
-                            for r in (0..rows).rev() {
-                                cells.insert(r * cols + g.min(cols), ghost());
-                            }
-                            *nc = cols + 1;
-                        } else {
-                            for j in 0..cols {
-                                cells.insert(g.min(rows) * cols + j, ghost());
-                            }
-                            *nr = rows + 1;
                         }
                     }
-                    // The caret is meaningless while lanes are selected.
-                    return (root, None);
                 }
+                return (root, Some((path, col)));
             }
+            // Gap cursor: a ghost lane previews the insert (a Spacer
+            // cell painted by the GRID_GAP mark). The ghost has real
+            // width, so the parked cell's index shifts with it.
+            let GridSel::Lanes {
+                cols: cmode, pos, ..
+            } = gs
+            else {
+                unreachable!()
+            };
+            let g = pos / 2;
+            let mark = if cmode { GRID_GAP } else { GRID_GAP_ROW };
+            let ghost = || vec![Node::Sym(mark), Node::Spacer];
+            if cmode {
+                for r in (0..rows).rev() {
+                    cells.insert(r * cols + g.min(cols), ghost());
+                }
+                *nc = cols + 1;
+            } else {
+                for j in 0..cols {
+                    cells.insert(g.min(rows) * cols + j, ghost());
+                }
+                *nr = rows + 1;
+            }
+            {
+                let (r, j) = (c / cols, c % cols);
+                let shifted = if cmode {
+                    r * (cols + 1) + j + usize::from(j >= g.min(cols))
+                } else {
+                    (r + usize::from(r >= g.min(rows))) * cols + j
+                };
+                path[k].1 = Field::Cell(shifted);
+            }
+            return (root, Some((path, col)));
         }
         let mut path = self.path.clone();
         let mut col = self.col;
@@ -1183,6 +1150,7 @@ impl Editor {
         ));
         self.path = path;
         self.col = col;
+        self.reclamp_grid();
     }
 
     pub fn redo(&mut self) {
@@ -1199,5 +1167,6 @@ impl Editor {
         ));
         self.path = path;
         self.col = col;
+        self.reclamp_grid();
     }
 }

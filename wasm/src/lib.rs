@@ -98,10 +98,17 @@ impl MasciiEditor {
             }
             row[c] = ch;
         };
+        use mascii::editor::{
+            CELLS_CLOSE, CELLS_OPEN, GRID_GAP, GRID_GAP_ROW, LANE_CLOSE, LANE_OPEN, ROWLANE_CLOSE,
+            ROWLANE_OPEN,
+        };
         for &(r, c, m) in &block.marks {
             let ch = match m {
-                SEL_OPEN => '⟦',
-                SEL_CLOSE | BLK_CLOSE => '⟧',
+                SEL_OPEN | CELLS_OPEN | LANE_OPEN | ROWLANE_OPEN => '⟦',
+                SEL_CLOSE | BLK_CLOSE | CELLS_CLOSE | LANE_CLOSE | ROWLANE_CLOSE => '⟧',
+                // The lane-gap ghost: a visible insert cursor even on
+                // the colorless text screen.
+                GRID_GAP | GRID_GAP_ROW => '◇',
                 m => {
                     let u = m as u32;
                     let idx = if (JUMP_RANK_BASE..JUMP_RANK_BASE + 0x400).contains(&u) {

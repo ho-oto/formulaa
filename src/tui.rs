@@ -253,7 +253,7 @@ fn marker_boxes(
     let mut lane_boxes: Vec<(usize, usize, usize, usize)> = Vec::new();
     let mut row_lane_boxes: Vec<(usize, usize, usize, usize)> = Vec::new();
     let mut frame: Option<(usize, usize, usize, usize)> = None;
-    for (y, mut row_marks) in by_row.clone() {
+    for (y, mut row_marks) in by_row {
         row_marks.sort_unstable();
         let mut stack: Vec<(usize, char)> = Vec::new();
         for (x, c) in row_marks {

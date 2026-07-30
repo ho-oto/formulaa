@@ -457,6 +457,73 @@ fn esc_exits_grid_mode_from_lane_mode() {
     assert!(ed.grid.is_none(), "{:?}", ed.grid);
 }
 
+/// A display redraw after any editor state: decorated + extents must
+/// never panic (the TUI calls these on every frame).
+fn redraw(ed: &Editor) {
+    let _ = ed.decorated();
+    let _ = ed.marker_extents();
+}
+
+#[test]
+fn grid_state_survives_undo_redo_and_clicks() {
+    // Undo shrinks the grid under a lane cursor parked past the end:
+    // used to drain past the cells vec / index out of bounds.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\matrix a C-o | Right Right Right Enter C-z");
+    redraw(&ed);
+    type_script(&mut ed, "Backspace");
+    redraw(&ed);
+    type_script(&mut ed, "Down Enter");
+    redraw(&ed);
+    // Undo shrinks the grid under a cell anchor.
+    let mut ed = Editor::new();
+    type_script(
+        &mut ed,
+        r"\matrix a C-o S-Down C-c Down Right C-v Down Down Right S-Up C-z",
+    );
+    redraw(&ed);
+    type_script(&mut ed, "C-c C-v Backspace");
+    redraw(&ed);
+    // A click relocates the cursor (possibly outside any grid): the
+    // grid state follows or ends, never dangles.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\matrix a Tab Tab + x");
+    type_script(&mut ed, "C-a"); // back to formula start…
+    // …enter the matrix and grid mode with an anchor:
+    type_script(&mut ed, r"Right C-o S-Down");
+    ed.click(1000, 1000); // far away: lands at the formula edge
+    redraw(&ed);
+    type_script(&mut ed, "C-c C-v");
+    redraw(&ed);
+}
+
+#[test]
+fn lane_selection_copies_its_cells() {
+    // ^C on a purple lane copies the lane's cells (it used to be a
+    // silent no-op).
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\matrix a Down b C-o S-Up S-Up C-c");
+    assert!(ed.message.contains("copied"), "{}", ed.message);
+    type_script(&mut ed, "Esc Tab Tab C-v");
+    assert!(
+        latex(&ed).ends_with("\\begin{matrix} a \\\\ b \\end{matrix}"),
+        "{}",
+        latex(&ed)
+    );
+}
+
+#[test]
+fn cell_clip_pastes_over_cells_even_outside_grid_mode() {
+    // With the cursor in a grid cell but ^O off, a cell clipboard
+    // still pastes as an overwrite — never a nested matrix.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\matrix a Down b C-o S-Up C-c Esc Right C-v");
+    assert_eq!(
+        latex(&ed),
+        "\\begin{bmatrix} a & a \\\\ b & b \\end{bmatrix}"
+    );
+}
+
 #[test]
 fn vmatrix_wraps_a_grid_in_a_norm() {
     let mut ed = Editor::new();

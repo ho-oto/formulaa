@@ -448,6 +448,9 @@ impl Editor {
             self.path = pos.0;
             self.col = pos.1;
         }
+        // The click may have landed anywhere — grid mode follows the
+        // cursor or ends, never keeps stale indices.
+        self.reclamp_grid();
     }
 
     /// Nearest editable position to a display cell, with its own cell
@@ -1003,7 +1006,7 @@ impl Editor {
         self.edit_array(|rows, cols, cells, c| {
             let n = hi - lo + 1;
             if cols_mode {
-                if n >= cols {
+                if n >= cols || hi >= cols {
                     return None;
                 }
                 for r in (0..rows).rev() {
@@ -1013,7 +1016,7 @@ impl Editor {
                 let j = if j > hi { j - n } else { j.min(cols - n - 1) };
                 Some((rows, cols - n, (c / cols) * (cols - n) + j))
             } else {
-                if n >= rows {
+                if n >= rows || hi >= rows {
                     return None;
                 }
                 cells.drain(lo * cols..(hi + 1) * cols);
@@ -1052,17 +1055,59 @@ impl Editor {
         Some((k, i, *rows, *cols, c))
     }
 
-    /// The selected cell rectangle in grid mode: (r0, c0, r1, c1),
-    /// inclusive — the current cell alone when no anchor is set.
-    pub fn grid_rect(&self) -> Option<(usize, usize, usize, usize)> {
-        let (_, _, _, cols, c) = self.grid_info()?;
-        let Some(GridSel::Cells { anchor }) = self.grid else {
-            return None;
+    /// Clamp the grid-mode state against the current tree — the tree
+    /// or cursor may have moved from under it (undo, click, jump).
+    /// Indices that no longer fit are dropped rather than left to
+    /// panic; outside any array the mode simply ends.
+    pub(crate) fn reclamp_grid(&mut self) {
+        let Some(gs) = self.grid else { return };
+        let Some((_, _, rows, cols, _)) = self.grid_info() else {
+            self.grid = None;
+            return;
         };
-        let a = anchor.unwrap_or(c);
-        let (r0, r1) = ((a / cols).min(c / cols), (a / cols).max(c / cols));
-        let (j0, j1) = ((a % cols).min(c % cols), (a % cols).max(c % cols));
-        Some((r0, j0, r1, j1))
+        self.grid = Some(match gs {
+            GridSel::Cells { anchor } => GridSel::Cells {
+                anchor: anchor.filter(|&a| a < rows * cols),
+            },
+            GridSel::Lanes { cols: cm, pos, ext } => {
+                let n = if cm { cols } else { rows };
+                GridSel::Lanes {
+                    cols: cm,
+                    pos: pos.min(2 * n),
+                    ext: ext.filter(|&e| e < n),
+                }
+            }
+        });
+    }
+
+    /// The selected cell rectangle in grid mode: (r0, c0, r1, c1),
+    /// inclusive. A cell state selects its rectangle (the current cell
+    /// alone without an anchor); a lane state selects the full-axis
+    /// rectangle of its lane(s), so ^C/^X work there too. None on a
+    /// gap.
+    pub fn grid_rect(&self) -> Option<(usize, usize, usize, usize)> {
+        let (_, _, rows, cols, c) = self.grid_info()?;
+        match self.grid? {
+            GridSel::Cells { anchor } => {
+                let a = anchor.unwrap_or(c).min(rows * cols - 1);
+                let c = c.min(rows * cols - 1);
+                let (r0, r1) = ((a / cols).min(c / cols), (a / cols).max(c / cols));
+                let (j0, j1) = ((a % cols).min(c % cols), (a % cols).max(c % cols));
+                Some((r0, j0, r1, j1))
+            }
+            GridSel::Lanes { cols: cm, pos, ext } if pos % 2 == 1 => {
+                let n = if cm { cols } else { rows };
+                let lane = (pos / 2).min(n - 1);
+                let end = ext.unwrap_or(lane).min(n - 1);
+                let (lo, hi) = (lane.min(end), lane.max(end));
+                Some(if cm {
+                    (0, lo, rows - 1, hi)
+                } else {
+                    (lo, 0, hi, cols - 1)
+                })
+            }
+            _ => None,
+        }
     }
 
     /// Clear the contents of the selected cells (grid-mode Backspace:
@@ -1082,14 +1127,16 @@ impl Editor {
         self.grid = Some(GridSel::Cells { anchor: None });
     }
 
-    /// Copy the selected cell rectangle into the clipboard.
+    /// Copy the selected cell rectangle (or lane) into the clipboard.
     pub fn grid_copy_cells(&mut self) {
         let Some((r0, j0, r1, j1)) = self.grid_rect() else {
+            self.message = "nothing to copy here (a gap has no cells)".into();
             return;
         };
-        let Some((k, i, _, cols, _)) = self.grid_info() else {
+        let Some((k, i, rows, cols, _)) = self.grid_info() else {
             return;
         };
+        let (r1, j1) = (r1.min(rows - 1), j1.min(cols - 1));
         let Node::Array { cells, .. } = &row_at(&self.root, &self.path[..k])[i] else {
             unreachable!()
         };
@@ -1298,10 +1345,10 @@ impl Editor {
                 row.splice(col..col, clip.iter().cloned());
                 self.col += clip.len();
             }
-            // A cell rectangle pastes over cells in grid mode, and as
-            // a bare Array node anywhere else.
+            // A cell rectangle pastes over cells whenever the cursor
+            // is inside a grid, and as a bare Array node anywhere else.
             Clip::Cells { rows, cols, cells } => {
-                if self.grid.is_some() && self.enclosing_array().is_some() {
+                if self.enclosing_array().is_some() {
                     self.grid_paste_cells(rows, cols, cells);
                 } else {
                     let node = Node::Array { rows, cols, cells };

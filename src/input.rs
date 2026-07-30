@@ -60,6 +60,9 @@ impl Editor {
         if self.root != before.0 {
             self.push_undo(before);
         }
+        // Whatever the key did (jump, snap, grid surgery), the grid
+        // state must fit the tree it now points at.
+        self.reclamp_grid();
         effect
     }
 
