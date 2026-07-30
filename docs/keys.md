@@ -150,8 +150,8 @@ Backspace は中身クリアではなく構造の削除)。
 | `\sqrt` `\cbrt` `\qdrt` | √ ∛ ∜ |
 | `\tex` / `\latex` | LaTeX 入力ボックス: 打ち込むかペーストして Enter で確定(best-effort 読み込み。KaTeX/MathJax 方言、不明コマンドは無視) |
 | `\cancel` | 打ち消し(選択を包める) |
-| `\matrix` | 2×2 行列。`\matrix34` で 3行×4列 |
-| `\pmatrix` `\bmatrix` `\Bmatrix` `\vmatrix` `\Vmatrix` `\cases` `\rcases` `\array` | 括弧違いの行列(同様に `\cases32` などサイズ指定可)。`\Vmatrix` は ‖ ‖、`\array` は裸の格子 |
+| `\matrix` / `\array` | 裸の格子(2×2。`\matrix34` で 3行×4列) |
+| `\pmatrix` `\bmatrix` `\Bmatrix` `\vmatrix` `\Vmatrix` `\cases` `\rcases` | 括弧付きの行列(同様に `\cases32` などサイズ指定可)。`\Vmatrix` は ‖ ‖ |
 | `\overbrace` `\underbrace` | ╭──╮ / ╰──╯(ラベル付き) |
 | `\xto` `\xfrom`(`\xrightarrow` `\xleftarrow`)/ `\xTo` `\xFrom` | ラベル付き伸縮矢印 → ← / ⇒ ⇐ |
 

@@ -348,7 +348,9 @@ pub enum GridWrap {
 /// pair and the dimensions.
 fn grid_command(cmd: &str) -> Option<(GridWrap, usize, usize)> {
     const GRIDS: &[(&str, GridWrap)] = &[
-        ("matrix", GridWrap::Pair(Delim::Bracket, Delim::Bracket)),
+        // \matrix is the bare lattice (like \array): the delimiter
+        // spells itself via \pmatrix / \bmatrix and friends.
+        ("matrix", GridWrap::Bare),
         ("bmatrix", GridWrap::Pair(Delim::Bracket, Delim::Bracket)),
         ("pmatrix", GridWrap::Pair(Delim::Paren, Delim::Paren)),
         ("Bmatrix", GridWrap::Pair(Delim::Brace, Delim::Brace)),
@@ -1909,11 +1911,19 @@ mod tests {
     #[test]
     fn grid_size_suffix() {
         let mut ed = Editor::new();
-        ed.execute("matrix13"); // 1×3 row vector
+        ed.execute("bmatrix13"); // 1×3 row vector
         ed.insert_sym('a');
         assert_eq!(
             row_to_latex(&ed.root),
             "\\begin{bmatrix} a &  &  \\end{bmatrix}"
+        );
+        // \matrix is the bare lattice, like \array.
+        let mut ed = Editor::new();
+        ed.execute("matrix13");
+        ed.insert_sym('a');
+        assert_eq!(
+            row_to_latex(&ed.root),
+            "\\begin{matrix} a &  &  \\end{matrix}"
         );
         let mut ed = Editor::new();
         ed.execute("cases32");
@@ -1933,7 +1943,7 @@ mod tests {
     #[test]
     fn grid_row_col_editing() {
         let mut ed = Editor::new();
-        ed.execute("matrix"); // 2x2, cursor in cell 0
+        ed.execute("bmatrix"); // 2x2, cursor in cell 0
         ed.insert_sym('a');
         ed.execute("addcol"); // now 2x3, cursor in new empty cell (0,1)
         ed.insert_sym('x');
@@ -1959,7 +1969,7 @@ mod tests {
     fn grid_and_mid_editing() {
         // \matrix puts the cursor into cell 0 of a [ ] grid.
         let mut ed = Editor::new();
-        ed.execute("matrix");
+        ed.execute("bmatrix");
         ed.insert_sym('a');
         assert_eq!(ed.path.len(), 2);
         ed.close_bracket();

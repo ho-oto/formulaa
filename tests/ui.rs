@@ -191,7 +191,7 @@ fn ctrl_e_jumps_to_the_end_outside_grids() {
     assert_eq!((ed.path.len(), ed.col), (0, 3), "formula end");
     // ^E is the end jump even inside a grid cell (grid mode is ^O).
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\matrix x C-o");
+    type_script(&mut ed, r"\bmatrix x C-o");
     assert!(ed.grid.is_some());
 }
 
@@ -388,7 +388,7 @@ fn grid_edit_mode() {
     let mut ed = Editor::new();
     type_script(
         &mut ed,
-        r"\matrix a C-o Right Enter b C-o Down Left Enter c C-o Right Enter d",
+        r"\bmatrix a C-o Right Enter b C-o Down Left Enter c C-o Right Enter d",
     );
     assert_eq!(
         latex(&ed),
@@ -405,14 +405,14 @@ fn grid_edit_mode() {
     // (green), Enter inserts a column there and lands on it; a
     // cross-axis arrow drops back to cell selection of that lane.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\matrix x C-o | Left Enter Up Enter y");
+    type_script(&mut ed, r"\bmatrix x C-o | Left Enter Up Enter y");
     assert_eq!(
         latex(&ed),
         "\\begin{bmatrix}  & x &  \\\\ y &  &  \\end{bmatrix}"
     );
     // Undo works inside grid mode (row deletion is one step).
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\matrix a Down b C-o r Backspace C-z");
+    type_script(&mut ed, r"\bmatrix a Down b C-o r Backspace C-z");
     assert!(
         latex(&ed).contains("\\\\"),
         "undo restored the row: {}",
@@ -428,12 +428,12 @@ fn grid_edit_mode() {
 fn grid_selection_promotes_and_clears() {
     // Backspace on a full-column CELL selection clears the contents…
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\matrix a Down b C-o S-Up Backspace");
+    type_script(&mut ed, r"\bmatrix a Down b C-o S-Up Backspace");
     assert_eq!(latex(&ed), "\\begin{bmatrix}  &  \\\\  &  \\end{bmatrix}");
     // …while pushing the selection past the edge promotes it to the
     // column itself, where Backspace deletes the column.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\matrix a Down b C-o S-Up S-Up");
+    type_script(&mut ed, r"\bmatrix a Down b C-o S-Up S-Up");
     assert!(
         matches!(
             ed.grid,
@@ -453,7 +453,7 @@ fn grid_selection_promotes_and_clears() {
 #[test]
 fn esc_exits_grid_mode_from_lane_mode() {
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\matrix x C-o c Esc");
+    type_script(&mut ed, r"\bmatrix x C-o c Esc");
     assert!(ed.grid.is_none(), "{:?}", ed.grid);
 }
 
@@ -469,7 +469,7 @@ fn grid_state_survives_undo_redo_and_clicks() {
     // Undo shrinks the grid under a lane cursor parked past the end:
     // used to drain past the cells vec / index out of bounds.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\matrix a C-o | Right Right Right Enter C-z");
+    type_script(&mut ed, r"\bmatrix a C-o | Right Right Right Enter C-z");
     redraw(&ed);
     type_script(&mut ed, "Backspace");
     redraw(&ed);
@@ -479,7 +479,7 @@ fn grid_state_survives_undo_redo_and_clicks() {
     let mut ed = Editor::new();
     type_script(
         &mut ed,
-        r"\matrix a C-o S-Down C-c Down Right C-v Down Down Right S-Up C-z",
+        r"\bmatrix a C-o S-Down C-c Down Right C-v Down Down Right S-Up C-z",
     );
     redraw(&ed);
     type_script(&mut ed, "C-c C-v Backspace");
@@ -487,7 +487,7 @@ fn grid_state_survives_undo_redo_and_clicks() {
     // A click relocates the cursor (possibly outside any grid): the
     // grid state follows or ends, never dangles.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\matrix a Tab Tab + x");
+    type_script(&mut ed, r"\bmatrix a Tab Tab + x");
     type_script(&mut ed, "C-a"); // back to formula start…
     // …enter the matrix and grid mode with an anchor:
     type_script(&mut ed, r"Right C-o S-Down");
@@ -502,7 +502,7 @@ fn lane_selection_copies_its_cells() {
     // ^C on a purple lane copies the lane's cells (it used to be a
     // silent no-op).
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\matrix a Down b C-o S-Up S-Up C-c");
+    type_script(&mut ed, r"\bmatrix a Down b C-o S-Up S-Up C-c");
     assert!(ed.message.contains("copied"), "{}", ed.message);
     type_script(&mut ed, "Esc Tab Tab C-v");
     assert!(
@@ -517,7 +517,7 @@ fn cell_clip_pastes_over_cells_even_outside_grid_mode() {
     // With the cursor in a grid cell but ^O off, a cell clipboard
     // still pastes as an overwrite — never a nested matrix.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\matrix a Down b C-o S-Up C-c Esc Right C-v");
+    type_script(&mut ed, r"\bmatrix a Down b C-o S-Up C-c Esc Right C-v");
     assert_eq!(
         latex(&ed),
         "\\begin{bmatrix} a & a \\\\ b & b \\end{bmatrix}"
@@ -537,7 +537,7 @@ fn grid_cells_copy_paste() {
     // Copy a 2x1 block, paste at the far corner: overwrite semantics,
     // and the grid grows to fit the overhang.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\matrix a Down b C-o S-Up C-c Down Right C-v");
+    type_script(&mut ed, r"\bmatrix a Down b C-o S-Up C-c Down Right C-v");
     assert_eq!(
         latex(&ed),
         "\\begin{bmatrix} a &  \\\\ b & a \\\\  & b \\end{bmatrix}"

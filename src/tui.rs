@@ -781,7 +781,7 @@ mod tests {
             bg
         };
         let mut ed = Editor::new();
-        for c in "\\matrix a".chars() {
+        for c in "\\bmatrix a".chars() {
             ed.input(Key::Char(c), false, false);
         }
         ed.input(Key::Char('o'), false, true); // ^O
@@ -890,7 +890,7 @@ mod tests {
     #[test]
     fn frame_survives_a_middle_row_gap() {
         let mut ed = Editor::new();
-        for c in r"\matrix a".chars() {
+        for c in r"\bmatrix a".chars() {
             ed.input(Key::Char(c), false, false);
         }
         ed.input(Key::Char('o'), false, true);
@@ -1022,7 +1022,7 @@ mod tests {
     #[test]
     fn frame_rect_is_exact() {
         let mut ed = Editor::new();
-        for c in r"\matrix ".chars() {
+        for c in r"\bmatrix ".chars() {
             ed.input(Key::Char(c), false, false);
         }
         for c in r"\pmatrix x".chars() {
@@ -1067,7 +1067,7 @@ mod tests {
     #[test]
     fn click_lands_true_while_the_gap_ghost_is_up() {
         let mut ed = Editor::new();
-        for c in r"\matrix x".chars() {
+        for c in r"\bmatrix x".chars() {
             ed.input(Key::Char(c), false, false);
         }
         ed.input(Key::Char('o'), false, true);
