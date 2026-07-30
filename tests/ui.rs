@@ -159,6 +159,41 @@ fn tex_box_reads_latex_in_place() {
 }
 
 #[test]
+fn minibuffer_previews_the_commit() {
+    // Symbol commands preview their character…
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ a l p h a");
+    assert_eq!(ed.command_preview(), Some('α'));
+    assert_eq!(
+        ed.command_preview_row(),
+        Some(vec![mascii::ast::Node::Sym('α')])
+    );
+    // …∑-class commands their operator…
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ s u m");
+    assert_eq!(ed.command_preview(), Some('∑'));
+    // …structures the empty template (single-char preview: none).
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ f r a c");
+    assert_eq!(ed.command_preview(), None);
+    assert!(matches!(
+        ed.command_preview_row().as_deref(),
+        Some([mascii::ast::Node::Frac { .. }])
+    ));
+    // Unknown or empty spellings preview nothing; mode openers too.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ f r");
+    assert_eq!(ed.command_preview_row(), None);
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ t e x");
+    assert_eq!(ed.command_preview_row(), None);
+    // The preview never touches the formula.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"x \ f r a c");
+    assert_eq!(latex(&ed), "x");
+}
+
+#[test]
 fn ctrl_keys_return_host_effects() {
     let mut ed = Editor::new();
     assert_eq!(ed.input(Key::Char('q'), false, true), Effect::Quit);

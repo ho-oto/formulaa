@@ -502,8 +502,8 @@ fn marker_boxes(
 /// at the selection's moving end, so the overlay shows next to it.
 fn overlay_minibuffer(
     ed: &Editor,
-    lines: &mut [Vec<char>],
-    bg: &mut [Vec<Option<Color>>],
+    lines: &mut Vec<Vec<char>>,
+    bg: &mut Vec<Vec<Option<Color>>>,
     cursor_cell: &mut Option<(usize, usize)>,
 ) {
     let Some(buf) = &ed.minibuffer else { return };
@@ -527,6 +527,34 @@ fn overlay_minibuffer(
     for (i, &ch) in text.iter().enumerate() {
         lines[cy][cx + i] = ch;
         bg[cy][cx + i] = Some(color);
+    }
+    // The command previews what committing would insert: a symbol as
+    // a ghost cell at the caret, a structure (\frac, \pmatrix …) as a
+    // small floating box under the caret with its empty ⬚ slots.
+    if let Some(c) = ed.command_preview() {
+        lines[cy][end] = c;
+        bg[cy][end] = Some(theme::PREVIEW_BG);
+    } else if let Some(row) = ed.command_preview_row() {
+        use mascii::render::{RenderCtx, render_root};
+        let block = render_root(&row, None, &RenderCtx::canonical());
+        for (dy, bline) in block.lines.iter().enumerate() {
+            let y = cy + 1 + dy;
+            // The preview may hang below the formula: grow the canvas
+            // (display-only overlay space).
+            while y >= lines.len() {
+                lines.push(Vec::new());
+                bg.push(Vec::new());
+            }
+            let need = cx + bline.len();
+            if lines[y].len() < need {
+                lines[y].resize(need, ' ');
+                bg[y].resize(need, None);
+            }
+            for (dx, &ch) in bline.iter().enumerate() {
+                lines[y][cx + dx] = ch;
+                bg[y][cx + dx] = Some(theme::PREVIEW_BG);
+            }
+        }
     }
     *cursor_cell = Some((cy, end));
 }
@@ -1089,6 +1117,65 @@ mod tests {
             "click lands in x's own cell: {:?}",
             ed.path
         );
+    }
+
+    /// Typing \alpha shows α as a ghost at the caret; typing \frac
+    /// floats the empty template under it — before committing.
+    #[test]
+    fn minibuffer_preview_shows_the_shape() {
+        let mut ed = Editor::new();
+        for c in "x\\alpha".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        let (root, cursor) = ed.decorated();
+        let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+        let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
+        let (mut lines, mut bg, mut cursor_cell, _) = marker_boxes(
+            &block.lines,
+            &ed.marker_extents(),
+            &block.marks,
+            block.caret,
+            None,
+            None,
+        );
+        overlay_minibuffer(&ed, &mut lines, &mut bg, &mut cursor_cell);
+        let (cy, cx) = cursor_cell.unwrap();
+        assert_eq!(lines[cy][cx], 'α', "symbol ghost at the caret");
+        assert_eq!(bg[cy][cx], Some(theme::PREVIEW_BG));
+        // Structural command: the template floats below the caret.
+        let mut ed = Editor::new();
+        for c in "x\\frac".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        let (root, cursor) = ed.decorated();
+        let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+        let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
+        let (mut lines, mut bg, mut cursor_cell, _) = marker_boxes(
+            &block.lines,
+            &ed.marker_extents(),
+            &block.marks,
+            block.caret,
+            None,
+            None,
+        );
+        overlay_minibuffer(&ed, &mut lines, &mut bg, &mut cursor_cell);
+        let below: String = lines[1..].iter().flatten().collect();
+        assert!(
+            below.contains('─'),
+            "fraction bar in the preview: {:?}",
+            below
+        );
+        assert!(
+            below.contains('⬚'),
+            "empty slots in the preview: {:?}",
+            below
+        );
+        let previewed = bg[1..]
+            .iter()
+            .flatten()
+            .filter(|c| **c == Some(theme::PREVIEW_BG))
+            .count();
+        assert!(previewed > 0, "preview box painted");
     }
 
     #[test]

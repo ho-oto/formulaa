@@ -29,6 +29,9 @@ pub const FREE_BG: Color = Color::Indexed(24);
 pub const MINIBUF_BG: Color = Color::Indexed(94);
 /// … the same overlay while the typed name is not a known command.
 pub const MINIBUF_BAD_BG: Color = Color::Indexed(88);
+/// The live preview of a symbol command's character (the ghost cell
+/// right at the caret while typing \alpha).
+pub const PREVIEW_BG: Color = Color::Indexed(238);
 
 // ----- jump / block markers -----
 

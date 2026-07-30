@@ -116,6 +116,75 @@ impl Editor {
             && (resolve(cmd).is_some() || cmd.starts_with("delim") || cmd.starts_with("lr"))
     }
 
+    /// What the open minibuffer would insert on commit, as a row the
+    /// display can render (empty slots show as ⬚): \alpha previews α,
+    /// \frac the empty fraction, \pmatrix the delimited grid. Mode
+    /// openers and grid surgery preview as nothing. Pure, like
+    /// `resolve`.
+    pub fn command_preview_row(&self) -> Option<Row> {
+        let cmd = self.minibuffer.as_deref()?;
+        if cmd.is_empty() {
+            return None;
+        }
+        match resolve(cmd)? {
+            Edit::Sym(c) => Some(vec![Node::Sym(c)]),
+            Edit::Insert { node, .. } => Some(vec![node]),
+            Edit::Delim { left, right, mids } => Some(vec![Node::Delim {
+                left,
+                right,
+                mids,
+                segs: vec![vec![]; mids + 1],
+            }]),
+            Edit::Grid { wrap, rows, cols } => {
+                let array = Node::Array {
+                    rows,
+                    cols,
+                    cells: vec![vec![]; rows * cols],
+                };
+                Some(vec![match wrap {
+                    GridWrap::Bare => array,
+                    GridWrap::Norm => Node::Norm { arg: vec![array] },
+                    GridWrap::Pair(l, r) => Node::Delim {
+                        left: l,
+                        right: r,
+                        mids: 0,
+                        segs: vec![vec![array]],
+                    },
+                }])
+            }
+            // An accent hangs its mark on the empty-slot glyph.
+            Edit::Accent(mark) => Some(vec![if mark.under() {
+                Node::Accent {
+                    overs: vec![],
+                    unders: vec![mark],
+                    base: '⬚',
+                }
+            } else {
+                Node::Accent {
+                    overs: vec![mark],
+                    unders: vec![],
+                    base: '⬚',
+                }
+            }]),
+            Edit::Mid
+            | Edit::AddRow
+            | Edit::AddCol
+            | Edit::DelRow
+            | Edit::DelCol
+            | Edit::OpenBox(_) => None,
+        }
+    }
+
+    /// The single-character preview (the text-screen hosts can only
+    /// overlay one cell).
+    pub fn command_preview(&self) -> Option<char> {
+        match self.command_preview_row()?.as_slice() {
+            [Node::Sym(c)] => Some(*c),
+            [Node::BigOpSym { op, .. }] => Some(*op),
+            _ => None,
+        }
+    }
+
     /// Execute a `\command` from the minibuffer: resolve the spelling
     /// to an `Edit`, then apply it.
     pub fn execute(&mut self, cmd: &str) {
