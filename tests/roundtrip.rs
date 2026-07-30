@@ -811,6 +811,24 @@ fn triple_integral_band() {
     roundtrip("triple-integral", &row);
 }
 
+/// \Vmatrix (a ‖ ‖ norm around a grid) and a bare Array standing
+/// mid-row — the grid shapes the editor's newer commands produce.
+#[test]
+fn norm_grid_and_bare_array_roundtrip() {
+    let row = vec![Node::Norm {
+        arg: vec![array(2, 2, vec![s("a"), s("b"), vec![], s("d")])],
+    }];
+    roundtrip("vmatrix", &row);
+    assert_eq!(
+        row_to_latex(&normalize(&row)),
+        "\\begin{Vmatrix} a & b \\\\  & d \\end{Vmatrix}"
+    );
+    // A cell-clipboard paste at the top level drops a bare Array
+    // between ordinary siblings.
+    let row = cat(&[s("x+"), n(array(1, 2, vec![s("a"), s("b")])), s("=y")]);
+    roundtrip("bare-array-mid-row", &row);
+}
+
 /// The amssymb tier: relations, orders and operators that now carry a
 /// LaTeX spelling (a ≼ b ⪅ c ⋆ d ⊓ e ⟹ a ≺ e).
 #[test]

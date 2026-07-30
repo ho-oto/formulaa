@@ -113,8 +113,14 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 - ratatui のイベントは `KeyEventKind::Press` のみ処理(Windows の重複対策)。
 - ジャンプ(Ctrl+G)・ブロック選択(Ctrl+B)・選択範囲は私用領域文字の
   マーカー原子を表示用クローン AST に挿入する方式(editor.rs `decorated`)。
-  U+E000–E0FF は表示マーカー予約。マーカー原子は**幅ゼロで描画**され
+  U+E000–E0FF は表示マーカー予約(選択/^B/ジャンプに加え、グリッド編集の
+  セル/レーン選択ペア・フレーム角・隙間ゴーストが E0F4–E0FF を使う)。
+  マーカー原子は**幅ゼロで描画**され
   `Block.marks` として伝搬(レイアウト不変)。TUI 側は marks から
-  ラベル重ね書きと背景ボックスを塗る(main.rs `marker_boxes`)。
+  ラベル重ね書きと背景ボックスを塗る(tui.rs `marker_boxes`)。
+  **例外**: グリッド編集の隙間カーソルだけは装飾 AST に幅1の
+  ゴーストレーン(Spacer セル)を実体挿入する — 挿入プレビューを
+  兼ねるための意図的なレイアウト変化で、クリック座標のプローブ描画も
+  同じゴーストを含めて整合させる(editor/mod.rs `display_coords`)。
   構造ビュー(Ctrl+O)は正準描画を `parse_with_regions` に通して
   矩形+深さを回収し背景色を塗る(main.rs `draw_structure`)。
