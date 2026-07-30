@@ -13,6 +13,8 @@ use crate::symbols::{Accent, Delim, bigop_by_char, is_func_name, symbol_by_name}
 mod command;
 mod modes;
 
+use modes::gap_shift_cell as modes_gap_shift;
+
 pub use command::{Edit, resolve};
 
 /// One undo step: the formula with the cursor that belonged to it.
@@ -504,6 +506,51 @@ impl Editor {
         use crate::render::{RenderCtx, render_root};
         let n = cands.len().min(0x800);
         let mut root = self.root.clone();
+        // The gap-cursor ghost lane has real width: the probe render
+        // must include it (and probe paths shift past it), or every
+        // coordinate right of / below the ghost is off by a lane.
+        let gap = match self.grid {
+            Some(GridSel::Lanes {
+                cols: cmode, pos, ..
+            }) if pos % 2 == 0 => self.grid_info().map(|(k, i, rows, cols, _)| {
+                let g = pos / 2;
+                let parent = self.path[..k].to_vec();
+                let Node::Array {
+                    rows: nr,
+                    cols: nc,
+                    cells,
+                } = &mut row_at_mut(&mut root, &parent)[i]
+                else {
+                    unreachable!()
+                };
+                let ghost = || vec![Node::Spacer];
+                if cmode {
+                    for r in (0..rows).rev() {
+                        cells.insert(r * cols + g.min(cols), ghost());
+                    }
+                    *nc = cols + 1;
+                } else {
+                    for j in 0..cols {
+                        cells.insert(g.min(rows) * cols + j, ghost());
+                    }
+                    *nr = rows + 1;
+                }
+                (k, i, cmode, g, rows, cols, parent)
+            }),
+            _ => None,
+        };
+        let gap_fix = |p: &mut Vec<(usize, Field)>| {
+            let Some((k, i, cmode, g, rows, cols, parent)) = &gap else {
+                return;
+            };
+            if p.len() > *k
+                && p[..*k] == parent[..]
+                && p[*k].0 == *i
+                && let Field::Cell(cell) = p[*k].1
+            {
+                p[*k].1 = Field::Cell(modes_gap_shift(cell, *cmode, *g, *rows, *cols));
+            }
+        };
         // Ghosts first (deepest rows first), then the probes with their
         // paths nudged past the ghost insertions — mixing the orders
         // corrupts whichever set is inserted second.
@@ -517,7 +564,8 @@ impl Editor {
                 continue;
             }
             let (p, c) = &cand.pos;
-            let (p2, c2) = ghost_adjust(&self.ghost, p, *c);
+            let (mut p2, c2) = ghost_adjust(&self.ghost, p, *c);
+            gap_fix(&mut p2);
             let mark = char::from_u32(PROBE_BASE + idx as u32).unwrap();
             row_at_mut(&mut root, &p2).insert(c2, Node::Sym(mark));
         }

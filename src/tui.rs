@@ -1062,6 +1062,35 @@ mod tests {
         );
     }
 
+    /// Mouse clicks stay true while the gap ghost (a width-bearing
+    /// decoration) is up: the probe render includes the ghost lane.
+    #[test]
+    fn click_lands_true_while_the_gap_ghost_is_up() {
+        let mut ed = Editor::new();
+        for c in r"\matrix x".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        ed.input(Key::Char('o'), false, true);
+        ed.input(Key::Char('|'), false, false);
+        ed.input(Key::Left, false, false); // gap 0: ghost left of column 0
+        let (root, cursor) = ed.decorated();
+        let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+        let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
+        let mut xy = None;
+        for (y, line) in block.lines.iter().enumerate() {
+            if let Some(x) = line.iter().position(|&c| c == '𝑥') {
+                xy = Some((y, x));
+            }
+        }
+        let (y, x) = xy.expect("x visible in the ghosted display");
+        ed.click(x, y);
+        assert!(
+            matches!(ed.path.last(), Some((_, mascii::ast::Field::Cell(0)))),
+            "click lands in x's own cell: {:?}",
+            ed.path
+        );
+    }
+
     #[test]
     fn minibuffer_overlays_at_the_cursor_without_layout_shift() {
         let mut ed = Editor::new();

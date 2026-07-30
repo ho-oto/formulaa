@@ -857,14 +857,9 @@ impl Editor {
                 }
                 *nr = rows + 1;
             }
-            {
-                let (r, j) = (c / cols, c % cols);
-                let shifted = if cmode {
-                    r * (cols + 1) + j + usize::from(j >= g.min(cols))
-                } else {
-                    (r + usize::from(r >= g.min(rows))) * cols + j
-                };
-                path[k].1 = Field::Cell(shifted);
+            if let Field::Cell(cell) = path[k].1 {
+                let _ = c;
+                path[k].1 = Field::Cell(gap_shift_cell(cell, cmode, g, rows, cols));
             }
             return (root, Some((path, col)));
         }
@@ -1154,5 +1149,23 @@ impl Editor {
         self.path = path;
         self.col = col;
         self.reclamp_grid();
+    }
+}
+
+/// A flat cell index re-based past a ghost lane inserted at gap `g`
+/// of a rows×cols array (the gap-cursor preview has real width, so
+/// every coordinate that touches the array must shift with it).
+pub(crate) fn gap_shift_cell(
+    cell: usize,
+    cmode: bool,
+    g: usize,
+    rows: usize,
+    cols: usize,
+) -> usize {
+    let (r, j) = (cell / cols, cell % cols);
+    if cmode {
+        r * (cols + 1) + j + usize::from(j >= g.min(cols))
+    } else {
+        (r + usize::from(r >= g.min(rows))) * cols + j
     }
 }
