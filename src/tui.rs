@@ -475,7 +475,19 @@ fn marker_boxes(
             bg[y].resize(x + 1, None);
         }
         match rank {
-            None => row[x] = c, // a ^B label
+            // A ^B label: same look as the ^G labels — its cell keeps
+            // the label ground (the depth box would swallow the black
+            // glyph otherwise), or the selection color when its
+            // ancestor is the arrow-picked one.
+            None => {
+                row[x] = c;
+                let idx = (c as u32 - JUMP_CHAR_BASE) as usize;
+                bg[y][x] = Some(if block_selected == Some(idx) {
+                    theme::SELECTED_BG
+                } else {
+                    theme::LABEL_BG
+                });
+            }
             Some(r) => {
                 let is_sel = selected == Some(r);
                 if let Some(label) = JUMP_LABELS.chars().nth(r) {
@@ -763,14 +775,17 @@ mod tests {
             Some(ed.block_sel),
         );
         // Left delimiter column = outer (Delim) shade; some interior
-        // cell = the highlighted innermost (Array) color.
+        // cell = the highlighted innermost (Array) color. The baseline
+        // cell holds a label, which keeps the label ground instead of
+        // the box shade (that is what makes it readable).
         let row = block.baseline;
         assert_eq!(
-            bg[row][0],
+            bg[0][0],
             Some(theme::DEPTH_BG[1]),
             "delim column shade\n{:?}",
             lines
         );
+        assert_eq!(bg[row][0], Some(theme::LABEL_BG), "label ground");
         let inner = bg[row][2..lines[row].len() - 1]
             .iter()
             .filter_map(|c| *c)

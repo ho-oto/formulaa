@@ -19,12 +19,14 @@ use ratatui::style::Color;
 
 // ----- the palette -----
 
-/// 紫メイン: selected things and the cursor itself.
-const PURPLE: Color = Color::Indexed(97);
-/// 紫サブ (明): secondary selection info, nearer.
-const PURPLE_SOFT: Color = Color::Indexed(60);
-/// 紫サブ (暗): secondary selection info, farther.
-const PURPLE_DIM: Color = Color::Indexed(54);
+/// 紫メイン: selected things and the cursor itself — the deepest of
+/// the three, so "selected" always reads strongest.
+const PURPLE: Color = Color::Indexed(54);
+/// 紫サブ (明): secondary selection info.
+const PURPLE_SOFT: Color = Color::Indexed(97);
+/// 紫サブ (淡): secondary selection info, the quieter alternation
+/// partner.
+const PURPLE_DIM: Color = Color::Indexed(60);
 /// 緑 (背景): OK / actionable ground.
 const GREEN_BG: Color = Color::Indexed(22);
 /// 緑 (背景・明): the marker labels' ground — pops over GREEN_BG.
@@ -71,8 +73,6 @@ pub const DEPTH_BG: [Color; 2] = [PURPLE_DIM, PURPLE_SOFT];
 /// In-place minibuffer overlay (`\cmd` typed at the cursor) while the
 /// name is a known command.
 pub const MINIBUF_BG: Color = GREEN_BG;
-/// The live preview of what committing the command would insert.
-pub const PREVIEW_BG: Color = GREEN_BG;
 /// Marker label glyphs (jump labels, block labels).
 pub const LABEL_FG: Color = Color::Black;
 pub const LABEL_BG: Color = GREEN_BRIGHT_BG;
@@ -92,3 +92,6 @@ pub const MINIBUF_BAD_BG: Color = RED_BG;
 
 /// Unlabeled jump markers (beyond the label alphabet).
 pub const UNLABELED_BG: Color = GRAY_BG;
+/// The live preview of what committing the command would insert —
+/// neutral ground: it is information, not yet an action.
+pub const PREVIEW_BG: Color = GRAY_BG;
