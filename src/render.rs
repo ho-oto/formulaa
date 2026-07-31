@@ -9,7 +9,7 @@ use crate::ast::{Field, Node, Row};
 pub use crate::symbols::scripts::{
     subscript_char, superscript_char, unsubscript_char, unsuperscript_char,
 };
-use crate::symbols::{Accent, DrawnForm};
+use crate::symbols::{Accent, DrawnForm, lattice_char};
 
 pub const CURSOR_CHAR: char = '▌'; // U+258C LEFT HALF BLOCK (view-only)
 /// Placeholder for an empty mandatory slot, and explicit base of a script
@@ -25,13 +25,6 @@ pub const OP_BAND: char = '┈'; // U+2508 BOX DRAWINGS LIGHT QUADRUPLE DASH HOR
 /// changes the reading). Double arrows (⇒ ⇐) use a ═ body. Heads render
 /// as ASCII < > ; the Unicode arrows are accepted as lenient input heads.
 pub const DOUBLE_BODY: char = '═'; // U+2550 BOX DRAWINGS DOUBLE HORIZONTAL
-
-/// Junction glyph for a lattice crossing at (row kind, col kind):
-/// 0 = first, 1 = internal, 2 = last.
-pub fn lattice_char(row_kind: usize, col_kind: usize) -> char {
-    let table = [['┌', '┬', '┐'], ['├', '┼', '┤'], ['└', '┴', '┘']];
-    table[row_kind][col_kind]
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {

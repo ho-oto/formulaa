@@ -9,6 +9,7 @@
 //! - [`funcs`] — upright function names, limit-takers and ∑-class ops
 //! - [`accents`] — accent marks and their LaTeX commands
 //! - [`delims`] — the delimiter pairs (glyph columns, LaTeX)
+//! - [`lattice`] — the grid lattice junctions (bare and fused frames)
 //! - [`arrows`] — the stretchy labeled arrows
 //! - [`scripts`] — the inline super/subscript bijections
 //!
@@ -21,6 +22,7 @@ pub mod arrows;
 pub mod atoms;
 pub mod delims;
 pub mod funcs;
+pub mod lattice;
 pub mod radicals;
 pub mod scripts;
 
@@ -29,6 +31,7 @@ pub use arrows::*;
 pub use atoms::*;
 pub use delims::*;
 pub use funcs::*;
+pub use lattice::*;
 pub use radicals::*;
 
 /// Resolve an input spelling to its character: the input table

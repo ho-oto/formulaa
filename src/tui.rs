@@ -13,6 +13,7 @@ use mascii::editor::{
     BLK_CLOSE, Editor, JUMP_CHAR_BASE, JUMP_LABELS, JUMP_RANK_BASE, SEL_CLOSE, SEL_OPEN,
 };
 use mascii::render::{RenderCtx, render_root};
+use mascii::symbols::is_lattice_glyph;
 
 use crate::theme;
 
@@ -629,12 +630,6 @@ fn overlay_minibuffer(
 /// green glyphs (the ^O frame color), never as ordinary text.
 const FENDER_L: char = '\u{F8F0}';
 const FENDER_R: char = '\u{F8F1}';
-
-/// Lattice glyphs (the array's own frame and separators): recolored
-/// anywhere inside the frame rectangle.
-fn is_lattice_glyph(c: char) -> bool {
-    "┌┬┐├┼┤└┴┘".contains(c)
-}
 
 /// Delimiter pieces: recolored only on the rectangle's edge columns —
 /// a fused matrix's own parens sit exactly there, while a delimiter

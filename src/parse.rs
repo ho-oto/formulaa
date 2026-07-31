@@ -12,14 +12,10 @@
 
 use crate::ast::{Node, Row};
 use crate::render::{
-    DOUBLE_BODY, FRAC_BAR, OP_BAND, PLACEHOLDER, lattice_char, unstyle_char, unsubscript_char,
-    unsuperscript_char,
+    DOUBLE_BODY, FRAC_BAR, OP_BAND, PLACEHOLDER, unstyle_char, unsubscript_char, unsuperscript_char,
 };
 use crate::symbols::Delim;
-
-/// Left-edge glyphs of a grid lattice column.
-const LATTICE_LEFT: &[char] = &['┌', '├', '└']; // U+250C/251C/2514
-const LATTICE_TOP: &[char] = &['┌', '┬', '┐'];
+use crate::symbols::{LATTICE_LEFT, LATTICE_TOP, lattice_char};
 
 fn radical_index(c: char) -> Option<crate::symbols::Radical> {
     crate::symbols::Radical::of_glyph(c)
