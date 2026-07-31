@@ -140,6 +140,24 @@ impl MasciiEditor {
                 if let Some(p) = self.ed.command_preview() {
                     put(&mut lines, r + 1, c, p);
                 }
+            } else if let Some((kind, buf)) = &self.ed.op_entry {
+                // The name box overlays like the minibuffer; ▌ sits at
+                // the box's own caret. Only \op* draws spaces as ␣
+                // (there they mean piece separators).
+                let shown = if buf.is_empty() {
+                    "⬚".to_string()
+                } else if *kind == mascii::editor::BoxKind::OpStar {
+                    buf.replace(' ', "␣")
+                } else {
+                    buf.clone()
+                };
+                let mut x = c;
+                for ch in shown.chars() {
+                    put(&mut lines, r, x, ch);
+                    x += 1;
+                }
+                let cur = self.ed.op_cursor.min(shown.chars().count());
+                put(&mut lines, r, c + cur, CURSOR_CHAR);
             } else {
                 put(&mut lines, r, c, CURSOR_CHAR);
             }

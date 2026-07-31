@@ -197,6 +197,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
             bgrow,
             ccol,
             ed.free.is_some(),
+            ed.op_entry.is_some(),
             view.scroll_x,
             frame,
         ));
@@ -529,15 +530,19 @@ fn overlay_minibuffer(
     // like the minibuffer: content cells at the cursor, caret at the
     // box's own cursor. Drawing it as cells (not AST nodes) keeps the
     // run free of the reparse-quoting rules — no stray '…' quotes.
-    if let Some((_, buf)) = &ed.op_entry {
+    if let Some((kind, buf)) = &ed.op_entry {
         let Some((cy, cx)) = *cursor_cell else { return };
         if cy >= lines.len() {
             return;
         }
         let text: Vec<char> = if buf.is_empty() {
             vec!['⬚']
-        } else {
+        } else if *kind == mascii::editor::BoxKind::OpStar {
+            // Only \op* gives a space meaning (piece separator), so
+            // only there it draws as ␣ — matching the committed band.
             buf.replace(' ', "␣").chars().collect()
+        } else {
+            buf.chars().collect()
         };
         let end = cx + text.len();
         if lines[cy].len() < end + 1 {
@@ -636,6 +641,7 @@ fn decorate_line(
     bg: &[Option<Color>],
     cursor: Option<usize>,
     free_caret: bool,
+    box_caret: bool,
     scroll_x: usize,
     frame: Option<(usize, usize, usize, usize)>,
 ) -> Vec<Span<'static>> {
@@ -643,7 +649,14 @@ fn decorate_line(
     // cursor is a solid colored block instead (reverse video would swap
     // the tint onto the glyph, which reads as "the character changed
     // color", not "the cursor changed color").
-    let cursor_style = if free_caret {
+    let cursor_style = if box_caret {
+        // Inside a name box: the caret turns green so the modal layer
+        // is visible at the cursor itself.
+        Style::default()
+            .fg(theme::BOX_CURSOR_FG)
+            .bg(theme::BOX_CURSOR_BG)
+            .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK)
+    } else if free_caret {
         Style::default()
             .fg(theme::FREE_CURSOR_FG)
             .bg(theme::FREE_CURSOR_BG)
@@ -1390,7 +1403,17 @@ mod tests {
                 None,
             );
             let (y, x) = cursor_cell.expect("caret visible");
-            let spans = decorate_line(&lines[y], y, &struck, &bg[y], Some(x), false, 0, None);
+            let spans = decorate_line(
+                &lines[y],
+                y,
+                &struck,
+                &bg[y],
+                Some(x),
+                false,
+                false,
+                0,
+                None,
+            );
             let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
             // Every struck glyph is still there, followed by its strike.
             for &(r, c) in &block.cancel {

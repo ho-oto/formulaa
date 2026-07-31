@@ -229,7 +229,11 @@ impl Editor {
                     return None;
                 }
             }
-            Key::Char(' ') if kind != BoxKind::Op => self.op_type(' '),
+            // Space is content only where it means something: \op*
+            // pieces, \text prose, \tex source. \op and \rm commit.
+            Key::Char(' ') if matches!(kind, BoxKind::OpStar | BoxKind::Text | BoxKind::Tex) => {
+                self.op_type(' ')
+            }
             Key::Char('\\') if !ctrl && kind == BoxKind::Text => self.op_escape = true,
             Key::Char('"') if !ctrl && kind == BoxKind::Text => self.op_commit(),
             Key::Char(c) if !ctrl && kind == BoxKind::Text && text_char(c) => self.op_type(c),

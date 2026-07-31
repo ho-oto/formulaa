@@ -123,6 +123,24 @@ fn every_radical_wraps_the_selection() {
 }
 
 #[test]
+fn rm_box_space_commits() {
+    // Space is not \rm content (names are alphanumerics + dots): it
+    // commits the box, like in \op.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\rm a Space b");
+    assert!(ed.op_entry.is_none());
+    assert_eq!(latex(&ed), "\\mathrm{a}b");
+    // \text keeps spaces as real content.
+    let mut ed = Editor::new();
+    ed.execute("text");
+    for c in "if x".chars() {
+        ed.input(Key::Char(c), false, false);
+    }
+    ed.input(Key::Enter, false, false);
+    assert_eq!(latex(&ed), "\\text{if x}");
+}
+
+#[test]
 fn box_caret_moves_and_edge_commits() {
     // ←/→ edit inside the box: type "ac", step left, insert "b".
     let mut ed = Editor::new();
