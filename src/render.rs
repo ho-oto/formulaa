@@ -26,17 +26,6 @@ pub const OP_BAND: char = '┈'; // U+2508 BOX DRAWINGS LIGHT QUADRUPLE DASH HOR
 /// as ASCII < > ; the Unicode arrows are accepted as lenient input heads.
 pub const DOUBLE_BODY: char = '═'; // U+2550 BOX DRAWINGS DOUBLE HORIZONTAL
 
-/// Body glyph for an arrow head.
-pub fn arrow_body(op: crate::symbols::Arrow) -> char {
-    op.body()
-}
-/// Grid lattice markers: a bare Array frames itself with box-drawing
-/// junctions at every crossing of its separator rows/columns including the
-/// outer edges (┌ ┬ ┐ / ├ ┼ ┤ / └ ┴ ┘), so it needs no delimiter to have a
-/// parseable extent, and the explicit corners make adjacent lattices
-/// unambiguous.
-pub const LATTICE_CHARS: &[char] = &['┌', '┬', '┐', '├', '┼', '┤', '└', '┴', '┘'];
-
 /// Junction glyph for a lattice crossing at (row kind, col kind):
 /// 0 = first, 1 = internal, 2 = last.
 pub fn lattice_char(row_kind: usize, col_kind: usize) -> char {
@@ -277,7 +266,7 @@ fn center_pad(b: &Block, width: usize) -> Vec<Vec<char>> {
 }
 
 /// Math-italic mapping for rendered letters (LaTeX output keeps ASCII).
-pub fn italic_char(c: char) -> char {
+fn italic_char(c: char) -> char {
     match c {
         'h' => 'ℎ', // U+1D455 is unassigned; Unicode uses PLANCK CONSTANT
         'a'..='z' => char::from_u32(0x1D44E + (c as u32 - 'a' as u32)).unwrap(),
@@ -1133,7 +1122,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             let w = o.width().max(u.width()).max(1) + 3;
             // Heads are ASCII < > (box-drawing bodies and Unicode arrow
             // glyphs rarely align in height across fonts).
-            let mut body = vec![arrow_body(*op); w];
+            let mut body = vec![op.body(); w];
             if !op.right() {
                 body[0] = '<';
             } else {
