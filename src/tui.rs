@@ -638,9 +638,11 @@ fn is_lattice_glyph(c: char) -> bool {
 
 /// Delimiter pieces: recolored only on the rectangle's edge columns —
 /// a fused matrix's own parens sit exactly there, while a delimiter
-/// nested inside a cell does not.
+/// nested inside a cell does not. The pair pieces come from the
+/// symbols table; the extras are the shapes drawn outside it (angle
+/// arms, mid/norm columns, over/underbrace corners).
 fn is_delim_piece(c: char) -> bool {
-    "()[]{}⌈⌉⌊⌋⟨⟩╱╲│╭╮╰╯⎡⎢⎣⎤⎥⎦⎛⎜⎝⎞⎟⎠⎧⎪⎨⎩⎫⎬⎭‖┆┊".contains(c)
+    mascii::symbols::Delim::all_pieces().contains(&c) || "╱╲│╭╮╰╯‖".contains(c)
 }
 
 #[allow(clippy::too_many_arguments)]

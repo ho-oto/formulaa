@@ -15,6 +15,7 @@ use crate::render::{
     DOUBLE_BODY, FRAC_BAR, OP_BAND, PLACEHOLDER, lattice_char, unstyle_char, unsubscript_char,
     unsuperscript_char,
 };
+use crate::symbols::Delim;
 
 /// Left-edge glyphs of a grid lattice column.
 const LATTICE_LEFT: &[char] = &['┌', '├', '└']; // U+250C/251C/2514
@@ -133,7 +134,7 @@ fn side_glyphs(left: bool) -> &'static [char] {
     static SIDES: OnceLock<[Vec<char>; 2]> = OnceLock::new();
     let sides = SIDES.get_or_init(|| {
         let build = |left: bool| {
-            let mut v: Vec<char> = crate::symbols::Delim::ALL
+            let mut v: Vec<char> = Delim::ALL
                 .iter()
                 .flat_map(|d| d.glyphs(left))
                 .filter(|&c| c != '⎪')
@@ -153,23 +154,16 @@ fn side_glyphs(left: bool) -> &'static [char] {
 }
 
 /// Delimiter spec char for a glyph that can appear on the *baseline row*
-/// of a left delimiter column. Brace/angle columns always show their
-/// vertex (⎨ / ⟨) on the baseline, so ⎧ ⎪ ⎩ ╱ ╲ never occur here.
+/// of a left delimiter column (symbols::Delim answers; the norm ‖ is
+/// the one non-pair). Brace/angle columns always show their vertex
+/// (⎨ / ⟨) on the baseline, so ⎧ ⎪ ⎩ ╱ ╲ never occur here — and a
+/// standalone ├ is a lattice edge (fused junctions resolve via the
+/// column walk in open_spec_at).
 fn open_spec(c: char) -> Option<char> {
-    Some(match c {
-        '(' | '⎛' | '⎜' | '⎝' => '(',
-        '[' | '⎡' | '⎢' | '⎣' => '[',
-        '⌈' => '⌈',
-        '⌊' => '⌊',
-        '‖' => '‖',
-        '{' | '⎨' => '{',
-        '⟨' => '⟨',
-        '┆' => '.',
-        // ├ (fused-grid junction) resolves its family via the column walk
-        // in open_spec_at; standalone it is a lattice edge.
-        '├' => return None,
-        _ => return None,
-    })
+    if c == '‖' {
+        return Some('‖');
+    }
+    Delim::of_baseline_piece(c, true).map(|d| d.spec(true))
 }
 
 /// Fused-grid markers of a delimiter block, if its interior is one.
@@ -254,12 +248,7 @@ fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
         return open_spec(ch);
     }
     let h = g.g.len();
-    let in_run = |c: char| {
-        matches!(
-            c,
-            '⎡' | '⎢' | '⎣' | '├' | '⎪' | '⎛' | '⎜' | '⎝' | '⎧' | '⎨' | '⎩' | '┆'
-        )
-    };
+    let in_run = |c: char| c == '├' || Delim::run_glyphs(true).contains(&c);
     let mut top = row;
     while top > 0 && in_run(g.at(top - 1, col)) {
         top -= 1;
@@ -269,36 +258,14 @@ fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
         bot += 1;
     }
     let has = |c: char| (top..=bot).any(|r| g.at(r, col) == c);
-    if has('⎛') || has('⎜') || has('⎝') {
-        return Some('(');
-    }
-    if has('⎧') || has('⎨') || has('⎩') {
-        return Some('{');
-    }
-    if has('┆') {
-        return Some('.');
-    }
-    Some(match (has('⎡'), has('⎣')) {
-        (true, true) => '[',
-        (true, false) => '⌈',
-        (false, true) => '⌊',
-        // A cornerless extension run is the vertical bar (\abs).
-        (false, false) => '|',
-    })
+    Some(Delim::of_run(has, true).spec(true))
 }
 
 fn close_spec(c: char) -> Option<char> {
-    Some(match c {
-        ')' | '⎞' | '⎟' | '⎠' => ')',
-        ']' | '⎤' | '⎥' | '⎦' => ']',
-        '⌉' => '⌉',
-        '⌋' => '⌋',
-        '‖' => '‖',
-        '}' | '⎬' => '}',
-        '⟩' => '⟩',
-        '┊' => '.',
-        _ => return None,
-    })
+    if c == '‖' {
+        return Some('‖');
+    }
+    Delim::of_baseline_piece(c, false).map(|d| d.spec(false))
 }
 
 /// Like `close_spec`, resolving a fused-grid junction (┤) by walking its
@@ -312,12 +279,7 @@ fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
     if !matches!(ch, '⎤' | '⎥' | '⎦') && !(ch == '┤' && fused_junction(g, row, col)) {
         return close_spec(ch);
     }
-    let in_run = |c: char| {
-        matches!(
-            c,
-            '⎤' | '⎥' | '⎦' | '┤' | '⎪' | '⎞' | '⎟' | '⎠' | '⎫' | '⎬' | '⎭' | '┊'
-        )
-    };
+    let in_run = |c: char| c == '┤' || Delim::run_glyphs(false).contains(&c);
     let mut top = row;
     while top > 0 && in_run(g.at(top - 1, col)) {
         top -= 1;
@@ -327,21 +289,7 @@ fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
         bot += 1;
     }
     let has = |c: char| (top..=bot).any(|r| g.at(r, col) == c);
-    if has('⎞') || has('⎟') || has('⎠') {
-        return Some(')');
-    }
-    if has('⎫') || has('⎬') || has('⎭') {
-        return Some('}');
-    }
-    if has('┊') {
-        return Some('.');
-    }
-    Some(match (has('⎤'), has('⎦')) {
-        (true, true) => ']',
-        (true, false) => '⌉',
-        (false, true) => '⌋',
-        (false, false) => '|',
-    })
+    Some(Delim::of_run(has, false).spec(false))
 }
 
 /// Every glyph a left delimiter column of `spec` can contain (for the
@@ -350,7 +298,7 @@ fn left_family(spec: char) -> Vec<char> {
     match spec {
         '‖' => vec!['‖'],
         _ => {
-            let mut v = crate::symbols::Delim::of_spec(spec)
+            let mut v = Delim::of_spec(spec)
                 .map(|(d, _)| d.glyphs(true))
                 .unwrap_or_default();
             // A fused-grid junction can sit anywhere in the column…
@@ -1940,8 +1888,8 @@ fn parse_delim(
                 cells,
             };
             let (Some(left), Some(right)) = (
-                crate::symbols::Delim::of_spec_side(left, true),
-                crate::symbols::Delim::of_spec_side(right, false),
+                Delim::of_spec_side(left, true),
+                Delim::of_spec_side(right, false),
             ) else {
                 return err("cannot resolve delimiter family", bl, col);
             };
@@ -1998,8 +1946,8 @@ fn parse_delim(
         }
     } else {
         let (Some(left), Some(right)) = (
-            crate::symbols::Delim::of_spec_side(left, true),
-            crate::symbols::Delim::of_spec_side(right, false),
+            Delim::of_spec_side(left, true),
+            Delim::of_spec_side(right, false),
         ) else {
             return err("cannot resolve delimiter family", bl, col);
         };

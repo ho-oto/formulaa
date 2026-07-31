@@ -1137,6 +1137,13 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
         // is a separate node only because its *parse* needs the extent
         // rule (both sides are the same glyph).
         Node::Norm { .. } | Node::Delim { .. } => {
+            // Only some pair kinds fuse with a sole grid (symbols::Delim
+            // knows which): curly braces keep their vertex column, null
+            // ghosts and norm/angle geometry take a bare lattice.
+            let fusable = matches!(
+                node,
+                Node::Delim { left, right, .. } if left.fuses() && right.fuses()
+            );
             // The glyph layer below works on spec chars; the slot
             // decides the side, so the typed kinds spell theirs here.
             let (left, right, mids, segs) = match node {
@@ -1156,11 +1163,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             // Angles keep their vertex geometry and wrap a bare lattice
             // instead.
             if mids == 0
-                // Only ( [ ⌈ ⌊ | columns fuse with a sole grid: curly
-                // braces keep their vertex column, null ┆ ┊ ghosts and
-                // norm/angle geometry take a bare lattice instead.
-                && matches!(*left, '(' | '[' | '⌈' | '⌊' | '|')
-                && matches!(*right, ')' | ']' | '⌉' | '⌋' | '|')
+                && fusable
                 && let [seg] = segs
                 // Display markers are transparent: a labeled sole-Array
                 // segment still fuses (the label overlays a cell).

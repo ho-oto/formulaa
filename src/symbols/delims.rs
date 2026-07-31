@@ -56,6 +56,27 @@ pub static DELIM_NAMES: phf::Map<&'static str, char> = phf::phf_map! {
     "dot" | "none" => '.',
 };
 
+/// Spec char -> (pair, side); None = either side (the side-symmetric
+/// `|` and `.`). The input table of the enum, same shape as the symbol
+/// `NAMES` map; a test pins it against the `info` rows so the two
+/// cannot drift.
+pub static DELIM_SPECS: phf::Map<char, (Delim, Option<bool>)> = phf::phf_map! {
+    '(' => (Delim::Paren, Some(true)),
+    ')' => (Delim::Paren, Some(false)),
+    '[' => (Delim::Bracket, Some(true)),
+    ']' => (Delim::Bracket, Some(false)),
+    '{' => (Delim::Brace, Some(true)),
+    '}' => (Delim::Brace, Some(false)),
+    '⌈' => (Delim::Ceil, Some(true)),
+    '⌉' => (Delim::Ceil, Some(false)),
+    '⌊' => (Delim::Floor, Some(true)),
+    '⌋' => (Delim::Floor, Some(false)),
+    '⟨' => (Delim::Angle, Some(true)),
+    '⟩' => (Delim::Angle, Some(false)),
+    '|' => (Delim::Bar, None),
+    '.' => (Delim::Null, None),
+};
+
 impl Delim {
     pub const ALL: [Delim; 8] = [
         Delim::Paren,
@@ -142,18 +163,7 @@ impl Delim {
     /// The pair a spec char belongs to, and which side the char spells
     /// (None = either; the side-symmetric `|` and `.`).
     pub fn of_spec(c: char) -> Option<(Delim, Option<bool>)> {
-        Delim::ALL.into_iter().find_map(|d| {
-            let (l, r) = d.info().spec;
-            if l == r && c == l {
-                Some((d, None))
-            } else if c == l {
-                Some((d, Some(true)))
-            } else if c == r {
-                Some((d, Some(false)))
-            } else {
-                None
-            }
-        })
+        DELIM_SPECS.get(&c).copied()
     }
 
     /// The pair a spec char spells when it stands on the given side —
@@ -175,6 +185,134 @@ impl Delim {
     pub fn latex(self, left: bool) -> &'static str {
         let (l, r) = self.info().latex;
         if left { l } else { r }
+    }
+
+    /// Whether this pair's columns fuse with a sole grid segment (the
+    /// delimiter absorbs the lattice edges: ├ ┤ junction rows, ┬ ┴
+    /// markers on its top/bottom rows). Curly braces keep their vertex
+    /// column; null ghosts and norm/angle geometry take a bare lattice
+    /// instead.
+    pub const fn fuses(self) -> bool {
+        matches!(
+            self,
+            Delim::Paren | Delim::Bracket | Delim::Ceil | Delim::Floor | Delim::Bar
+        )
+    }
+
+    /// The pair a glyph on the *baseline row* of a delimiter column can
+    /// belong to (first claimant in `ALL` order wins the shared bracket
+    /// pieces — the column walk refines it). A pair with a vertex shows
+    /// the vertex on the baseline, so only its short and vertex glyphs
+    /// count; ⎧ ⎪ ⎩ never stand on a baseline.
+    pub fn of_baseline_piece(c: char, left: bool) -> Option<Delim> {
+        let side = |p: (char, char)| if left { p.0 } else { p.1 };
+        Delim::ALL.into_iter().find(|d| {
+            let info = d.info();
+            match info.vertex {
+                Some(vx) => c == side(info.short) || c == side(vx),
+                None => d.glyphs(left).contains(&c),
+            }
+        })
+    }
+
+    /// Every glyph a tall delimiter column can contain on this side
+    /// (tall pieces and vertices — never the one-line shorts).
+    pub fn run_glyphs(left: bool) -> &'static [char] {
+        use std::sync::OnceLock;
+        static RUNS: OnceLock<[Vec<char>; 2]> = OnceLock::new();
+        let runs = RUNS.get_or_init(|| {
+            let build = |left: bool| {
+                let mut v: Vec<char> = Delim::ALL
+                    .iter()
+                    .flat_map(|d| {
+                        let info = d.info();
+                        let mut p = Vec::new();
+                        if let Some(tall) = info.tall {
+                            let (t, e, b) = tall[usize::from(!left)];
+                            p.extend([t, e, b]);
+                        }
+                        if let Some(vx) = info.vertex {
+                            p.push(if left { vx.0 } else { vx.1 });
+                        }
+                        p
+                    })
+                    .collect();
+                v.sort_unstable();
+                v.dedup();
+                v
+            };
+            [build(true), build(false)]
+        });
+        &runs[usize::from(!left)]
+    }
+
+    /// Resolve which pair a delimiter column's glyph run belongs to.
+    /// Pieces unique to one (pair, side) resolve outright (⎜ is paren,
+    /// ⎨ is brace, ┆ is null — the ⎪ extension serves both brace
+    /// columns, so it stays neutral); what remains is the group sharing
+    /// its extension piece (bracket/ceil/floor/bar all extend with ⎢),
+    /// where the corners decide — by exactly the corner-dropping
+    /// convention the tall columns encode (⌈ repeats its foot, ⌊ its
+    /// head, the bar both).
+    pub fn of_run(has: impl Fn(char) -> bool, left: bool) -> Delim {
+        let owners = |g: char| {
+            Delim::ALL
+                .iter()
+                .flat_map(|d| [d.glyphs(true), d.glyphs(false)])
+                .filter(|v| v.contains(&g))
+                .count()
+        };
+        for d in Delim::ALL {
+            if d.glyphs(left).into_iter().any(|g| owners(g) == 1 && has(g)) {
+                return d;
+            }
+        }
+        // The extension-sharing group: its members' own corners are the
+        // pieces that differ from the shared extension.
+        let tall = |d: Delim| d.info().tall.map(|t| t[usize::from(!left)]);
+        let group: Vec<(Delim, (char, char, char))> = Delim::ALL
+            .into_iter()
+            .filter_map(|d| Some((d, tall(d)?)))
+            .filter(|&(_, (_, e, _))| {
+                Delim::ALL
+                    .iter()
+                    .filter(|&&o| tall(o).is_some_and(|(_, oe, _)| oe == e))
+                    .count()
+                    > 1
+            })
+            .collect();
+        // The group's head and foot corners (every cornered member
+        // shares them: ⎡ and ⎣ on the left).
+        let head = group
+            .iter()
+            .find_map(|&(_, (t, e, _))| (t != e).then_some(t));
+        let foot = group
+            .iter()
+            .find_map(|&(_, (_, e, b))| (b != e).then_some(b));
+        let (head_seen, foot_seen) = (head.is_some_and(&has), foot.is_some_and(&has));
+        group
+            .iter()
+            .find(|&&(_, (t, e, b))| (t != e) == head_seen && (b != e) == foot_seen)
+            .map(|&(d, _)| d)
+            // Unreachable by construction (the no-corner member matches
+            // anything left), but stay total.
+            .unwrap_or(Delim::Bar)
+    }
+
+    /// Every glyph any pair can show on either side, in any height.
+    pub fn all_pieces() -> &'static [char] {
+        use std::sync::OnceLock;
+        static PIECES: OnceLock<Vec<char>> = OnceLock::new();
+        PIECES.get_or_init(|| {
+            let mut v: Vec<char> = Delim::ALL
+                .iter()
+                .flat_map(|d| [d.glyphs(true), d.glyphs(false)])
+                .flatten()
+                .collect();
+            v.sort_unstable();
+            v.dedup();
+            v
+        })
     }
 
     /// Every glyph this side can show, in any height (the angles show
@@ -244,5 +382,66 @@ mod tests {
         for (&name, &c) in DELIM_NAMES.entries() {
             assert!(Delim::of_spec(c).is_some(), "\\{} names no pair", name);
         }
+        // The DELIM_SPECS input table lists nothing the info rows do
+        // not spell (the loop above proved the other inclusion).
+        for (&c, &(d, _)) in DELIM_SPECS.entries() {
+            assert!(
+                d.spec(true) == c || d.spec(false) == c,
+                "{:?} is not a spec of {:?}",
+                c,
+                d
+            );
+        }
+    }
+
+    /// The column-run classifiers derived from the info rows behave as
+    /// the parser expects: baseline pieces resolve to their family
+    /// (vertex pairs by short/vertex only), and glyph runs resolve
+    /// through unique pieces or the corner convention.
+    #[test]
+    fn run_classifiers_follow_the_table() {
+        // Baseline pieces: bracket pieces default to the bracket, the
+        // brace only stands on its short or vertex.
+        for (c, want) in [
+            ('⎢', Some(Delim::Bracket)),
+            ('⎡', Some(Delim::Bracket)),
+            ('⌈', Some(Delim::Ceil)),
+            ('(', Some(Delim::Paren)),
+            ('⎜', Some(Delim::Paren)),
+            ('⎨', Some(Delim::Brace)),
+            ('┆', Some(Delim::Null)),
+            ('⎧', None),
+            ('⎪', None),
+            ('|', None),
+        ] {
+            assert_eq!(Delim::of_baseline_piece(c, true), want, "{:?}", c);
+        }
+        // Runs never contain one-line shorts.
+        for left in [true, false] {
+            for d in Delim::ALL {
+                let short = if left {
+                    d.info().short.0
+                } else {
+                    d.info().short.1
+                };
+                let run = Delim::run_glyphs(left);
+                // ┆ and ⎢ double as extensions — the only shorts a run
+                // may show.
+                if !matches!(d, Delim::Null | Delim::Bar) {
+                    assert!(!run.contains(&short), "{:?} in run", short);
+                }
+            }
+        }
+        // Run resolution: unique pieces first, corners for the rest.
+        let of = |glyphs: &'static str, left| Delim::of_run(|c| glyphs.contains(c), left);
+        assert_eq!(of("⎛⎜⎝", true), Delim::Paren);
+        assert_eq!(of("⎧⎨⎪⎩", true), Delim::Brace);
+        assert_eq!(of("⎡⎢⎣", true), Delim::Bracket);
+        assert_eq!(of("⎡⎢", true), Delim::Ceil);
+        assert_eq!(of("⎢⎣", true), Delim::Floor);
+        assert_eq!(of("⎢", true), Delim::Bar);
+        assert_eq!(of("⎪", true), Delim::Bar); // vertex-less ⎪ run: degenerate, reads as bar
+        assert_eq!(of("⎤⎥", false), Delim::Ceil);
+        assert_eq!(of("┊", false), Delim::Null);
     }
 }
