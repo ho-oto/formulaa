@@ -694,10 +694,17 @@ fn decorate_line(
     for (i, &c) in line.iter().enumerate().skip(scroll_x) {
         let u = c as u32;
         let cell_bg = bg.get(i).copied().flatten();
+        // The fender sentinels always show as brackets, whatever branch
+        // (caret included) ends up drawing the cell.
+        let shown = match c {
+            FENDER_L => '[',
+            FENDER_R => ']',
+            _ => c,
+        };
         let cell = if struck.contains(&(y, i)) {
-            format!("{}\u{338}", c)
+            format!("{}\u{338}", shown)
         } else {
-            c.to_string()
+            shown.to_string()
         };
         if cursor == Some(i) {
             // Terminal-style caret: reverse video on the glyph right of
@@ -717,8 +724,7 @@ fn decorate_line(
             if let Some(color) = cell_bg {
                 style = style.bg(color);
             }
-            let glyph = if c == FENDER_L { "[" } else { "]" };
-            spans.push(Span::styled(glyph.to_string(), style));
+            spans.push(Span::styled(cell, style));
         } else if c == '␣' {
             // Explicit space atom: keep visible but unobtrusive.
             flush(&mut buf, buf_bg, &mut spans);
@@ -1342,6 +1348,29 @@ mod tests {
             all
         );
         assert!(!all.contains('\''), "no quote artifacts: {}", all);
+        // With the caret at the end of the content it sits on the right
+        // fender's cell — the painted line must still show the bracket
+        // (the caret draws the mapped glyph, not the raw sentinel).
+        {
+            let (cy, cx) = cursor_cell.unwrap();
+            let spans = decorate_line(
+                &lines[cy],
+                cy,
+                &struck,
+                &bg[cy],
+                Some(cx),
+                false,
+                true,
+                0,
+                None,
+            );
+            let painted: String = spans.iter().map(|s| s.content.as_ref()).collect();
+            assert!(
+                painted.contains("[a]"),
+                "fenders survive the caret: {}",
+                painted
+            );
+        }
         // ← moves the display caret inside the box.
         let (cy, cx) = cursor_cell.unwrap();
         ed.input(Key::Left, false, false);
