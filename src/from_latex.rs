@@ -661,15 +661,14 @@ impl Parser {
     /// `\mathbb{R}`-style styled letters: every char in the group that
     /// the family knows becomes its styled atom.
     fn styled_letters<'a>(&self, name: &str, t: &'a [Tok]) -> Option<(Row, &'a [Tok])> {
-        let fam = crate::symbols::alphabets::ALPHABETS
-            .iter()
-            .find(|f| f.latex == name)?;
+        let (style, _) = crate::symbols::alphabets::ALPHABETS
+            .entries()
+            .find(|(_, f)| f.latex == name)?;
         let (text, rest) = self.group_text(t);
         let row: Row = text
             .chars()
             .filter_map(|c| {
-                crate::symbols::alphabets::alphabet_char(&format!("{}{}", fam.prefixes[0], c))
-                    .map(Node::Sym)
+                crate::symbols::alphabets::alphabet_char(&format!("{}{}", style, c)).map(Node::Sym)
             })
             .collect();
         Some((row, rest))

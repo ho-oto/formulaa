@@ -553,13 +553,11 @@ pub fn is_atom(c: char) -> bool {
             NAMES
                 .values()
                 .copied()
-                .chain(alphabets::ALPHABETS.iter().flat_map(|a| {
+                .chain(alphabets::ALPHABETS.keys().flat_map(|style| {
                     ('A'..='Z')
                         .chain('a'..='z')
                         .chain('0'..='9')
-                        .filter_map(|l| {
-                            alphabets::alphabet_char(&format!("{}{}", a.prefixes[0], l))
-                        })
+                        .filter_map(move |l| alphabets::alphabet_char(&format!("{}{}", style, l)))
                 }))
                 .collect()
         })
@@ -640,9 +638,9 @@ mod tests {
                 name
             );
         }
-        for fam in alphabets::ALPHABETS {
+        for style in alphabets::ALPHABETS.keys() {
             for l in ('A'..='Z').chain('a'..='z').chain('0'..='9') {
-                if let Some(c) = alphabets::alphabet_char(&format!("{}{}", fam.prefixes[0], l)) {
+                if let Some(c) = alphabets::alphabet_char(&format!("{}{}", style, l)) {
                     assert!(!is_reserved_glyph(c), "{:?}", c);
                 }
             }

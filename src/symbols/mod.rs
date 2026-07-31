@@ -69,9 +69,9 @@ mod tests {
     /// regression that widens the gap fails here.
     #[test]
     fn latex_spelling_covers_the_styled_families() {
-        for fam in alphabets::ALPHABETS {
+        for (style, fam) in alphabets::ALPHABETS.entries() {
             for l in ('A'..='Z').chain('a'..='z') {
-                let c = alphabets::alphabet_char(&format!("{}{}", fam.prefixes[0], l)).unwrap();
+                let c = alphabets::alphabet_char(&format!("{}{}", style, l)).unwrap();
                 let want = format!("\\{}{{{}}}", fam.latex, l);
                 // A letterlike symbol the curated table names (ℑ = \Im)
                 // keeps that name — it wins on purpose.
@@ -79,7 +79,7 @@ mod tests {
                 assert!(
                     got == want || latex_name(c).is_some(),
                     "{}{}: {:?}",
-                    fam.prefixes[0],
+                    style,
                     l,
                     got
                 );
