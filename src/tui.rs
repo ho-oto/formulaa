@@ -525,6 +525,32 @@ fn overlay_minibuffer(
     struck: &mut std::collections::HashSet<(usize, usize)>,
     cursor_cell: &mut Option<(usize, usize)>,
 ) {
+    // The in-place name box (\op \rm \text \tex) overlays exactly
+    // like the minibuffer: content cells at the cursor, caret at the
+    // box's own cursor. Drawing it as cells (not AST nodes) keeps the
+    // run free of the reparse-quoting rules — no stray '…' quotes.
+    if let Some((_, buf)) = &ed.op_entry {
+        let Some((cy, cx)) = *cursor_cell else { return };
+        if cy >= lines.len() {
+            return;
+        }
+        let text: Vec<char> = if buf.is_empty() {
+            vec!['⬚']
+        } else {
+            buf.replace(' ', "␣").chars().collect()
+        };
+        let end = cx + text.len();
+        if lines[cy].len() < end + 1 {
+            lines[cy].resize(end + 1, ' ');
+            bg[cy].resize(end + 1, None);
+        }
+        for (i, &ch) in text.iter().enumerate() {
+            lines[cy][cx + i] = ch;
+            bg[cy][cx + i] = Some(theme::MINIBUF_BG);
+        }
+        *cursor_cell = Some((cy, cx + ed.op_cursor.min(text.len())));
+        return;
+    }
     let Some(buf) = &ed.minibuffer else { return };
     let Some((cy, cx)) = *cursor_cell else { return };
     if cy >= lines.len() {
@@ -1251,6 +1277,51 @@ mod tests {
         assert!(all.contains('α'), "{}", all);
         let bars_after = lines.iter().filter(|l| l.contains(&'─')).count();
         assert_eq!(bars_after, bars_before, "the bar was not painted over");
+    }
+
+    /// The name box never shows the reparse-quoting quotes: typing a
+    /// single letter into \rm displays that letter, bare, with the
+    /// caret at the box cursor.
+    #[test]
+    fn op_box_overlay_is_quote_free() {
+        let mut ed = Editor::new();
+        for c in "\\rm a".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        let (root, cursor) = ed.decorated();
+        let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+        let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
+        let (mut lines, mut bg, mut cursor_cell, _) = marker_boxes(
+            &block.lines,
+            &ed.marker_extents(),
+            &block.marks,
+            block.caret,
+            None,
+            None,
+        );
+        let mut struck = std::collections::HashSet::new();
+        overlay_minibuffer(&ed, &mut lines, &mut bg, &mut struck, &mut cursor_cell);
+        let all: String = lines.iter().flatten().collect();
+        assert!(all.contains('a'), "{}", all);
+        assert!(!all.contains('\''), "no quote artifacts: {}", all);
+        // ← moves the display caret inside the box.
+        let (cy, cx) = cursor_cell.unwrap();
+        ed.input(Key::Left, false, false);
+        let (root, cursor) = ed.decorated();
+        let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+        let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
+        let (mut lines, mut bg, mut cursor_cell2, _) = marker_boxes(
+            &block.lines,
+            &ed.marker_extents(),
+            &block.marks,
+            block.caret,
+            None,
+            None,
+        );
+        overlay_minibuffer(&ed, &mut lines, &mut bg, &mut struck, &mut cursor_cell2);
+        let (cy2, cx2) = cursor_cell2.unwrap();
+        assert_eq!(cy2, cy);
+        assert_eq!(cx2 + 1, cx, "caret stepped left inside the box");
     }
 
     #[test]

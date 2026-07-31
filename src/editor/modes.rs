@@ -877,30 +877,6 @@ impl Editor {
         let adjusted = ghost_adjust(&self.ghost, &path, col);
         path = adjusted.0;
         col = adjusted.1;
-        if let Some((_, buf)) = &self.op_entry {
-            // The in-progress name shows as an upright run (display-
-            // only Func atoms: never quoted, spaces drawn as ␣) framed
-            // by the selection markers. The run splits at the box
-            // caret so the display caret can sit inside the text.
-            let cur = self.op_cursor.min(buf.chars().count());
-            let at = buf.char_indices().nth(cur).map_or(buf.len(), |(b, _)| b);
-            let (before, after) = buf.split_at(at);
-            let mut nodes = vec![Node::Sym(SEL_OPEN)];
-            if !before.is_empty() {
-                nodes.push(Node::Func(before.replace(' ', "␣")));
-            }
-            let caret_at = nodes.len();
-            if !after.is_empty() {
-                nodes.push(Node::Func(after.replace(' ', "␣")));
-            }
-            if buf.is_empty() {
-                nodes.push(Node::Sym('⬚'));
-            }
-            nodes.push(Node::Sym(SEL_CLOSE));
-            let row = row_at_mut(&mut root, &path);
-            row.splice(col..col, nodes);
-            return (root, Some((path, col + caret_at)));
-        }
         if let Some((lo, hi)) = self.selection() {
             let row = row_at_mut(&mut root, &path);
             row.insert(hi, Node::Sym(SEL_CLOSE));
