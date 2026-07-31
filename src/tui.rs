@@ -535,7 +535,7 @@ fn overlay_minibuffer(
         if cy >= lines.len() {
             return;
         }
-        let text: Vec<char> = if buf.is_empty() {
+        let content: Vec<char> = if buf.is_empty() {
             vec!['⬚']
         } else if *kind == mascii::editor::BoxKind::OpStar {
             // Only \op* gives a space meaning (piece separator), so
@@ -544,16 +544,23 @@ fn overlay_minibuffer(
         } else {
             buf.chars().collect()
         };
-        let end = cx + text.len();
+        // The box shows as [content]: bracket fenders on the brighter
+        // label ground, content on the box ground — the modal span is
+        // visible at a glance.
+        let end = cx + content.len() + 2;
         if lines[cy].len() < end + 1 {
             lines[cy].resize(end + 1, ' ');
             bg[cy].resize(end + 1, None);
         }
-        for (i, &ch) in text.iter().enumerate() {
-            lines[cy][cx + i] = ch;
-            bg[cy][cx + i] = Some(theme::MINIBUF_BG);
+        lines[cy][cx] = '[';
+        bg[cy][cx] = Some(theme::LABEL_BG);
+        for (i, &ch) in content.iter().enumerate() {
+            lines[cy][cx + 1 + i] = ch;
+            bg[cy][cx + 1 + i] = Some(theme::MINIBUF_BG);
         }
-        *cursor_cell = Some((cy, cx + ed.op_cursor.min(text.len())));
+        lines[cy][end - 1] = ']';
+        bg[cy][end - 1] = Some(theme::LABEL_BG);
+        *cursor_cell = Some((cy, cx + 1 + ed.op_cursor.min(content.len())));
         return;
     }
     let Some(buf) = &ed.minibuffer else { return };
@@ -1315,7 +1322,11 @@ mod tests {
         let mut struck = std::collections::HashSet::new();
         overlay_minibuffer(&ed, &mut lines, &mut bg, &mut struck, &mut cursor_cell);
         let all: String = lines.iter().flatten().collect();
-        assert!(all.contains('a'), "{}", all);
+        assert!(
+            all.contains("[a]"),
+            "bracket fenders around content: {}",
+            all
+        );
         assert!(!all.contains('\''), "no quote artifacts: {}", all);
         // ← moves the display caret inside the box.
         let (cy, cx) = cursor_cell.unwrap();

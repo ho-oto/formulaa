@@ -152,12 +152,15 @@ impl MasciiEditor {
                     buf.clone()
                 };
                 let mut x = c;
-                for ch in shown.chars() {
+                for ch in std::iter::once('[')
+                    .chain(shown.chars())
+                    .chain(std::iter::once(']'))
+                {
                     put(&mut lines, r, x, ch);
                     x += 1;
                 }
                 let cur = self.ed.op_cursor.min(shown.chars().count());
-                put(&mut lines, r, c + cur, CURSOR_CHAR);
+                put(&mut lines, r, c + 1 + cur, CURSOR_CHAR);
             } else {
                 put(&mut lines, r, c, CURSOR_CHAR);
             }
