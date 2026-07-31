@@ -544,22 +544,20 @@ fn overlay_minibuffer(
         } else {
             buf.chars().collect()
         };
-        // The box shows as [content]: bracket fenders on the brighter
-        // label ground, content on the box ground — the modal span is
-        // visible at a glance.
+        // The box shows as [content]: bracket fenders drawn as green
+        // glyphs (no ground — same look as the ^O grid frame), content
+        // on the box ground.
         let end = cx + content.len() + 2;
         if lines[cy].len() < end + 1 {
             lines[cy].resize(end + 1, ' ');
             bg[cy].resize(end + 1, None);
         }
-        lines[cy][cx] = '[';
-        bg[cy][cx] = Some(theme::LABEL_BG);
+        lines[cy][cx] = FENDER_L;
         for (i, &ch) in content.iter().enumerate() {
             lines[cy][cx + 1 + i] = ch;
             bg[cy][cx + 1 + i] = Some(theme::MINIBUF_BG);
         }
-        lines[cy][end - 1] = ']';
-        bg[cy][end - 1] = Some(theme::LABEL_BG);
+        lines[cy][end - 1] = FENDER_R;
         *cursor_cell = Some((cy, cx + 1 + ed.op_cursor.min(content.len())));
         return;
     }
@@ -627,6 +625,11 @@ fn overlay_minibuffer(
 /// backgrounds from `marker_boxes` are applied to plain glyphs. A
 /// struck cell gets its combining U+0338 appended *inside* its span,
 /// so the ligature is never split across style boundaries.
+/// Display sentinels for the open name box's [ ] fenders: drawn as
+/// green glyphs (the ^O frame color), never as ordinary text.
+const FENDER_L: char = '\u{F8F0}';
+const FENDER_R: char = '\u{F8F1}';
+
 /// Lattice glyphs (the array's own frame and separators): recolored
 /// anywhere inside the frame rectangle.
 fn is_lattice_glyph(c: char) -> bool {
@@ -705,6 +708,17 @@ fn decorate_line(
                 _ => cursor_style,
             };
             spans.push(Span::styled(cell, style));
+        } else if c == FENDER_L || c == FENDER_R {
+            // The open box's fenders: green glyphs, no ground.
+            flush(&mut buf, buf_bg, &mut spans);
+            let mut style = Style::default()
+                .fg(theme::GRID_FRAME_FG)
+                .add_modifier(Modifier::BOLD);
+            if let Some(color) = cell_bg {
+                style = style.bg(color);
+            }
+            let glyph = if c == FENDER_L { "[" } else { "]" };
+            spans.push(Span::styled(glyph.to_string(), style));
         } else if c == '␣' {
             // Explicit space atom: keep visible but unobtrusive.
             flush(&mut buf, buf_bg, &mut spans);
@@ -1323,7 +1337,7 @@ mod tests {
         overlay_minibuffer(&ed, &mut lines, &mut bg, &mut struck, &mut cursor_cell);
         let all: String = lines.iter().flatten().collect();
         assert!(
-            all.contains("[a]"),
+            all.contains(&format!("{}a{}", FENDER_L, FENDER_R)),
             "bracket fenders around content: {}",
             all
         );
