@@ -198,6 +198,22 @@ impl Accent {
         }
     }
 
+    /// The cells this mark occupies in a compact column, in order —
+    /// the ddot is the one mark wider than its base (`․․` overhanging
+    /// one column right); every other mark is its single glyph.
+    pub fn cells(self) -> Vec<char> {
+        match self.drawn() {
+            DrawnForm::Dots => vec!['․', '․'],
+            _ => vec![self.glyph()],
+        }
+    }
+
+    /// A glyph some mark draws with (band material and compact columns
+    /// alike).
+    pub fn is_mark_material(c: char) -> bool {
+        Accent::ALL.iter().any(|a| a.glyph() == c)
+    }
+
     /// Read a compact over-column glyph back to its mark (`․` is a
     /// dot; the caller upgrades a `․․` pair to the ddot).
     pub fn of_over_glyph(c: char) -> Option<Accent> {

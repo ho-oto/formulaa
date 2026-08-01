@@ -7,13 +7,13 @@
 
 use crate::ast::{Field, Node, Row};
 use crate::glyphs::{
-    COL_MARK_BOT, COL_MARK_TOP, CROSSING, MID, NORM, ROW_JUNCTION_L, ROW_JUNCTION_R, STEM,
-    brace_corners, lattice_char,
+    COL_MARK_BOT, COL_MARK_TOP, CROSSING, HEAD_LEFT, HEAD_RIGHT, MID, NORM, ROW_JUNCTION_L,
+    ROW_JUNCTION_R, STEM, brace_corners, lattice_char,
 };
 pub use crate::symbols::scripts::{
     subscript_char, superscript_char, unsubscript_char, unsuperscript_char,
 };
-use crate::symbols::{Accent, DrawnForm};
+use crate::symbols::{Accent, ColDelim, Delim, DrawnForm};
 
 // The structural glyph vocabulary lives in crate::glyphs; re-exported
 // here for the callers that grew up importing it from the render side.
@@ -629,9 +629,9 @@ pub fn render_row(
                             // keep decimals tight (3.14).
                             || (a == '.' && b.is_ascii_alphabetic())
                             || (a == b && (a == FRAC_BAR || a == DOUBLE_BODY))
-                            || (a == FRAC_BAR && b == '>')
-                            || (a == DOUBLE_BODY && b == '>')
-                            || (a == '<' && (b == FRAC_BAR || b == DOUBLE_BODY))
+                            || (a == FRAC_BAR && b == HEAD_RIGHT)
+                            || (a == DOUBLE_BODY && b == HEAD_RIGHT)
+                            || (a == HEAD_LEFT && (b == FRAC_BAR || b == DOUBLE_BODY))
                     }
                     _ => false,
                 };
@@ -910,25 +910,20 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             // as ․․ overhanging one column right of the base; the spill
             // column keeps a blank baseline so the pair reads back
             // uniquely.
-            let w = if overs.contains(&Accent::Ddot) { 2 } else { 1 };
-            let cell = |c: char| {
-                let mut v = vec![c];
+            let w = overs
+                .iter()
+                .chain(unders.iter())
+                .map(|m| m.cells().len())
+                .max()
+                .unwrap_or(1)
+                .max(1);
+            let pad = |mut v: Vec<char>| {
                 v.resize(w, ' ');
                 v
             };
-            let mut lines: Vec<Vec<char>> = overs
-                .iter()
-                .rev()
-                .map(|&m| {
-                    if m == Accent::Ddot {
-                        vec!['․', '․']
-                    } else {
-                        cell(m.glyph())
-                    }
-                })
-                .collect();
-            lines.push(cell(b));
-            lines.extend(unders.iter().map(|&m| cell(m.glyph())));
+            let mut lines: Vec<Vec<char>> = overs.iter().rev().map(|&m| pad(m.cells())).collect();
+            lines.push(pad(vec![b]));
+            lines.extend(unders.iter().map(|&m| pad(m.cells())));
             Block::new(lines, overs.len())
         }
 
@@ -1105,9 +1100,9 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             // glyphs rarely align in height across fonts).
             let mut body = vec![op.body(); w];
             if !op.right() {
-                body[0] = '<';
+                body[0] = HEAD_LEFT;
             } else {
-                body[w - 1] = '>';
+                body[w - 1] = HEAD_RIGHT;
             }
             let mut lines = center_pad(&o, w);
             let baseline = lines.len();
@@ -1130,6 +1125,17 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 node,
                 Node::Delim { left, right, .. } if left.fuses() && right.fuses()
             );
+            // The drawn-kind flags come off the types, not the spec
+            // chars: the norm is its own node, angles and braces are
+            // their Delim kinds per side.
+            let is_norm = matches!(node, Node::Norm { .. });
+            let (angle_sided, curly) = match node {
+                Node::Delim { left, right, .. } => (
+                    *left == Delim::Angle || *right == Delim::Angle,
+                    left.col() == Some(ColDelim::Brace) || right.col() == Some(ColDelim::Brace),
+                ),
+                _ => (false, false),
+            };
             // The glyph layer below works on spec chars; the slot
             // decides the side, so the typed kinds spell theirs here.
             let (left, right, mids, segs) = match node {
@@ -1217,13 +1223,12 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             // reads as a kink). The turn is a same-column vertical pair
             // (╱ over ╲ on the left, ╲ over ╱ on the right); the extent
             // is always even, the baseline is the upper turn row.
-            let angle = h >= 2 && (*left == '⟨' || *right == '⟩');
-            let curly = *left == '{' || *right == '}';
+            let angle = h >= 2 && angle_sided;
             // Norm-in-norm: both sides are the same ‖, so the outer
             // pair must outsize the inner one — whenever the body holds
             // a full-height ‖ column, grow the extent by a row on each
             // side (the parser groups ‖ columns by vertical extent).
-            let norm = *left == NORM || *right == NORM;
+            let norm = is_norm;
             let inner_norm_full = norm
                 && (0..body.width()).any(|c| {
                     body.lines

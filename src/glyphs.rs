@@ -27,6 +27,12 @@ pub const OP_BAND: char = '┈'; // U+2508 BOX DRAWINGS LIGHT QUADRUPLE DASH HOR
 /// ASCII < > (never the Unicode arrows — those stay ordinary atoms).
 pub const DOUBLE_BODY: char = '═'; // U+2550 BOX DRAWINGS DOUBLE HORIZONTAL
 
+/// The arrow heads capping a body run (`──>` `<══`). The same ASCII
+/// chars are ordinary atoms elsewhere — a head is one that touches
+/// its body, which is why the renderer spaces the fusion pairs.
+pub const HEAD_RIGHT: char = '>';
+pub const HEAD_LEFT: char = '<';
+
 // ----- delimiter-layer glyphs outside the pair tables -----
 
 /// The norm `‖` — not a pair (both sides are the same glyph, told

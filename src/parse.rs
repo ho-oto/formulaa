@@ -13,8 +13,8 @@
 use crate::ast::{Node, Row};
 use crate::glyphs::{
     ARM_FALL, ARM_RISE, BRACE_BL, BRACE_TL, COL_MARK_BOT, COL_MARK_TOP, CROSSING, DOUBLE_BODY,
-    FRAC_BAR, LATTICE, LATTICE_LEFT, LATTICE_RIGHT, LATTICE_TOP, MID, NORM, OP_BAND,
-    OVERLINE_CORNER, PLACEHOLDER, ROW_JUNCTION_L, ROW_JUNCTION_R, STEM, is_stem_glyph,
+    FRAC_BAR, HEAD_LEFT, HEAD_RIGHT, LATTICE, LATTICE_LEFT, LATTICE_RIGHT, LATTICE_TOP, MID, NORM,
+    OP_BAND, OVERLINE_CORNER, PLACEHOLDER, ROW_JUNCTION_L, ROW_JUNCTION_R, STEM, is_stem_glyph,
     lattice_char,
 };
 use crate::render::{unstyle_char, unsubscript_char, unsuperscript_char};
@@ -366,11 +366,6 @@ fn angle_open_turn(g: &Grid, row: usize, col: usize) -> bool {
         && row + 1 < g.g.len()
         && col < width(row + 1)
         && g.at(row + 1, col) == '╲'
-        // A hat accent band (┈╱╲┈) fakes this pair when its ╱ sits right
-        // above another band's ╲. The hat's ╱ always has its partner ╲
-        // directly to its right; a real turn's interior never starts
-        // with ╲ (a ┈ band may hug the turn, so ┈ stays allowed).
-        && (col + 1 >= width(row) || g.at(row, col + 1) != '╲')
 }
 
 fn angle_close_turn(g: &Grid, row: usize, col: usize) -> bool {
@@ -379,10 +374,6 @@ fn angle_close_turn(g: &Grid, row: usize, col: usize) -> bool {
         && row + 1 < g.g.len()
         && col < width(row + 1)
         && g.at(row + 1, col) == '╱'
-        // Mirror of the open-turn guard: a stacked hat's ╲ has its
-        // partner ╱ directly to its left; a real turn's interior never
-        // ends with ╱ (a ┈ band may hug the turn, so ┈ stays allowed).
-        && (col == 0 || g.at(row, col - 1) != '╱')
 }
 
 /// Resolve which angle an arm glyph belongs to by walking its diagonal
@@ -880,7 +871,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
                 // a fraction next to a > atom renders with a space
                 // between (presence of the space is the disambiguator).
                 let run_end = scan_while(g, bl, col, rect.r, |c| c == FRAC_BAR);
-                if run_end < rect.r && g.at(bl, run_end + 1) == '>' {
+                if run_end < rect.r && g.at(bl, run_end + 1) == HEAD_RIGHT {
                     let span = Rect {
                         t: rect.t,
                         b: rect.b,
@@ -969,7 +960,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
             _ if ch == DOUBLE_BODY => {
                 // Double-arrow body: ═ run capped by > (═ has no other use).
                 let run_end = scan_while(g, bl, col, rect.r, |c| c == DOUBLE_BODY);
-                if run_end == rect.r || g.at(bl, run_end + 1) != '>' {
+                if run_end == rect.r || g.at(bl, run_end + 1) != HEAD_RIGHT {
                     return err("═ run without a > head", bl, col);
                 }
                 let span = Rect {
@@ -989,7 +980,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
                 });
                 col = run_end + 2;
             }
-            '<' if col < rect.r && matches!(g.at(bl, col + 1), FRAC_BAR | DOUBLE_BODY) => {
+            HEAD_LEFT if col < rect.r && matches!(g.at(bl, col + 1), FRAC_BAR | DOUBLE_BODY) => {
                 // Left-pointing labeled arrow: head, then the body run.
                 let body = g.at(bl, col + 1);
                 let run_end = scan_while(g, bl, col + 1, rect.r, |c| c == body);
@@ -1430,9 +1421,9 @@ fn accent_band_run(
                 trailed = true;
             }
         } else if !trailed
-            // The full material alphabet: ─ and > for the vec arrow,
-            // the fill/centered drawn marks for everything else.
-            && matches!(ch, '￫' | '_' | '¯' | '˜' | '˷' | '˰' | '˯' | '˳' | '․')
+            // The full material alphabet: every mark's drawn glyph
+            // (symbols::Accent answers).
+            && crate::symbols::Accent::is_mark_material(ch)
         {
             piece.push(ch);
         } else {
@@ -1451,7 +1442,7 @@ fn accent_band_run(
     let single = |m: char| piece.len() == 1 && piece[0] == m;
     // The drawn-form table names each glyph's (mark, side); the dots
     // are the one length-sensitive case (․ = dot, ․․ = ddot).
-    let mark = if over && all('․') && piece.len() == 2 {
+    let mark = if over && piece == crate::symbols::Accent::Ddot.cells() {
         Some(crate::symbols::Accent::Ddot)
     } else {
         crate::symbols::Accent::ALL.into_iter().find(|a| {
@@ -1696,7 +1687,10 @@ fn accent_stacks(
     while r > rect.t
         && let Some(m) = over_mark_at(g.at(r - 1, col))
     {
-        if m == crate::symbols::Accent::Dot && col < rect.r && g.at(r - 1, col + 1) == '․' {
+        if m == crate::symbols::Accent::Dot
+            && col < rect.r
+            && g.at(r - 1, col + 1) == crate::symbols::Accent::Dot.glyph()
+        {
             pair_rows.push(r - 1);
         }
         overs.push(m);
