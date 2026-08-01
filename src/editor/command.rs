@@ -5,7 +5,7 @@
 
 use super::*;
 
-use crate::symbols::{Arrow, Delim, Radical};
+use crate::symbols::{Arrow, ColDelim, Delim, Radical};
 
 impl Editor {
     /// Open the `\op` operator-name box at the cursor.
@@ -380,12 +380,12 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
             arg: vec![],
             label: vec![],
         }),
-        "ceil" => delim(Delim::Ceil, Delim::Ceil, 0),
-        "floor" => delim(Delim::Floor, Delim::Floor, 0),
-        "abs" => delim(Delim::Bar, Delim::Bar, 0),
+        "ceil" => delim(Delim::Col(ColDelim::Ceil), Delim::Col(ColDelim::Ceil), 0),
+        "floor" => delim(Delim::Col(ColDelim::Floor), Delim::Col(ColDelim::Floor), 0),
+        "abs" => delim(Delim::Col(ColDelim::Bar), Delim::Col(ColDelim::Bar), 0),
         "langle" => delim(Delim::Angle, Delim::Angle, 0),
         "braket" => delim(Delim::Angle, Delim::Angle, 1),
-        "set" => delim(Delim::Brace, Delim::Brace, 1),
+        "set" => delim(Delim::Col(ColDelim::Brace), Delim::Col(ColDelim::Brace), 1),
         "mid" => Some(Edit::Mid),
         "addrow" => Some(Edit::AddRow),
         "addcol" => Some(Edit::AddCol),

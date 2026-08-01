@@ -6,7 +6,7 @@
 
 use crate::ast::Node;
 use crate::editor::{BoxKind, Edit, Editor, JUMP_LABELS};
-use crate::symbols::Delim;
+use crate::symbols::{ColDelim, Delim};
 
 /// One keystroke, host-neutral. `Char` carries printable input
 /// (including ' ', '\\', '^' …); everything else is a named key.
@@ -418,8 +418,8 @@ impl Editor {
             }),
             Key::Char('(') => self.apply(Edit::Insert {
                 node: Node::Delim {
-                    left: Delim::Paren,
-                    right: Delim::Paren,
+                    left: Delim::Col(ColDelim::Paren),
+                    right: Delim::Col(ColDelim::Paren),
                     mids: 0,
                     segs: vec![vec![]],
                 },
@@ -428,8 +428,8 @@ impl Editor {
             Key::Char(')') => self.close_paren(),
             Key::Char('{') => self.apply(Edit::Insert {
                 node: Node::Delim {
-                    left: Delim::Brace,
-                    right: Delim::Brace,
+                    left: Delim::Col(ColDelim::Brace),
+                    right: Delim::Col(ColDelim::Brace),
                     mids: 0,
                     segs: vec![vec![]],
                 },
@@ -438,8 +438,8 @@ impl Editor {
             Key::Char('}') => self.close_brace(),
             Key::Char('[') => self.apply(Edit::Insert {
                 node: Node::Delim {
-                    left: Delim::Bracket,
-                    right: Delim::Bracket,
+                    left: Delim::Col(ColDelim::Bracket),
+                    right: Delim::Col(ColDelim::Bracket),
                     mids: 0,
                     segs: vec![vec![]],
                 },

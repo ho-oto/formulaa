@@ -18,7 +18,7 @@ use crate::glyphs::{
     lattice_char,
 };
 use crate::render::{unstyle_char, unsubscript_char, unsuperscript_char};
-use crate::symbols::Delim;
+use crate::symbols::{ColDelim, Delim};
 
 fn radical_index(c: char) -> Option<crate::symbols::Radical> {
     crate::symbols::Radical::of_glyph(c)
@@ -240,11 +240,13 @@ fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
     if angle_open_turn(g, row, col) {
         return Some('⟨');
     }
-    if !Delim::is_shared_piece(ch, true) && !(ch == ROW_JUNCTION_L && fused_junction(g, row, col)) {
+    if !ColDelim::is_shared_piece(ch, true)
+        && !(ch == ROW_JUNCTION_L && fused_junction(g, row, col))
+    {
         return open_spec(ch);
     }
     let h = g.g.len();
-    let in_run = |c: char| c == ROW_JUNCTION_L || Delim::run_glyphs(true).contains(&c);
+    let in_run = |c: char| c == ROW_JUNCTION_L || ColDelim::run_glyphs(true).contains(&c);
     let mut top = row;
     while top > 0 && in_run(g.at(top - 1, col)) {
         top -= 1;
@@ -254,7 +256,7 @@ fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
         bot += 1;
     }
     let has = |c: char| (top..=bot).any(|r| g.at(r, col) == c);
-    Some(Delim::of_run(has, true).spec(true))
+    Some(ColDelim::of_run(has, true).spec(true))
 }
 
 fn close_spec(c: char) -> Option<char> {
@@ -272,11 +274,12 @@ fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
         return Some('⟩');
     }
     let h = g.g.len();
-    if !Delim::is_shared_piece(ch, false) && !(ch == ROW_JUNCTION_R && fused_junction(g, row, col))
+    if !ColDelim::is_shared_piece(ch, false)
+        && !(ch == ROW_JUNCTION_R && fused_junction(g, row, col))
     {
         return close_spec(ch);
     }
-    let in_run = |c: char| c == ROW_JUNCTION_R || Delim::run_glyphs(false).contains(&c);
+    let in_run = |c: char| c == ROW_JUNCTION_R || ColDelim::run_glyphs(false).contains(&c);
     let mut top = row;
     while top > 0 && in_run(g.at(top - 1, col)) {
         top -= 1;
@@ -286,7 +289,7 @@ fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
         bot += 1;
     }
     let has = |c: char| (top..=bot).any(|r| g.at(r, col) == c);
-    Some(Delim::of_run(has, false).spec(false))
+    Some(ColDelim::of_run(has, false).spec(false))
 }
 
 /// Every glyph a left delimiter column of `spec` can contain (for the
@@ -320,7 +323,7 @@ fn fused_junction(g: &Grid, row: usize, col: usize) -> bool {
         ROW_JUNCTION_R => (ROW_JUNCTION_R, false),
         _ => return false,
     };
-    let family = Delim::run_glyphs(left);
+    let family = ColDelim::run_glyphs(left);
     let in_run = |c: char| c == junction || family.contains(&c);
     let mut r = row;
     while r > 0 && in_run(g.at(r - 1, col)) {
@@ -501,7 +504,7 @@ fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
     }
     let family: Vec<char> = [true, false]
         .into_iter()
-        .flat_map(|side| Delim::Brace.run_pieces(side))
+        .flat_map(|side| ColDelim::Brace.run_pieces(side))
         .collect();
     let mut r = row;
     while r > 0 && family.contains(&g.at(r - 1, col)) {
@@ -605,8 +608,8 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
             )
         }
         // Brace columns carry their vertex on the baseline row.
-        _ if Delim::Brace.run_pieces(true).contains(&g.at(first, c)) => {
-            let vertex = Delim::Brace.info().vertex.unwrap().0;
+        _ if ColDelim::Brace.run_pieces(true).contains(&g.at(first, c)) => {
+            let vertex = ColDelim::Brace.info().vertex.unwrap().0;
             occupied
                 .iter()
                 .find(|&&r| g.at(r, c) == vertex)
@@ -2164,10 +2167,11 @@ mod tests {
             base: 'y',
         }]);
         roundtrip(&vec![Node::Func("sin".into()), Node::Sym('x')]);
+        use crate::symbols::ColDelim as C;
         use crate::symbols::Delim as D;
         roundtrip(&vec![Node::Delim {
-            left: D::Bracket,
-            right: D::Bracket,
+            left: D::Col(C::Bracket),
+            right: D::Col(C::Bracket),
             mids: 0,
             segs: vec![vec![Node::Array {
                 rows: 2,
@@ -2176,8 +2180,8 @@ mod tests {
             }]],
         }]);
         roundtrip(&vec![Node::Delim {
-            left: D::Paren,
-            right: D::Paren,
+            left: D::Col(C::Paren),
+            right: D::Col(C::Paren),
             mids: 0,
             segs: vec![syms("a+b")],
         }]);

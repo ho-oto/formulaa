@@ -7,7 +7,7 @@ use mascii::ast::{Node, Row, normalize};
 use mascii::latex::row_to_latex;
 use mascii::render::{RenderCtx, render_row};
 use mascii::symbols::Radical;
-use mascii::symbols::{Accent, Arrow};
+use mascii::symbols::{Accent, Arrow, ColDelim};
 
 // ----- tiny DSL for building formulas -----
 
@@ -47,8 +47,8 @@ fn sub(arg: Row) -> Node {
 
 fn paren(inner: Row) -> Node {
     Node::Delim {
-        left: mascii::symbols::Delim::Paren,
-        right: mascii::symbols::Delim::Paren,
+        left: mascii::symbols::Delim::Col(ColDelim::Paren),
+        right: mascii::symbols::Delim::Col(ColDelim::Paren),
         mids: 0,
         segs: vec![inner],
     }
@@ -89,8 +89,8 @@ fn acc(accent: Accent, base: char) -> Node {
 fn mat(rows: usize, cols: usize, cells: Vec<Row>) -> Node {
     assert_eq!(cells.len(), rows * cols);
     Node::Delim {
-        left: mascii::symbols::Delim::Bracket,
-        right: mascii::symbols::Delim::Bracket,
+        left: mascii::symbols::Delim::Col(ColDelim::Bracket),
+        right: mascii::symbols::Delim::Col(ColDelim::Bracket),
         mids: 0,
         segs: vec![vec![Node::Array { rows, cols, cells }]],
     }

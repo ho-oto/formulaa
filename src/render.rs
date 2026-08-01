@@ -1603,7 +1603,12 @@ fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
     let Some((d, spec_side)) = crate::symbols::Delim::of_spec(spec) else {
         return vec![spec; h];
     };
-    let info = d.info();
+    // The angles never reach here (their arms are drawn above); every
+    // column pair lists its tall pieces.
+    let Some(cd) = d.col() else {
+        return vec![spec; h];
+    };
+    let info = cd.info();
     // A side-distinct spec names its own side, which is what makes a
     // mismatched pair like `(0,1]` render correctly. `|` and `.` spell
     // both sides the same, so there the caller's side decides.
@@ -1611,12 +1616,7 @@ fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
     if h == 1 {
         return vec![if is_left { info.short.0 } else { info.short.1 }];
     }
-    // The angles never reach here (their arms are drawn above); the
-    // stacked families all list a tall column.
-    let Some(tall) = info.tall else {
-        return vec![spec; h];
-    };
-    let (top, ext, bot) = tall[usize::from(!is_left)];
+    let (top, ext, bot) = info.tall[usize::from(!is_left)];
     (0..h)
         .map(|r| match info.vertex {
             // A brace shows its vertex on the baseline row, ahead of
@@ -1705,8 +1705,8 @@ mod tests {
     #[test]
     fn matrix_2x2() {
         let root = vec![Node::Delim {
-            left: crate::symbols::Delim::Bracket,
-            right: crate::symbols::Delim::Bracket,
+            left: crate::symbols::Delim::Col(crate::symbols::ColDelim::Bracket),
+            right: crate::symbols::Delim::Col(crate::symbols::ColDelim::Bracket),
             mids: 0,
             segs: vec![vec![Node::Array {
                 rows: 2,
@@ -1721,8 +1721,8 @@ mod tests {
     fn delim_families_render() {
         // {x} with a tall fraction: brace vertex ⎨ on the baseline row.
         let root = vec![Node::Delim {
-            left: crate::symbols::Delim::Brace,
-            right: crate::symbols::Delim::Brace,
+            left: crate::symbols::Delim::Col(crate::symbols::ColDelim::Brace),
+            right: crate::symbols::Delim::Col(crate::symbols::ColDelim::Brace),
             mids: 0,
             segs: vec![vec![Node::Frac {
                 num: sym_row("1"),

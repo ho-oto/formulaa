@@ -188,20 +188,21 @@ fn node_to_latex(node: &Node) -> String {
                 && let [seg] = &segs[..]
                 && let [Node::Array { cols, cells, .. }] = &seg[..]
             {
-                use crate::symbols::Delim as D;
+                use crate::symbols::ColDelim as C;
+                use crate::symbols::Delim::Col;
                 let env = match (left, right) {
-                    (D::Paren, D::Paren) => Some("pmatrix"),
-                    (D::Bracket, D::Bracket) => Some("bmatrix"),
-                    (D::Brace, D::Brace) => Some("Bmatrix"),
-                    (D::Bar, D::Bar) => Some("vmatrix"),
+                    (Col(C::Paren), Col(C::Paren)) => Some("pmatrix"),
+                    (Col(C::Bracket), Col(C::Bracket)) => Some("bmatrix"),
+                    (Col(C::Brace), Col(C::Brace)) => Some("Bmatrix"),
+                    (Col(C::Bar), Col(C::Bar)) => Some("vmatrix"),
                     // (Null, Null) deliberately absent: \begin{matrix}
                     // is the bare Array's spelling, so the null pair
                     // keeps its \left. shell to read back as itself.
                     // cases is a two-column environment; wider grids fall
                     // through to \left\{ \begin{matrix} … \right.
-                    (D::Brace, D::Null) if *cols <= 2 => Some("cases"),
+                    (Col(C::Brace), Col(C::Null)) if *cols <= 2 => Some("cases"),
                     // mathtools' mirror image (\usepackage{mathtools}).
-                    (D::Null, D::Brace) if *cols <= 2 => Some("rcases"),
+                    (Col(C::Null), Col(C::Brace)) if *cols <= 2 => Some("rcases"),
                     _ => None,
                 };
                 if let Some(env) = env {
@@ -282,8 +283,8 @@ mod tests {
                 base: 'v',
             },
             Node::Delim {
-                left: crate::symbols::Delim::Bracket,
-                right: crate::symbols::Delim::Bracket,
+                left: crate::symbols::Delim::Col(crate::symbols::ColDelim::Bracket),
+                right: crate::symbols::Delim::Col(crate::symbols::ColDelim::Bracket),
                 mids: 0,
                 segs: vec![vec![Node::Array {
                     rows: 1,

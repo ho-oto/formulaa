@@ -15,7 +15,7 @@
 //! sub-parse never runs past its own region.
 
 use crate::ast::{Node, Row};
-use crate::symbols::{Accent, Arrow, Delim, Radical, bigop_by_char, symbol_by_name};
+use crate::symbols::{Accent, Arrow, ColDelim, Delim, Radical, bigop_by_char, symbol_by_name};
 
 /// Read a LaTeX math string into a Row, best-effort. Callers that care
 /// about canonical trees normalize the result.
@@ -480,8 +480,8 @@ impl Parser {
                             if depth == 0 {
                                 let inner = self.sub().row(&t[..i]);
                                 out.push(Node::Delim {
-                                    left: Delim::Brace,
-                                    right: Delim::Brace,
+                                    left: Delim::Col(ColDelim::Brace),
+                                    right: Delim::Col(ColDelim::Brace),
                                     mids: 0,
                                     segs: vec![inner],
                                 });
@@ -700,7 +700,7 @@ impl Parser {
             _ => {
                 // A `‖` paired with something else degrades to the bar.
                 let kind = |spec: Option<char>, left: bool| match spec {
-                    Some('‖') => Some(Delim::Bar),
+                    Some('‖') => Some(Delim::Col(ColDelim::Bar)),
                     Some(c) => {
                         Delim::of_spec_side(c, left).or_else(|| Delim::of_spec(c).map(|(d, _)| d))
                     }
@@ -749,16 +749,17 @@ impl Parser {
             mids: 0,
             segs: vec![vec![array]],
         };
-        use Delim as D;
+        use ColDelim as C;
+        use Delim::Col;
         match name.as_str() {
             "matrix" | "smallmatrix" | "array" => out.push(array),
-            "pmatrix" => out.push(wrap(D::Paren, D::Paren, array)),
-            "bmatrix" => out.push(wrap(D::Bracket, D::Bracket, array)),
-            "Bmatrix" => out.push(wrap(D::Brace, D::Brace, array)),
-            "vmatrix" => out.push(wrap(D::Bar, D::Bar, array)),
+            "pmatrix" => out.push(wrap(Col(C::Paren), Col(C::Paren), array)),
+            "bmatrix" => out.push(wrap(Col(C::Bracket), Col(C::Bracket), array)),
+            "Bmatrix" => out.push(wrap(Col(C::Brace), Col(C::Brace), array)),
+            "vmatrix" => out.push(wrap(Col(C::Bar), Col(C::Bar), array)),
             "Vmatrix" => out.push(Node::Norm { arg: vec![array] }),
-            "cases" => out.push(wrap(D::Brace, D::Null, array)),
-            "rcases" => out.push(wrap(D::Null, D::Brace, array)),
+            "cases" => out.push(wrap(Col(C::Brace), Col(C::Null), array)),
+            "rcases" => out.push(wrap(Col(C::Null), Col(C::Brace), array)),
             _ => {
                 // Unknown environment: keep its contents inline, with
                 // `\\` as formula breaks at top level (aligned & co).
@@ -972,7 +973,7 @@ mod tests {
         let row = tex("\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}");
         assert!(matches!(
             &row[..],
-            [Node::Delim { left: Delim::Paren, right: Delim::Paren, segs, .. }]
+            [Node::Delim { left: Delim::Col(ColDelim::Paren), right: Delim::Col(ColDelim::Paren), segs, .. }]
                 if matches!(&segs[0][..], [Node::Array { rows: 2, cols: 2, .. }])
         ));
         // Primes and bare \{ \} pairs.

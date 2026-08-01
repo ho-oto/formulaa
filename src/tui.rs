@@ -1087,11 +1087,12 @@ mod tests {
     #[test]
     fn unfused_frame_leaves_the_outer_delimiter_alone() {
         use mascii::ast::{Field, Node};
+        use mascii::symbols::ColDelim as C;
         use mascii::symbols::Delim as D;
         let mut ed = Editor::new();
         ed.root = vec![Node::Delim {
-            left: D::Paren,
-            right: D::Paren,
+            left: D::Col(C::Paren),
+            right: D::Col(C::Paren),
             mids: 0,
             segs: vec![vec![
                 Node::Array {

@@ -695,11 +695,7 @@ impl Editor {
         match &row_at(&self.root, &p[..p.len() - 1])[pi] {
             Node::Delim {
                 left, right, mids, ..
-            } => {
-                use crate::symbols::Delim as D;
-                let fuses = |d: D| matches!(d, D::Paren | D::Bracket | D::Ceil | D::Floor | D::Bar);
-                *mids == 0 && fuses(*left) && fuses(*right)
-            }
+            } => *mids == 0 && left.fuses() && right.fuses(),
             _ => false,
         }
     }

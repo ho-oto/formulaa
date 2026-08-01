@@ -8,7 +8,7 @@ use crate::ast::{Field, Node, Row, row_at, row_at_mut};
 pub type CursorPos = (Vec<(usize, Field)>, usize);
 /// A block-select target: (parent row path, node index).
 pub type BlockRef = (Vec<(usize, Field)>, usize);
-use crate::symbols::{Accent, Delim, bigop_by_char, is_func_name, symbol_by_name};
+use crate::symbols::{Accent, ColDelim, Delim, bigop_by_char, is_func_name, symbol_by_name};
 
 mod command;
 mod modes;
@@ -357,13 +357,31 @@ fn grid_command(cmd: &str) -> Option<(GridWrap, usize, usize)> {
         // \matrix is the bare lattice (like \array): the delimiter
         // spells itself via \pmatrix / \bmatrix and friends.
         ("matrix", GridWrap::Bare),
-        ("bmatrix", GridWrap::Pair(Delim::Bracket, Delim::Bracket)),
-        ("pmatrix", GridWrap::Pair(Delim::Paren, Delim::Paren)),
-        ("Bmatrix", GridWrap::Pair(Delim::Brace, Delim::Brace)),
-        ("vmatrix", GridWrap::Pair(Delim::Bar, Delim::Bar)),
+        (
+            "bmatrix",
+            GridWrap::Pair(Delim::Col(ColDelim::Bracket), Delim::Col(ColDelim::Bracket)),
+        ),
+        (
+            "pmatrix",
+            GridWrap::Pair(Delim::Col(ColDelim::Paren), Delim::Col(ColDelim::Paren)),
+        ),
+        (
+            "Bmatrix",
+            GridWrap::Pair(Delim::Col(ColDelim::Brace), Delim::Col(ColDelim::Brace)),
+        ),
+        (
+            "vmatrix",
+            GridWrap::Pair(Delim::Col(ColDelim::Bar), Delim::Col(ColDelim::Bar)),
+        ),
         ("Vmatrix", GridWrap::Norm),
-        ("cases", GridWrap::Pair(Delim::Brace, Delim::Null)),
-        ("rcases", GridWrap::Pair(Delim::Null, Delim::Brace)),
+        (
+            "cases",
+            GridWrap::Pair(Delim::Col(ColDelim::Brace), Delim::Col(ColDelim::Null)),
+        ),
+        (
+            "rcases",
+            GridWrap::Pair(Delim::Col(ColDelim::Null), Delim::Col(ColDelim::Brace)),
+        ),
         ("array", GridWrap::Bare),
     ];
     for &(name, delims) in GRIDS {
@@ -906,14 +924,14 @@ impl Editor {
     /// allowed: it is indistinguishable from a closing delimiter, so a
     /// mismatched-pair scan inside any delimiter would misread it.
     pub fn close_paren(&mut self) {
-        if !self.close_delim(Delim::Paren) {
+        if !self.close_delim(Delim::Col(ColDelim::Paren)) {
             self.info("not inside a ( ) inset (( inserts one)");
         }
     }
 
     /// `]` leaves the innermost [ … ] block (matrix) or bare array.
     pub fn close_bracket(&mut self) {
-        if self.close_delim(Delim::Bracket) {
+        if self.close_delim(Delim::Col(ColDelim::Bracket)) {
             return;
         }
         if let Some((k, i, _)) = self.enclosing_array() {
@@ -926,7 +944,7 @@ impl Editor {
 
     /// `}` leaves the innermost { … } block.
     pub fn close_brace(&mut self) {
-        if !self.close_delim(Delim::Brace) {
+        if !self.close_delim(Delim::Col(ColDelim::Brace)) {
             self.info("not inside a { } block ({ inserts one)");
         }
     }
@@ -1504,8 +1522,8 @@ mod tests {
         assert!(matches!(
             ed.root[0],
             Node::Delim {
-                left: Delim::Paren,
-                right: Delim::Bracket,
+                left: Delim::Col(ColDelim::Paren),
+                right: Delim::Col(ColDelim::Bracket),
                 mids: 1,
                 ..
             }
@@ -1519,8 +1537,8 @@ mod tests {
         assert!(matches!(
             ed.root[0],
             Node::Delim {
-                left: Delim::Paren,
-                right: Delim::Bracket,
+                left: Delim::Col(ColDelim::Paren),
+                right: Delim::Col(ColDelim::Bracket),
                 ..
             }
         ));
@@ -1863,7 +1881,7 @@ mod tests {
     #[test]
     fn close_paren_exits_inset() {
         let mut ed = Editor::new();
-        ed.insert_delim(Delim::Paren, Delim::Paren, 0);
+        ed.insert_delim(Delim::Col(ColDelim::Paren), Delim::Col(ColDelim::Paren), 0);
         ed.insert_sym('x');
         ed.close_paren();
         assert!(ed.path.is_empty());
