@@ -27,3 +27,12 @@ pub const LATTICE_LEFT: [char; 3] = [LATTICE[0][0], LATTICE[1][0], LATTICE[2][0]
 pub const LATTICE_RIGHT: [char; 3] = [LATTICE[0][2], LATTICE[1][2], LATTICE[2][2]];
 /// The top-edge row of a lattice (┌ ┬ ┐), left to right kinds.
 pub const LATTICE_TOP: [char; 3] = [LATTICE[0][0], LATTICE[0][1], LATTICE[0][2]];
+
+/// The interior markers by name — what a *fused* grid keeps of the
+/// lattice: ┬ ┴ column markers riding the delimiter's top/bottom rows,
+/// ├ ┤ row junctions dug into the delimiter columns, ┼ separator rows.
+pub const COL_MARK_TOP: char = LATTICE[0][1]; // ┬
+pub const COL_MARK_BOT: char = LATTICE[2][1]; // ┴
+pub const ROW_JUNCTION_L: char = LATTICE[1][0]; // ├
+pub const ROW_JUNCTION_R: char = LATTICE[1][2]; // ┤
+pub const CROSSING: char = LATTICE[1][1]; // ┼

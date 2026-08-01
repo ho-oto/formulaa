@@ -215,28 +215,42 @@ impl Delim {
         })
     }
 
-    /// Every glyph a tall delimiter column can contain on this side
-    /// (tall pieces and vertices — never the one-line shorts).
+    /// The glyphs this pair's tall column shows on one side: the tall
+    /// pieces and the vertex — never the one-line short.
+    pub fn run_pieces(self, left: bool) -> Vec<char> {
+        let info = self.info();
+        let mut p = Vec::new();
+        if let Some(tall) = info.tall {
+            let (t, e, b) = tall[usize::from(!left)];
+            p.extend([t, e, b]);
+        }
+        if let Some(vx) = info.vertex {
+            p.push(if left { vx.0 } else { vx.1 });
+        }
+        p.sort_unstable();
+        p.dedup();
+        p
+    }
+
+    /// A piece several pairs share on this side (⎡ ⎢ ⎣ / ⎤ ⎥ ⎦): its
+    /// family needs the column walk (`of_run`); every other piece
+    /// names its pair outright.
+    pub fn is_shared_piece(c: char, left: bool) -> bool {
+        Delim::ALL
+            .iter()
+            .filter(|d| d.glyphs(left).contains(&c))
+            .count()
+            > 1
+    }
+
+    /// Every glyph a tall delimiter column can contain on this side —
+    /// the union of `run_pieces` over all pairs.
     pub fn run_glyphs(left: bool) -> &'static [char] {
         use std::sync::OnceLock;
         static RUNS: OnceLock<[Vec<char>; 2]> = OnceLock::new();
         let runs = RUNS.get_or_init(|| {
             let build = |left: bool| {
-                let mut v: Vec<char> = Delim::ALL
-                    .iter()
-                    .flat_map(|d| {
-                        let info = d.info();
-                        let mut p = Vec::new();
-                        if let Some(tall) = info.tall {
-                            let (t, e, b) = tall[usize::from(!left)];
-                            p.extend([t, e, b]);
-                        }
-                        if let Some(vx) = info.vertex {
-                            p.push(if left { vx.0 } else { vx.1 });
-                        }
-                        p
-                    })
-                    .collect();
+                let mut v: Vec<char> = Delim::ALL.iter().flat_map(|d| d.run_pieces(left)).collect();
                 v.sort_unstable();
                 v.dedup();
                 v

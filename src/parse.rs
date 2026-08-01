@@ -15,7 +15,10 @@ use crate::render::{
     DOUBLE_BODY, FRAC_BAR, OP_BAND, PLACEHOLDER, unstyle_char, unsubscript_char, unsuperscript_char,
 };
 use crate::symbols::Delim;
-use crate::symbols::{LATTICE_LEFT, LATTICE_TOP, lattice_char};
+use crate::symbols::{
+    COL_MARK_BOT, COL_MARK_TOP, CROSSING, LATTICE, LATTICE_LEFT, LATTICE_RIGHT, LATTICE_TOP,
+    ROW_JUNCTION_L, ROW_JUNCTION_R, lattice_char,
+};
 
 fn radical_index(c: char) -> Option<crate::symbols::Radical> {
     crate::symbols::Radical::of_glyph(c)
@@ -134,11 +137,8 @@ fn side_glyphs(left: bool) -> &'static [char] {
                 .iter()
                 .flat_map(|d| d.glyphs(left))
                 .filter(|&c| c != '⎪')
-                .chain(if left {
-                    ['⟨', '┌', '├', '└']
-                } else {
-                    ['⟩', '┐', '┤', '┘']
-                })
+                .chain([Delim::Angle.spec(left)])
+                .chain(if left { LATTICE_LEFT } else { LATTICE_RIGHT })
                 .collect();
             v.sort_unstable();
             v.dedup();
@@ -198,11 +198,11 @@ fn fused_grid_markers(
     };
     let (mut t, mut b) = (top, bot);
     let mut cols_marks: Option<Vec<usize>> = None;
-    if let Some(cs) = pure(top, '┬') {
+    if let Some(cs) = pure(top, COL_MARK_TOP) {
         cols_marks = Some(cs);
         t = top + 1;
     }
-    if let Some(cs) = pure(bot, '┴') {
+    if let Some(cs) = pure(bot, COL_MARK_BOT) {
         if let Some(prev) = &cols_marks {
             if *prev != cs {
                 return None;
@@ -214,13 +214,13 @@ fn fused_grid_markers(
     }
     let mut marker_rows: Vec<usize> = Vec::new();
     for r in t..=b {
-        if let Some(cs) = pure(r, '┼') {
+        if let Some(cs) = pure(r, CROSSING) {
             match &cols_marks {
                 Some(prev) if *prev != cs => return None,
                 _ => cols_marks = Some(cs),
             }
             marker_rows.push(r);
-        } else if g.at(r, col) == '├' || g.at(r, close) == '┤' {
+        } else if g.at(r, col) == ROW_JUNCTION_L || g.at(r, close) == ROW_JUNCTION_R {
             marker_rows.push(r);
         }
     }
@@ -240,11 +240,11 @@ fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
     if angle_open_turn(g, row, col) {
         return Some('⟨');
     }
-    if !matches!(ch, '⎡' | '⎢' | '⎣') && !(ch == '├' && fused_junction(g, row, col)) {
+    if !Delim::is_shared_piece(ch, true) && !(ch == ROW_JUNCTION_L && fused_junction(g, row, col)) {
         return open_spec(ch);
     }
     let h = g.g.len();
-    let in_run = |c: char| c == '├' || Delim::run_glyphs(true).contains(&c);
+    let in_run = |c: char| c == ROW_JUNCTION_L || Delim::run_glyphs(true).contains(&c);
     let mut top = row;
     while top > 0 && in_run(g.at(top - 1, col)) {
         top -= 1;
@@ -272,10 +272,11 @@ fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
         return Some('⟩');
     }
     let h = g.g.len();
-    if !matches!(ch, '⎤' | '⎥' | '⎦') && !(ch == '┤' && fused_junction(g, row, col)) {
+    if !Delim::is_shared_piece(ch, false) && !(ch == ROW_JUNCTION_R && fused_junction(g, row, col))
+    {
         return close_spec(ch);
     }
-    let in_run = |c: char| c == '┤' || Delim::run_glyphs(false).contains(&c);
+    let in_run = |c: char| c == ROW_JUNCTION_R || Delim::run_glyphs(false).contains(&c);
     let mut top = row;
     while top > 0 && in_run(g.at(top - 1, col)) {
         top -= 1;
@@ -298,7 +299,7 @@ fn left_family(spec: char) -> Vec<char> {
                 .map(|(d, _)| d.glyphs(true))
                 .unwrap_or_default();
             // A fused-grid junction can sit anywhere in the column…
-            v.push('├');
+            v.push(ROW_JUNCTION_L);
             // …and the bar spells its two sides alike, so a column of
             // either extension piece belongs to it.
             if spec == '|' {
@@ -314,12 +315,13 @@ fn left_family(spec: char) -> Vec<char> {
 /// glyphs above/below. A bare-lattice edge marker has blank gaps
 /// instead, so it never classifies.
 fn fused_junction(g: &Grid, row: usize, col: usize) -> bool {
-    let (junction, family): (char, &str) = match g.at(row, col) {
-        '├' => ('├', "⎛⎜⎝⎡⎢⎣⎧⎪⎨⎩⎸┆"),
-        '┤' => ('┤', "⎞⎟⎠⎤⎥⎦⎫⎬⎭⎹┊"),
+    let (junction, left) = match g.at(row, col) {
+        ROW_JUNCTION_L => (ROW_JUNCTION_L, true),
+        ROW_JUNCTION_R => (ROW_JUNCTION_R, false),
         _ => return false,
     };
-    let in_run = |c: char| c == junction || family.contains(c);
+    let family = Delim::run_glyphs(left);
+    let in_run = |c: char| c == junction || family.contains(&c);
     let mut r = row;
     while r > 0 && in_run(g.at(r - 1, col)) {
         r -= 1;
@@ -329,7 +331,7 @@ fn fused_junction(g: &Grid, row: usize, col: usize) -> bool {
     while r + 1 < g.g.len() && in_run(g.at(r + 1, col)) {
         r += 1;
     }
-    (top..=r).any(|rr| family.contains(g.at(rr, col)))
+    (top..=r).any(|rr| family.contains(&g.at(rr, col)))
 }
 
 /// Vertical extent (top, bottom) of the contiguous ‖ run through
@@ -493,10 +495,15 @@ fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
     if let s @ Some(_) = angle_arm_side(g, row, col) {
         return s;
     }
-    let family: &[char] = match ch {
-        '⎪' => &['⎧', '⎨', '⎩', '⎫', '⎬', '⎭', '⎪'],
-        _ => return None,
-    };
+    // The shared brace extension: walk the column to a side-distinct
+    // brace piece.
+    if ch != '⎪' {
+        return None;
+    }
+    let family: Vec<char> = [true, false]
+        .into_iter()
+        .flat_map(|side| Delim::Brace.run_pieces(side))
+        .collect();
     let mut r = row;
     while r > 0 && family.contains(&g.at(r - 1, col)) {
         r -= 1;
@@ -599,12 +606,15 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
         }
         '(' => Ok(first),
         // Brace columns carry their vertex on the baseline row.
-        '⎧' | '⎪' | '⎨' | '⎩' => occupied
-            .iter()
-            .find(|&&r| g.at(r, c) == '⎨')
-            .copied()
-            .ok_or(())
-            .or_else(|_| err("brace column without ⎨", first, c)),
+        _ if Delim::Brace.run_pieces(true).contains(&g.at(first, c)) => {
+            let vertex = Delim::Brace.info().vertex.unwrap().0;
+            occupied
+                .iter()
+                .find(|&&r| g.at(r, c) == vertex)
+                .copied()
+                .ok_or(())
+                .or_else(|_| err("brace column without ⎨", first, c))
+        }
         // Angle: the ⟨ vertex (one-line form) or the diagonal turn
         // pair — ╱ directly above ╲ in the leftmost column. The upper
         // turn row is the baseline.
@@ -629,7 +639,7 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
                 },
             )
         }
-        '┌' | '├' | '└' => Ok((first + last) / 2),
+        _ if LATTICE_LEFT.contains(&g.at(first, c)) => Ok((first + last) / 2),
         // Accent band: the base owns the baseline on the other side
         // (over marks ride above their base, under marks below).
         _ if accent_band_run(g, rect, first, c, true).is_some() => find_baseline(
@@ -860,7 +870,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
             // A ├ inside a delimiter column run is a fused-grid row
             // junction, not a bare-lattice edge — the delimiter arm
             // below handles it.
-            '┌' | '├' | '└' if !fused_junction(g, bl, col) => {
+            _ if LATTICE_LEFT.contains(&ch) && !fused_junction(g, bl, col) => {
                 let (node, right) = parse_lattice(g, rect, col, in_cancel)?;
                 out.push(node);
                 col = right + 1;
@@ -1070,11 +1080,11 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
                 });
                 col = close + 1;
             }
-            ')' | ']' | '}' | '⟩' => {
-                // Closing delimiters are never atoms: a `)` atom inside
-                // any delimiter would be captured by the mismatched-pair
-                // depth scan (`{y)}` would close at `)`), so a stray
-                // close is an error rather than a silently shifted read.
+            // Closing delimiters are never atoms: a `)` atom inside
+            // any delimiter would be captured by the mismatched-pair
+            // depth scan (`{y)}` would close at `)`), so a stray
+            // close is an error rather than a silently shifted read.
+            _ if matches!(Delim::of_spec(ch), Some((_, Some(false)))) => {
                 return err(format!("unmatched {}", ch), bl, col);
             }
             _ if open_spec_at(g, bl, col).is_some() => {
@@ -1720,7 +1730,7 @@ fn parse_lattice(g: &Grid, rect: Rect, col: usize, in_cancel: bool) -> Result<(N
         .rows()
         .filter(|&r| LATTICE_LEFT.contains(&g.at(r, col)))
         .collect();
-    if marker_rows.len() < 2 || g.at(marker_rows[0], col) != '┌' {
+    if marker_rows.len() < 2 || g.at(marker_rows[0], col) != LATTICE[0][0] {
         return err("broken lattice edge column", rect.t, col);
     }
     let top = marker_rows[0];
@@ -1734,7 +1744,7 @@ fn parse_lattice(g: &Grid, rect: Rect, col: usize, in_cancel: bool) -> Result<(N
         let ch = g.at(top, c);
         if LATTICE_TOP.contains(&ch) {
             marker_cols.push(c);
-            if ch == '┐' {
+            if ch == LATTICE[0][2] {
                 break;
             }
         }

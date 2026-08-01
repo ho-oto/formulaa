@@ -9,7 +9,10 @@ use crate::ast::{Field, Node, Row};
 pub use crate::symbols::scripts::{
     subscript_char, superscript_char, unsubscript_char, unsuperscript_char,
 };
-use crate::symbols::{Accent, DrawnForm, lattice_char};
+use crate::symbols::{
+    Accent, COL_MARK_BOT, COL_MARK_TOP, CROSSING, DrawnForm, ROW_JUNCTION_L, ROW_JUNCTION_R,
+    lattice_char,
+};
 
 pub const CURSOR_CHAR: char = '▌'; // U+258C LEFT HALF BLOCK (view-only)
 /// Placeholder for an empty mandatory slot, and explicit base of a script
@@ -1409,12 +1412,12 @@ fn render_fused_grid(
     let mut marks: Vec<(usize, usize, char)> = Vec::new();
     let mut sep_rows: Vec<usize> = Vec::new();
     if one_row {
-        lines.push(edge_row('┬'));
+        lines.push(edge_row(COL_MARK_TOP));
     }
     for i in 0..rows {
         if i > 0 {
             sep_rows.push(lines.len());
-            lines.push(edge_row('┼'));
+            lines.push(edge_row(CROSSING));
         }
         let mut parts: Vec<Block> = Vec::new();
         for j in 0..cols {
@@ -1449,7 +1452,7 @@ fn render_fused_grid(
         }
     }
     if one_row {
-        lines.push(edge_row('┴'));
+        lines.push(edge_row(COL_MARK_BOT));
     }
     let h = lines.len();
     let bl = (h - 1) / 2;
@@ -1463,7 +1466,7 @@ fn render_fused_grid(
         // delimiter columns as ├ ┤ (U+251C/2524 — the light joints; the
         // heavy ┠ ┨ stood out as the only heavy strokes in the format).
         let (lc, rc) = if junction && sep_rows.contains(&r) {
-            ('├', '┤')
+            (ROW_JUNCTION_L, ROW_JUNCTION_R)
         } else {
             (lcol[r], rcol[r])
         };
