@@ -33,6 +33,20 @@ pub static RADICAL_NAMES: phf::Map<&'static str, Radical> = phf::phf_map! {
     "qdrt" | "sqrt4" => Radical::Qdrt,
 };
 
+/// The radical stem column: │ runs from the overline down to the root
+/// glyph, which is its bottom cell.
+pub const STEM: char = '│'; // U+2502 (shared glyph with the \lr mid separator)
+
+/// The overline's corner, sitting directly above the stem (the lattice
+/// ┌ has a blank gap below instead — that adjacency is the
+/// disambiguator).
+pub const OVERLINE_CORNER: char = '┌'; // U+250C
+
+/// A glyph the stem column may show: the stem or a root sign.
+pub fn is_stem_glyph(c: char) -> bool {
+    c == STEM || Radical::of_glyph(c).is_some()
+}
+
 impl Radical {
     pub const ALL: [Radical; 3] = [Radical::Sqrt, Radical::Cbrt, Radical::Qdrt];
 

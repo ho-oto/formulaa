@@ -11,13 +11,12 @@
 //! parse as `Node::Func`.
 
 use crate::ast::{Node, Row};
-use crate::render::{
-    DOUBLE_BODY, FRAC_BAR, OP_BAND, PLACEHOLDER, unstyle_char, unsubscript_char, unsuperscript_char,
-};
-use crate::symbols::Delim;
+use crate::render::{unstyle_char, unsubscript_char, unsuperscript_char};
+use crate::symbols::radicals::{OVERLINE_CORNER, STEM, is_stem_glyph};
 use crate::symbols::{
-    COL_MARK_BOT, COL_MARK_TOP, CROSSING, LATTICE, LATTICE_LEFT, LATTICE_RIGHT, LATTICE_TOP,
-    ROW_JUNCTION_L, ROW_JUNCTION_R, lattice_char,
+    ARM_FALL, ARM_RISE, BRACE_BL, BRACE_TL, COL_MARK_BOT, COL_MARK_TOP, CROSSING, DOUBLE_BODY,
+    Delim, FRAC_BAR, LATTICE, LATTICE_LEFT, LATTICE_RIGHT, LATTICE_TOP, MID, NORM, OP_BAND,
+    PLACEHOLDER, ROW_JUNCTION_L, ROW_JUNCTION_R, lattice_char,
 };
 
 fn radical_index(c: char) -> Option<crate::symbols::Radical> {
@@ -156,8 +155,8 @@ fn side_glyphs(left: bool) -> &'static [char] {
 /// standalone ├ is a lattice edge (fused junctions resolve via the
 /// column walk in open_spec_at).
 fn open_spec(c: char) -> Option<char> {
-    if c == '‖' {
-        return Some('‖');
+    if c == NORM {
+        return Some(NORM);
     }
     Delim::of_baseline_piece(c, true).map(|d| d.spec(true))
 }
@@ -258,8 +257,8 @@ fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
 }
 
 fn close_spec(c: char) -> Option<char> {
-    if c == '‖' {
-        return Some('‖');
+    if c == NORM {
+        return Some(NORM);
     }
     Delim::of_baseline_piece(c, false).map(|d| d.spec(false))
 }
@@ -293,7 +292,7 @@ fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
 /// vertical-extent scan).
 fn left_family(spec: char) -> Vec<char> {
     match spec {
-        '‖' => vec!['‖'],
+        NORM => vec![NORM],
         _ => {
             let mut v = Delim::of_spec(spec)
                 .map(|(d, _)| d.glyphs(true))
@@ -338,11 +337,11 @@ fn fused_junction(g: &Grid, row: usize, col: usize) -> bool {
 /// (row, col) — nested norm pairs differ exactly here.
 fn norm_extent(g: &Grid, row: usize, col: usize) -> (usize, usize) {
     let mut top = row;
-    while top > 0 && g.at(top - 1, col) == '‖' {
+    while top > 0 && g.at(top - 1, col) == NORM {
         top -= 1;
     }
     let mut bot = row;
-    while bot + 1 < g.g.len() && g.at(bot + 1, col) == '‖' {
+    while bot + 1 < g.g.len() && g.at(bot + 1, col) == NORM {
         bot += 1;
     }
     (top, bot)
@@ -468,21 +467,20 @@ fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
     // The sqrt overline corner (┌ directly above the radical stem) is
     // not a delimiter: its row has no matching close, and counting it
     // would desync the depth scan.
-    if ch == '┌' && row + 1 < g.g.len() && matches!(g.at(row + 1, col), '│' | '√' | '∛' | '∜')
-    {
+    if ch == OVERLINE_CORNER && row + 1 < g.g.len() && is_stem_glyph(g.at(row + 1, col)) {
         return None;
     }
     // Norm columns use the same ‖ on both sides: parity along the row
     // decides (full-height columns keep the parity consistent per row).
     // Direct norm-in-norm is therefore unsupported.
-    if ch == '‖' {
+    if ch == NORM {
         // Norm columns use the same ‖ on both sides: parity along the
         // row decides, but only among columns with the same vertical
         // extent — nested norms render the outer pair two rows taller,
         // which is what tells the pairs apart.
         let ext = norm_extent(g, row, col);
         let before = (0..col)
-            .filter(|&c2| g.at(row, c2) == '‖' && norm_extent(g, row, c2) == ext)
+            .filter(|&c2| g.at(row, c2) == NORM && norm_extent(g, row, c2) == ext)
             .count();
         return Some(before % 2 == 0);
     }
@@ -584,11 +582,12 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
     let first = *occupied.first().unwrap();
     let last = *occupied.last().unwrap();
     match g.at(first, c) {
-        // Delimiter columns: a fused grid (├ junctions in this column or
-        // ┬ markers on the top row) centers on the extent; otherwise the
-        // baseline is that of the inner region (a lattice inside answers
-        // with its own ┌├└ center rule).
-        '⎡' | '[' | '⎛' | '┆' | '⎢' | '‖' => {
+        // Delimiter columns (any baseline-capable head, or the norm):
+        // a fused grid (├ junctions in this column or ┬ markers on the
+        // top row) centers on the extent; otherwise the baseline is
+        // that of the inner region (a lattice inside answers with its
+        // own ┌├└ center rule, a one-line pair with its only row).
+        ch if ch == NORM || Delim::of_baseline_piece(ch, true).is_some() => {
             if let Ok(close) = match_delim(g, first, c, rect.r)
                 && fused_grid_markers(g, first, last, c, close).is_some()
             {
@@ -604,7 +603,6 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
                 },
             )
         }
-        '(' => Ok(first),
         // Brace columns carry their vertex on the baseline row.
         _ if Delim::Brace.run_pieces(true).contains(&g.at(first, c)) => {
             let vertex = Delim::Brace.info().vertex.unwrap().0;
@@ -618,7 +616,7 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
         // Angle: the ⟨ vertex (one-line form) or the diagonal turn
         // pair — ╱ directly above ╲ in the leftmost column. The upper
         // turn row is the baseline.
-        '⟨' | '╱' | '╲' => occupied
+        ARM_RISE | ARM_FALL => occupied
             .iter()
             .find(|&&r| g.at(r, c) == '⟨' || angle_open_turn(g, r, c))
             .copied()
@@ -628,17 +626,15 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
         // A ┌ directly above a radical stem is the sqrt overline corner
         // (a lattice ┌ has a blank gap below instead): dive into the
         // radicand right of the stem.
-        '┌' if first < last && matches!(g.at(first + 1, c), '│' | '√' | '∛' | '∜') => {
-            find_baseline(
-                g,
-                Rect {
-                    t: first + 1,
-                    b: last,
-                    l: c + 1,
-                    r: rect.r,
-                },
-            )
-        }
+        OVERLINE_CORNER if first < last && is_stem_glyph(g.at(first + 1, c)) => find_baseline(
+            g,
+            Rect {
+                t: first + 1,
+                b: last,
+                l: c + 1,
+                r: rect.r,
+            },
+        ),
         _ if LATTICE_LEFT.contains(&g.at(first, c)) => Ok((first + last) / 2),
         // Accent band: the base owns the baseline on the other side
         // (over marks ride above their base, under marks below).
@@ -664,7 +660,7 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
         }
         // Over/under brace corner: the argument owns the baseline on the
         // other side of the brace row.
-        '╭' => find_baseline(
+        BRACE_TL => find_baseline(
             g,
             Rect {
                 t: first + 1,
@@ -673,7 +669,7 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
                 r: rect.r,
             },
         ),
-        '╰' if first > rect.t => find_baseline(
+        BRACE_BL if first > rect.t => find_baseline(
             g,
             Rect {
                 t: rect.t,
@@ -683,7 +679,7 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
             },
         ),
         // Sqrt: stem covers exactly the content rows; recurse into content.
-        '│' => find_baseline(
+        STEM => find_baseline(
             g,
             Rect {
                 t: first,
@@ -1092,11 +1088,11 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
                 out.push(node);
                 col = close_col + 1;
             }
-            '│' | '√' | '∛' | '∜' => {
+            _ if is_stem_glyph(ch) => {
                 // Stem covers exactly the content rows; the radical glyph
                 // (√ ∛ ∜) is its bottom cell.
                 let mut top = bl;
-                while top > rect.t && g.at(top - 1, col) == '│' {
+                while top > rect.t && g.at(top - 1, col) == STEM {
                     top -= 1;
                 }
                 let mut bot = bl;
@@ -1106,7 +1102,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
                     }
                     bot += 1;
                 }
-                if top == 0 || g.at(top - 1, col) != '┌' {
+                if top == 0 || g.at(top - 1, col) != OVERLINE_CORNER {
                     return err("radical without its ┌─ overline", top, col);
                 }
                 let index = radical_index(g.at(bot, col)).unwrap();
@@ -1375,16 +1371,20 @@ fn scan_band(
 /// baseline content and is left for the script parser.
 fn brace_at(g: &Grid, rect: Rect, bl: usize, c: usize) -> Option<(usize, bool, usize)> {
     let cand = (rect.t..bl)
-        .find(|&r| g.at(r, c) == '╭')
+        .find(|&r| g.at(r, c) == BRACE_TL)
         .map(|r| (r, true))
         .or_else(|| {
             (bl + 1..=rect.b)
-                .find(|&r| g.at(r, c) == '╰')
+                .find(|&r| g.at(r, c) == BRACE_BL)
                 .map(|r| (r, false))
         });
     let (brow, over) = cand?;
     let run_end = scan_while(g, brow, c, rect.r, |c2| c2 == FRAC_BAR);
-    let closer = if over { '╮' } else { '╯' };
+    let closer = if over {
+        crate::symbols::BRACE_TR
+    } else {
+        crate::symbols::BRACE_BR
+    };
     if run_end == rect.r || g.at(brow, run_end + 1) != closer {
         return None;
     }
@@ -1939,7 +1939,7 @@ fn parse_delim(
     }
     // Both norm sides are the same ‖, so it has no middles to speak of
     // (a `│` inside one would have no side to belong to).
-    let node = if left == '‖' {
+    let node = if left == NORM {
         if segs.len() != 1 {
             return err("a norm takes no │ middle", bl, col);
         }
@@ -1970,7 +1970,7 @@ fn mid_columns(g: &Grid, interior: Rect) -> Vec<usize> {
     let protected = protected_cols(g, interior, None);
     interior
         .cols()
-        .filter(|&c| interior.rows().all(|r| g.at(r, c) == '│') && !protected[c - interior.l])
+        .filter(|&c| interior.rows().all(|r| g.at(r, c) == MID) && !protected[c - interior.l])
         .collect()
 }
 

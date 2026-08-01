@@ -10,24 +10,15 @@ pub use crate::symbols::scripts::{
     subscript_char, superscript_char, unsubscript_char, unsuperscript_char,
 };
 use crate::symbols::{
-    Accent, COL_MARK_BOT, COL_MARK_TOP, CROSSING, DrawnForm, ROW_JUNCTION_L, ROW_JUNCTION_R,
-    lattice_char,
+    Accent, COL_MARK_BOT, COL_MARK_TOP, CROSSING, DrawnForm, MID, NORM, ROW_JUNCTION_L,
+    ROW_JUNCTION_R, brace_corners, lattice_char, radicals::STEM,
 };
 
 pub const CURSOR_CHAR: char = '▌'; // U+258C LEFT HALF BLOCK (view-only)
-/// Placeholder for an empty mandatory slot, and explicit base of a script
-/// that starts a row (so `[Sup(x)]` is distinguishable from `[Sym(x)]`).
-pub const PLACEHOLDER: char = '⬚'; // U+2B1A DOTTED SQUARE
-/// Fraction bar. Distinct from the '-' atom and the big-op band.
-pub const FRAC_BAR: char = '─'; // U+2500 BOX DRAWINGS LIGHT HORIZONTAL
-/// Big-operator band: marks the horizontal extent of over/under limits.
-pub const OP_BAND: char = '┈'; // U+2508 BOX DRAWINGS LIGHT QUADRUPLE DASH HORIZONTAL
-/// Stretchy single-arrow bodies reuse the ─ bar: a bar run directly
-/// capped by a head (`──>`) *is* the arrow; a fraction next to a `>` atom
-/// is written with a separating space (space presence, not count, is what
-/// changes the reading). Double arrows (⇒ ⇐) use a ═ body. Heads render
-/// as ASCII < > (never the Unicode arrows — those stay ordinary atoms).
-pub const DOUBLE_BODY: char = '═'; // U+2550 BOX DRAWINGS DOUBLE HORIZONTAL
+// The structural glyph vocabulary lives under symbols (marks, delims,
+// lattice, radicals, braces); re-exported here for the parser and the
+// callers that grew up importing them from the render side.
+pub use crate::symbols::{DOUBLE_BODY, FRAC_BAR, OP_BAND, PLACEHOLDER};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
@@ -970,7 +961,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             top[0] = '┌';
             lines.push(top);
             for (r, line) in a.lines.iter().enumerate() {
-                let head = if r == h - 1 { radical } else { '│' };
+                let head = if r == h - 1 { radical } else { STEM };
                 let mut row = Vec::with_capacity(w + 1);
                 row.push(head);
                 row.extend_from_slice(line);
@@ -1077,8 +1068,9 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             let l = render_row(label, cur(Field::BraceLabel), l_placeholder(cursor), ctx);
             let w = a.width().max(l.width()).max(1) + 2;
             let mut brace = vec![FRAC_BAR; w];
-            brace[0] = if *over { '╭' } else { '╰' };
-            brace[w - 1] = if *over { '╮' } else { '╯' };
+            let corners = brace_corners(*over);
+            brace[0] = corners.0;
+            brace[w - 1] = corners.1;
             let mut lines: Vec<Vec<char>> = Vec::new();
             if *over {
                 lines.extend(center_pad(&l, w));
@@ -1142,7 +1134,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             // The glyph layer below works on spec chars; the slot
             // decides the side, so the typed kinds spell theirs here.
             let (left, right, mids, segs) = match node {
-                Node::Norm { arg } => ('‖', '‖', 0, std::slice::from_ref(arg)),
+                Node::Norm { arg } => (NORM, NORM, 0, std::slice::from_ref(arg)),
                 Node::Delim {
                     left,
                     right,
@@ -1214,7 +1206,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             for (k, b) in parts.iter().enumerate() {
                 if k % 2 == 1 {
                     for line in body.lines.iter_mut() {
-                        line[x] = '│';
+                        line[x] = MID;
                     }
                 }
                 x += b.width();
@@ -1232,12 +1224,12 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             // pair must outsize the inner one — whenever the body holds
             // a full-height ‖ column, grow the extent by a row on each
             // side (the parser groups ‖ columns by vertical extent).
-            let norm = *left == '‖' || *right == '‖';
+            let norm = *left == NORM || *right == NORM;
             let inner_norm_full = norm
                 && (0..body.width()).any(|c| {
                     body.lines
                         .iter()
-                        .all(|line| line.get(c).copied() == Some('‖'))
+                        .all(|line| line.get(c).copied() == Some(NORM))
                 });
             let (ext_h, ext_bl) = if angle {
                 let k = (bl + 1).max(h - 1 - bl);
@@ -1266,7 +1258,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             for (kk, b) in parts.iter().enumerate() {
                 if kk % 2 == 1 {
                     for line in inner.iter_mut() {
-                        line[x] = '│';
+                        line[x] = MID;
                     }
                 }
                 x += b.width();

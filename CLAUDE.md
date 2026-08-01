@@ -56,12 +56,14 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 | ├ `atoms.rs` | **全記号語彙のテーブル2枚**(どちらも phf・手書き): 出力側 `ATOMS`(char → LaTeX 綴り+`kind` Sym/BigOp)と入力側 `NAMES`(綴り → char、別綴り・ASCII 絵文字綴りは `\|` で併記。コマンド別綴りは `resolve` の match パターン)・予約グリフ・`is_atom`。**入力できる原子は必ず LaTeX 綴りを持つ**(gap=0 をテストが固定) |
 | ├ `funcs.rs` | 立体関数 `FUNCS`(limits/spaced)。∑系は `ATOMS` の kind に統合 |
 | ├ `accents.rs` | `Accent` enum: 入力 `ACCENT_NAMES`(phf, 綴り→variant)+`info()`(variant→全属性の1 match) |
-| ├ `radicals.rs` | `Radical` enum: 入力 `RADICAL_NAMES`(phf)+`info()`(グリフ・LaTeX 指数) |
+| ├ `radicals.rs` | `Radical` enum: 入力 `RADICAL_NAMES`(phf)+`info()`(グリフ・LaTeX 指数)+茎 `STEM`/庇 `OVERLINE_CORNER` |
 | ├ `delims.rs` | `Delim` enum(ペア種8つ): 入力 `DELIM_SPECS`(phf, 仕様文字→ペア+側)/`DELIM_NAMES`(`\lr` 名)+`info()` の1 match に仕様文字・1行/縦グリフ・LaTeX を集約。列分類(`of_baseline_piece`/`of_run`/`run_glyphs`/`fuses`)も info 行からの導出としてここ。parse/render/latex/tui がここを引く |
 | ├ `arrows.rs` | `Arrow` enum: 入力 `ARROW_NAMES`(phf, 綴り→variant)+`info()`(variant→全属性の1 match) |
 | ├ `scripts.rs` | インライン上付き/下付き: phf 3枚(base→sup・base→sub・script→base)、テストが全単射を固定 |
 | ├ `alphabets.rs` | スタイル族(12族28綴り×前置/後置)を phf(別綴りは or キー)+規則+例外表で。LaTeX 逆引き(`𝔸`→`\mathbb{A}`)もここ |
-| ├ `lattice.rs` | 格子罫線の定義(3×3 junction 表・辺・述語)。裸 Array のフレームと融合マーカーの語彙 |
+| ├ `lattice.rs` | 格子罫線の定義(3×3 junction 表・辺・述語・融合マーカー名)。裸 Array のフレームと融合の語彙 |
+| ├ `marks.rs` | 横断的な基線マーク(`─` `┈` `═` `⬚`)。render は再輸出のみ |
+| ├ `braces.rs` | over/underbrace の角(╭╮╰╯) |
 | `src/theme.rs` | TUI の配色定数(bin 専用) |
 | `src/main.rs` | メインループ + CLI サブコマンド |
 | `src/tui.rs` | 描画(レイアウト・スクロール・マーカー/選択の塗り・セル装飾) |

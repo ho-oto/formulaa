@@ -637,7 +637,10 @@ const FENDER_R: char = '\u{F8F1}';
 /// symbols table; the extras are the shapes drawn outside it (angle
 /// arms, mid/norm columns, over/underbrace corners).
 fn is_delim_piece(c: char) -> bool {
-    mascii::symbols::Delim::all_pieces().contains(&c) || "╱╲│╭╮╰╯‖".contains(c)
+    use mascii::symbols::{ARM_FALL, ARM_RISE, MID, NORM, is_brace_corner};
+    mascii::symbols::Delim::all_pieces().contains(&c)
+        || matches!(c, ARM_RISE | ARM_FALL | MID | NORM)
+        || is_brace_corner(c)
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -56,6 +56,19 @@ pub static DELIM_NAMES: phf::Map<&'static str, char> = phf::phf_map! {
     "dot" | "none" => '.',
 };
 
+/// The norm `‖` — not a pair (both sides are the same glyph, told
+/// apart by extent), so it stays outside the enum; the glyph lives
+/// here with the rest of the delimiter vocabulary.
+pub const NORM: char = '‖'; // U+2016 DOUBLE VERTICAL LINE
+
+/// The `\lr` mid separator column (│ between segments).
+pub const MID: char = '│'; // U+2502 BOX DRAWINGS LIGHT VERTICAL
+
+/// The tall angles' diagonal arms (drawn by the renderer; resolved
+/// contextually by the parser — they name no side of their own).
+pub const ARM_RISE: char = '╱'; // U+2571 BOX DRAWINGS LIGHT DIAGONAL
+pub const ARM_FALL: char = '╲'; // U+2572
+
 /// Spec char -> (pair, side); None = either side (the side-symmetric
 /// `|` and `.`). The input table of the enum, same shape as the symbol
 /// `NAMES` map; a test pins it against the `info` rows so the two
