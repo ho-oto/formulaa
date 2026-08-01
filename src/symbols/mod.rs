@@ -9,10 +9,6 @@
 //! - [`funcs`] — upright function names, limit-takers and ∑-class ops
 //! - [`accents`] — accent marks and their LaTeX commands
 //! - [`delims`] — the delimiter pairs (glyph columns, LaTeX)
-//! - [`lattice`] — the grid lattice junctions (bare and fused frames)
-//! - [`braces`] — the over/underbrace corners
-//! - [`marks`] — the cross-cutting baseline marks (bar, band, ⬚)
-//! - [`radicals`] — the root signs, their stem and overline corner
 //! - [`arrows`] — the stretchy labeled arrows
 //! - [`scripts`] — the inline super/subscript bijections
 //!
@@ -23,22 +19,16 @@ pub mod accents;
 pub mod alphabets;
 pub mod arrows;
 pub mod atoms;
-pub mod braces;
 pub mod delims;
 pub mod funcs;
-pub mod lattice;
-pub mod marks;
 pub mod radicals;
 pub mod scripts;
 
 pub use accents::*;
 pub use arrows::*;
 pub use atoms::*;
-pub use braces::*;
 pub use delims::*;
 pub use funcs::*;
-pub use lattice::*;
-pub use marks::*;
 pub use radicals::*;
 
 /// Resolve an input spelling to its character: the input table

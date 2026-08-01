@@ -12,8 +12,8 @@ use ratatui::widgets::{Block as UiBlock, Borders, Paragraph};
 use mascii::editor::{
     BLK_CLOSE, Editor, JUMP_CHAR_BASE, JUMP_LABELS, JUMP_RANK_BASE, SEL_CLOSE, SEL_OPEN,
 };
+use mascii::glyphs::is_lattice_glyph;
 use mascii::render::{RenderCtx, render_root};
-use mascii::symbols::is_lattice_glyph;
 
 use crate::theme;
 
@@ -637,7 +637,7 @@ const FENDER_R: char = '\u{F8F1}';
 /// symbols table; the extras are the shapes drawn outside it (angle
 /// arms, mid/norm columns, over/underbrace corners).
 fn is_delim_piece(c: char) -> bool {
-    use mascii::symbols::{ARM_FALL, ARM_RISE, MID, NORM, is_brace_corner};
+    use mascii::glyphs::{ARM_FALL, ARM_RISE, MID, NORM, is_brace_corner};
     mascii::symbols::Delim::all_pieces().contains(&c)
         || matches!(c, ARM_RISE | ARM_FALL | MID | NORM)
         || is_brace_corner(c)

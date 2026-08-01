@@ -11,13 +11,14 @@
 //! parse as `Node::Func`.
 
 use crate::ast::{Node, Row};
-use crate::render::{unstyle_char, unsubscript_char, unsuperscript_char};
-use crate::symbols::radicals::{OVERLINE_CORNER, STEM, is_stem_glyph};
-use crate::symbols::{
+use crate::glyphs::{
     ARM_FALL, ARM_RISE, BRACE_BL, BRACE_TL, COL_MARK_BOT, COL_MARK_TOP, CROSSING, DOUBLE_BODY,
-    Delim, FRAC_BAR, LATTICE, LATTICE_LEFT, LATTICE_RIGHT, LATTICE_TOP, MID, NORM, OP_BAND,
-    PLACEHOLDER, ROW_JUNCTION_L, ROW_JUNCTION_R, lattice_char,
+    FRAC_BAR, LATTICE, LATTICE_LEFT, LATTICE_RIGHT, LATTICE_TOP, MID, NORM, OP_BAND,
+    OVERLINE_CORNER, PLACEHOLDER, ROW_JUNCTION_L, ROW_JUNCTION_R, STEM, is_stem_glyph,
+    lattice_char,
 };
+use crate::render::{unstyle_char, unsubscript_char, unsuperscript_char};
+use crate::symbols::Delim;
 
 fn radical_index(c: char) -> Option<crate::symbols::Radical> {
     crate::symbols::Radical::of_glyph(c)
@@ -1381,9 +1382,9 @@ fn brace_at(g: &Grid, rect: Rect, bl: usize, c: usize) -> Option<(usize, bool, u
     let (brow, over) = cand?;
     let run_end = scan_while(g, brow, c, rect.r, |c2| c2 == FRAC_BAR);
     let closer = if over {
-        crate::symbols::BRACE_TR
+        crate::glyphs::BRACE_TR
     } else {
-        crate::symbols::BRACE_BR
+        crate::glyphs::BRACE_BR
     };
     if run_end == rect.r || g.at(brow, run_end + 1) != closer {
         return None;

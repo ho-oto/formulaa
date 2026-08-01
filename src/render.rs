@@ -6,19 +6,18 @@
 //! change them in lockstep and keep the roundtrip tests green.
 
 use crate::ast::{Field, Node, Row};
+use crate::glyphs::{
+    COL_MARK_BOT, COL_MARK_TOP, CROSSING, MID, NORM, ROW_JUNCTION_L, ROW_JUNCTION_R, STEM,
+    brace_corners, lattice_char,
+};
 pub use crate::symbols::scripts::{
     subscript_char, superscript_char, unsubscript_char, unsuperscript_char,
 };
-use crate::symbols::{
-    Accent, COL_MARK_BOT, COL_MARK_TOP, CROSSING, DrawnForm, MID, NORM, ROW_JUNCTION_L,
-    ROW_JUNCTION_R, brace_corners, lattice_char, radicals::STEM,
-};
+use crate::symbols::{Accent, DrawnForm};
 
-pub const CURSOR_CHAR: char = '▌'; // U+258C LEFT HALF BLOCK (view-only)
-// The structural glyph vocabulary lives under symbols (marks, delims,
-// lattice, radicals, braces); re-exported here for the parser and the
-// callers that grew up importing them from the render side.
-pub use crate::symbols::{DOUBLE_BODY, FRAC_BAR, OP_BAND, PLACEHOLDER};
+// The structural glyph vocabulary lives in crate::glyphs; re-exported
+// here for the callers that grew up importing it from the render side.
+pub use crate::glyphs::{CURSOR_CHAR, DOUBLE_BODY, FRAC_BAR, OP_BAND, PLACEHOLDER};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
