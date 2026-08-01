@@ -866,11 +866,11 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
                 col = right + 1;
             }
             _ if ch == FRAC_BAR => {
-                // Maximal munch: a ─ run capped by → is a labeled arrow;
-                // a fraction next to an arrow *atom* renders with a space
+                // Maximal munch: a ─ run capped by > is a labeled arrow;
+                // a fraction next to a > atom renders with a space
                 // between (presence of the space is the disambiguator).
                 let run_end = scan_while(g, bl, col, rect.r, |c| c == FRAC_BAR);
-                if run_end < rect.r && matches!(g.at(bl, run_end + 1), '>' | '→') {
+                if run_end < rect.r && g.at(bl, run_end + 1) == '>' {
                     let span = Rect {
                         t: rect.t,
                         b: rect.b,
@@ -957,9 +957,9 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
                 col = end + 1;
             }
             _ if ch == DOUBLE_BODY => {
-                // Double-arrow body: ═ run capped by ⇒ (═ has no other use).
+                // Double-arrow body: ═ run capped by > (═ has no other use).
                 let run_end = scan_while(g, bl, col, rect.r, |c| c == DOUBLE_BODY);
-                if run_end == rect.r || !matches!(g.at(bl, run_end + 1), '>' | '⇒') {
+                if run_end == rect.r || g.at(bl, run_end + 1) != '>' {
                     return err("═ run without a > head", bl, col);
                 }
                 let span = Rect {
@@ -979,11 +979,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
                 });
                 col = run_end + 2;
             }
-            '<' | '←' | '⇐'
-                if col < rect.r
-                    && ((matches!(ch, '<' | '←') && g.at(bl, col + 1) == FRAC_BAR)
-                        || (matches!(ch, '<' | '⇐') && g.at(bl, col + 1) == DOUBLE_BODY)) =>
-            {
+            '<' if col < rect.r && matches!(g.at(bl, col + 1), FRAC_BAR | DOUBLE_BODY) => {
                 // Left-pointing labeled arrow: head, then the body run.
                 let body = g.at(bl, col + 1);
                 let run_end = scan_while(g, bl, col + 1, rect.r, |c| c == body);

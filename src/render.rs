@@ -23,7 +23,7 @@ pub const OP_BAND: char = '┈'; // U+2508 BOX DRAWINGS LIGHT QUADRUPLE DASH HOR
 /// capped by a head (`──>`) *is* the arrow; a fraction next to a `>` atom
 /// is written with a separating space (space presence, not count, is what
 /// changes the reading). Double arrows (⇒ ⇐) use a ═ body. Heads render
-/// as ASCII < > ; the Unicode arrows are accepted as lenient input heads.
+/// as ASCII < > (never the Unicode arrows — those stay ordinary atoms).
 pub const DOUBLE_BODY: char = '═'; // U+2550 BOX DRAWINGS DOUBLE HORIZONTAL
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -580,9 +580,9 @@ pub fn render_row(
     // adjacent glyphs would otherwise fuse into one token — space
     // *presence* (never count) is what changes a reading:
     //  - between two identical bar glyphs (── / ┈┈ / ══ would merge)
-    //  - between a bar edge and an arrow head that would cap it (─ then →,
-    //    ═ then ⇒) and between a head and a body that would absorb it
-    //    (← then ─, ⇐ then ═)
+    //  - between a bar edge and a > head that would cap it (─ then >,
+    //    ═ then >) and between a < head and a body that would absorb it
+    //    (< then ─ or ═)
     //  - after a cancel with a blank baseline edge (the strike-extent scan
     //    must not fuse the ragged edge with the neighbour)
     // A 2D script right after a cancel instead needs a non-blank baseline
@@ -636,10 +636,9 @@ pub fn render_row(
                             // keep decimals tight (3.14).
                             || (a == '.' && b.is_ascii_alphabetic())
                             || (a == b && (a == FRAC_BAR || a == DOUBLE_BODY))
-                            || (a == FRAC_BAR && (b == '>' || b == '→'))
-                            || (a == DOUBLE_BODY && (b == '>' || b == '⇒'))
-                            || ((a == '<' || a == '←') && b == FRAC_BAR)
-                            || ((a == '<' || a == '⇐') && b == DOUBLE_BODY)
+                            || (a == FRAC_BAR && b == '>')
+                            || (a == DOUBLE_BODY && b == '>')
+                            || (a == '<' && (b == FRAC_BAR || b == DOUBLE_BODY))
                     }
                     _ => false,
                 };
