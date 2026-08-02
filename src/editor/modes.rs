@@ -815,18 +815,9 @@ impl Editor {
             };
             let g = pos / 2;
             let mark = Mark::Gap { cols: cmode }.ch();
-            let ghost = || vec![Node::Sym(mark), Node::Spacer];
-            if cmode {
-                for r in (0..rows).rev() {
-                    cells.insert(r * cols + g.min(cols), ghost());
-                }
-                *nc = cols + 1;
-            } else {
-                for j in 0..cols {
-                    cells.insert(g.min(rows) * cols + j, ghost());
-                }
-                *nr = rows + 1;
-            }
+            (*nr, *nc) = splice_lane(cells, rows, cols, cmode, g, || {
+                vec![Node::Sym(mark), Node::Spacer]
+            });
             if let Field::Cell(cell) = path[k].1 {
                 let _ = c;
                 path[k].1 = Field::Cell(gap_shift_cell(cell, cmode, g, rows, cols));
@@ -1110,6 +1101,31 @@ impl Editor {
 /// A flat cell index re-based past a ghost lane inserted at gap `g`
 /// of a rows×cols array (the gap-cursor preview has real width, so
 /// every coordinate that touches the array must shift with it).
+/// Splice one lane into a cell rectangle at gap `g` (0..=n), filling
+/// it with `fill()`. The row-major arithmetic is identical for a real
+/// insertion and for the display's ghost preview, so both go through
+/// here; returns the grown (rows, cols).
+pub(crate) fn splice_lane(
+    cells: &mut Vec<Row>,
+    rows: usize,
+    cols: usize,
+    cols_mode: bool,
+    g: usize,
+    fill: impl Fn() -> Row,
+) -> (usize, usize) {
+    if cols_mode {
+        for r in (0..rows).rev() {
+            cells.insert(r * cols + g.min(cols), fill());
+        }
+        (rows, cols + 1)
+    } else {
+        for j in 0..cols {
+            cells.insert(g.min(rows) * cols + j, fill());
+        }
+        (rows + 1, cols)
+    }
+}
+
 pub(crate) fn gap_shift_cell(
     cell: usize,
     cmode: bool,

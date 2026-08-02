@@ -304,42 +304,66 @@ pub enum GridWrap {
     Norm,
 }
 
+/// The matrix environments, in one table: the `\pmatrix`-family
+/// minibuffer commands, the LaTeX `\begin{env}` names, and the
+/// delimiter pair each wraps. Both LaTeX directions read this, so a
+/// new environment is added once.
+///
+/// `matrix` and `array` are the bare lattice — a delimited grid spells
+/// its pair with `\pmatrix` and friends. `cases`/`rcases` are
+/// two-column environments; a wider grid falls back to the general
+/// `\left\{ \begin{matrix} … \right.` shell.
+pub const GRID_ENVS: &[(&str, GridWrap)] = &[
+    ("matrix", GridWrap::Bare),
+    ("array", GridWrap::Bare),
+    ("smallmatrix", GridWrap::Bare),
+    (
+        "pmatrix",
+        GridWrap::Pair(Delim::Col(ColDelim::Paren), Delim::Col(ColDelim::Paren)),
+    ),
+    (
+        "bmatrix",
+        GridWrap::Pair(Delim::Col(ColDelim::Bracket), Delim::Col(ColDelim::Bracket)),
+    ),
+    (
+        "Bmatrix",
+        GridWrap::Pair(Delim::Col(ColDelim::Brace), Delim::Col(ColDelim::Brace)),
+    ),
+    (
+        "vmatrix",
+        GridWrap::Pair(Delim::Col(ColDelim::Bar), Delim::Col(ColDelim::Bar)),
+    ),
+    ("Vmatrix", GridWrap::Norm),
+    (
+        "cases",
+        GridWrap::Pair(Delim::Col(ColDelim::Brace), Delim::Col(ColDelim::Null)),
+    ),
+    (
+        "rcases",
+        GridWrap::Pair(Delim::Col(ColDelim::Null), Delim::Col(ColDelim::Brace)),
+    ),
+];
+
+/// The environment a delimited grid spells, if any. `cols` decides the
+/// two-column-only environments.
+pub fn grid_env_name(left: Delim, right: Delim, cols: usize) -> Option<&'static str> {
+    GRID_ENVS
+        .iter()
+        .find(|(name, w)| {
+            *w == GridWrap::Pair(left, right)
+                // (Null, Null) is deliberately absent: \begin{matrix} is
+                // the bare Array's spelling, so a null pair keeps its
+                // \left. shell and reads back as itself.
+                && (cols <= 2 || !matches!(*name, "cases" | "rcases"))
+        })
+        .map(|&(name, _)| name)
+}
+
 /// Grid minibuffer commands with an optional RxC digit suffix
 /// (`matrix34` = 3 rows × 4 cols; bare name = 2×2). Returns the delimiter
 /// pair and the dimensions.
 fn grid_command(cmd: &str) -> Option<(GridWrap, usize, usize)> {
-    const GRIDS: &[(&str, GridWrap)] = &[
-        // \matrix is the bare lattice (like \array): the delimiter
-        // spells itself via \pmatrix / \bmatrix and friends.
-        ("matrix", GridWrap::Bare),
-        (
-            "bmatrix",
-            GridWrap::Pair(Delim::Col(ColDelim::Bracket), Delim::Col(ColDelim::Bracket)),
-        ),
-        (
-            "pmatrix",
-            GridWrap::Pair(Delim::Col(ColDelim::Paren), Delim::Col(ColDelim::Paren)),
-        ),
-        (
-            "Bmatrix",
-            GridWrap::Pair(Delim::Col(ColDelim::Brace), Delim::Col(ColDelim::Brace)),
-        ),
-        (
-            "vmatrix",
-            GridWrap::Pair(Delim::Col(ColDelim::Bar), Delim::Col(ColDelim::Bar)),
-        ),
-        ("Vmatrix", GridWrap::Norm),
-        (
-            "cases",
-            GridWrap::Pair(Delim::Col(ColDelim::Brace), Delim::Col(ColDelim::Null)),
-        ),
-        (
-            "rcases",
-            GridWrap::Pair(Delim::Col(ColDelim::Null), Delim::Col(ColDelim::Brace)),
-        ),
-        ("array", GridWrap::Bare),
-    ];
-    for &(name, delims) in GRIDS {
+    for &(name, delims) in GRID_ENVS {
         let Some(rest) = cmd.strip_prefix(name) else {
             continue;
         };
@@ -532,18 +556,7 @@ impl Editor {
                 else {
                     unreachable!()
                 };
-                let ghost = || vec![Node::Spacer];
-                if cmode {
-                    for r in (0..rows).rev() {
-                        cells.insert(r * cols + g.min(cols), ghost());
-                    }
-                    *nc = cols + 1;
-                } else {
-                    for j in 0..cols {
-                        cells.insert(g.min(rows) * cols + j, ghost());
-                    }
-                    *nr = rows + 1;
-                }
+                (*nr, *nc) = modes::splice_lane(cells, rows, cols, cmode, g, || vec![Node::Spacer]);
                 (k, i, cmode, g, rows, cols, parent)
             }),
             _ => None,
@@ -986,69 +999,39 @@ impl Editor {
         self.col = 0;
     }
 
-    /// Insert an empty row below the cursor's row (Enter inside a grid).
-    pub fn add_row(&mut self) {
-        self.edit_array(|rows, cols, cells, c| {
-            let r = c / cols;
-            for j in 0..cols {
-                cells.insert((r + 1) * cols + j, vec![]);
-            }
-            Some((rows + 1, cols, (r + 1) * cols + c % cols))
-        });
+    /// Insert an empty row below the cursor's row, or a column right
+    /// of its column — the `Edit::Add*` commands, expressed as the
+    /// lane ops with the gap the cursor names.
+    pub fn add_lane(&mut self, cols_mode: bool) {
+        let Some((_, _, _, cols, c)) = self.grid_info() else {
+            self.info("not inside a grid");
+            return;
+        };
+        let after = if cols_mode { c % cols } else { c / cols };
+        self.lane_insert(cols_mode, after + 1);
     }
 
-    /// Insert an empty column right of the cursor's column.
-    pub fn add_col(&mut self) {
-        self.edit_array(|rows, cols, cells, c| {
-            let j = c % cols;
-            for r in (0..rows).rev() {
-                cells.insert(r * cols + j + 1, vec![]);
-            }
-            Some((rows, cols + 1, (c / cols) * (cols + 1) + j + 1))
-        });
-    }
-
-    /// Delete the cursor's row (unless it is the only one).
-    pub fn del_row(&mut self) {
-        self.edit_array(|rows, cols, cells, c| {
-            if rows == 1 {
-                return None;
-            }
-            let r = c / cols;
-            cells.drain(r * cols..(r + 1) * cols);
-            Some((rows - 1, cols, r.min(rows - 2) * cols + c % cols))
-        });
-    }
-
-    /// Delete the cursor's column (unless it is the only one).
-    pub fn del_col(&mut self) {
-        self.edit_array(|rows, cols, cells, c| {
-            if cols == 1 {
-                return None;
-            }
-            let j = c % cols;
-            for r in (0..rows).rev() {
-                cells.remove(r * cols + j);
-            }
-            Some((rows, cols - 1, (c / cols) * (cols - 1) + j.min(cols - 2)))
-        });
+    /// Delete the cursor's row or column (never the last one).
+    pub fn del_lane(&mut self, cols_mode: bool) {
+        let Some((_, _, _, cols, c)) = self.grid_info() else {
+            self.info("not inside a grid");
+            return;
+        };
+        let at = if cols_mode { c % cols } else { c / cols };
+        self.lane_delete(cols_mode, at, at);
     }
 
     /// Insert an empty lane (column when `cols_mode`, row otherwise)
     /// at gap `g` (0..=n), parking the cursor in the new lane.
     pub fn lane_insert(&mut self, cols_mode: bool, g: usize) {
         self.edit_array(|rows, cols, cells, c| {
-            if cols_mode {
-                for r in (0..rows).rev() {
-                    cells.insert(r * cols + g.min(cols), vec![]);
-                }
-                Some((rows, cols + 1, (c / cols) * (cols + 1) + g.min(cols)))
+            let (nr, nc) = modes::splice_lane(cells, rows, cols, cols_mode, g, Vec::new);
+            let at = if cols_mode {
+                (c / cols) * nc + g.min(cols)
             } else {
-                for j in 0..cols {
-                    cells.insert(g.min(rows) * cols + j, vec![]);
-                }
-                Some((rows + 1, cols, g.min(rows) * cols + c % cols))
-            }
+                g.min(rows) * cols + c % cols
+            };
+            Some((nr, nc, at))
         });
     }
 

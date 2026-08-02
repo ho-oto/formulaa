@@ -773,22 +773,16 @@ impl Parser {
             mids: 0,
             segs: vec![vec![array]],
         };
-        use ColDelim as C;
-        use Delim::Col;
-        match name.as_str() {
-            "matrix" | "smallmatrix" | "array" => out.push(array),
-            "pmatrix" => out.push(wrap(Col(C::Paren), Col(C::Paren), array)),
-            "bmatrix" => out.push(wrap(Col(C::Bracket), Col(C::Bracket), array)),
-            "Bmatrix" => out.push(wrap(Col(C::Brace), Col(C::Brace), array)),
-            "vmatrix" => out.push(wrap(Col(C::Bar), Col(C::Bar), array)),
-            "Vmatrix" => out.push(Node::Norm { arg: vec![array] }),
-            "cases" => out.push(wrap(Col(C::Brace), Col(C::Null), array)),
-            "rcases" => out.push(wrap(Col(C::Null), Col(C::Brace), array)),
-            _ => {
-                // Unknown environment: keep its contents inline, with
-                // `\\` as formula breaks at top level (aligned & co).
-                out.extend(self.row(inner));
-            }
+        // The environment table is the editor's (one row per env, both
+        // LaTeX directions and the \pmatrix commands read it).
+        use crate::editor::{GRID_ENVS, GridWrap};
+        match GRID_ENVS.iter().find(|(n, _)| *n == name).map(|&(_, w)| w) {
+            Some(GridWrap::Bare) => out.push(array),
+            Some(GridWrap::Pair(l, r)) => out.push(wrap(l, r, array)),
+            Some(GridWrap::Norm) => out.push(Node::Norm { arg: vec![array] }),
+            // Unknown environment: keep its contents inline, with
+            // `\\` as formula breaks at top level (aligned & co).
+            None => out.extend(self.row(inner)),
         }
         rest
     }

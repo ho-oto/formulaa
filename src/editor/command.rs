@@ -325,10 +325,10 @@ impl Editor {
                 }),
             },
             Edit::Mid => self.insert_mid(),
-            Edit::AddRow => self.add_row(),
-            Edit::AddCol => self.add_col(),
-            Edit::DelRow => self.del_row(),
-            Edit::DelCol => self.del_col(),
+            Edit::AddRow => self.add_lane(false),
+            Edit::AddCol => self.add_lane(true),
+            Edit::DelRow => self.del_lane(false),
+            Edit::DelCol => self.del_lane(true),
             Edit::OpenBox(kind) => self.op_start(kind),
         }
     }

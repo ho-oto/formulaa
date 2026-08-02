@@ -205,23 +205,7 @@ fn node_to_latex(node: &Node) -> String {
                 && let [seg] = &segs[..]
                 && let [Node::Array { cols, cells, .. }] = &seg[..]
             {
-                use crate::symbols::ColDelim as C;
-                use crate::symbols::Delim::Col;
-                let env = match (left, right) {
-                    (Col(C::Paren), Col(C::Paren)) => Some("pmatrix"),
-                    (Col(C::Bracket), Col(C::Bracket)) => Some("bmatrix"),
-                    (Col(C::Brace), Col(C::Brace)) => Some("Bmatrix"),
-                    (Col(C::Bar), Col(C::Bar)) => Some("vmatrix"),
-                    // (Null, Null) deliberately absent: \begin{matrix}
-                    // is the bare Array's spelling, so the null pair
-                    // keeps its \left. shell to read back as itself.
-                    // cases is a two-column environment; wider grids fall
-                    // through to \left\{ \begin{matrix} … \right.
-                    (Col(C::Brace), Col(C::Null)) if *cols <= 2 => Some("cases"),
-                    // mathtools' mirror image (\usepackage{mathtools}).
-                    (Col(C::Null), Col(C::Brace)) if *cols <= 2 => Some("rcases"),
-                    _ => None,
-                };
+                let env = crate::editor::grid_env_name(*left, *right, *cols);
                 if let Some(env) = env {
                     return format!(
                         "\\begin{{{env}}} {} \\end{{{env}}}",
