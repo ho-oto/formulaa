@@ -23,7 +23,7 @@ editors/vscode   editors/obsidian       editors/zed
 
 - エディタ本体のロジック(カーソル・コマンド・選択)はすべて Rust 側
   (`src/editor/mod.rs`)にあり、JS はキーイベント転送と画面表示だけを行う。
-  `MasciiEditor.screen()` はカーソル `▌`・選択 `⟦ ⟧` 込みのテキストを返す。
+  `MasciiEditor.screen()` はカーソル `▌`・選択(各セルに結合下線 U+0332)込みのテキストを返す。
 - フェンス検出は各エディタ側で行う(````math` / ````mascii`)。
   確定時にブロック内容を正準 AA で書き戻す。
 

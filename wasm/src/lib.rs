@@ -49,7 +49,8 @@ pub fn aa_check(text: &str) -> String {
 }
 
 /// The structural editor. Feed keys with `key()`, display `screen()`
-/// (the cursor is the ▌ character; selection is wrapped in ⟦ ⟧), and read
+/// (the cursor is the ▌ character; selected ranges carry a combining
+/// underline U+0332 on every covered cell), and read
 /// the result back with `aa()` / `latex()`.
 #[wasm_bindgen]
 pub struct MasciiEditor {
@@ -103,12 +104,40 @@ impl MasciiEditor {
             }
             row[c] = ch;
         };
+        // Selection / cell / lane ranges show as a combining underline
+        // on every covered cell (like the cancel strike: zero-width,
+        // so no glyph is hidden and the geometry stays true). Pair the
+        // marks per row; the label emphasis is a double underline.
+        let mut underlined: Vec<(usize, usize, usize)> = Vec::new(); // (row, x0, x1)
+        {
+            let mut open_at: Vec<(usize, usize)> = Vec::new(); // (row, x)
+            let mut marks = block.marks.clone();
+            marks.sort_unstable();
+            for &(r, c, m) in &marks {
+                match Mark::decode(m) {
+                    Some(
+                        Mark::Sel { open: true }
+                        | Mark::Cells { open: true }
+                        | Mark::Lane { open: true, .. },
+                    ) => open_at.push((r, c)),
+                    Some(
+                        Mark::Sel { open: false }
+                        | Mark::Cells { open: false }
+                        | Mark::Lane { open: false, .. }
+                        | Mark::BlockClose,
+                    ) => {
+                        if let Some((r0, x0)) = open_at.pop()
+                            && r0 == r
+                        {
+                            underlined.push((r, x0, c));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
         for &(r, c, m) in &block.marks {
             let ch = match Mark::decode(m) {
-                Some(Mark::Sel { open } | Mark::Cells { open } | Mark::Lane { open, .. }) => {
-                    if open { '⟦' } else { '⟧' }
-                }
-                Some(Mark::BlockClose) => '⟧',
                 // The lane-gap ghost: a visible insert cursor even on
                 // the colorless text screen.
                 Some(Mark::Gap { .. }) => '◇',
@@ -119,10 +148,16 @@ impl MasciiEditor {
                         None => continue,
                     }
                 }
-                // Frame corners and ghosts have no colorless form.
+                // Ranges underline (above); frame corners have no
+                // colorless form.
                 _ => continue,
             };
             put(&mut lines, r, c, ch);
+        }
+        // The free cursor (^F) floats over the picture; without it the
+        // caret would sit motionless while arrows appear dead.
+        if let Some(f) = &self.ed.free {
+            put(&mut lines, f.at.0, f.at.1, CURSOR_CHAR);
         }
         if let Some((r, c)) = block.caret {
             // Open minibuffer: the typed `\command` overlays the cells
@@ -164,10 +199,15 @@ impl MasciiEditor {
                 put(&mut lines, r, c, CURSOR_CHAR);
             }
         }
-        // Re-apply the cancel strikes cell-by-cell (skipping cells the
-        // caret overlay replaced).
+        // Assemble, appending the combining channels per cell: the
+        // cancel strike (U+0338) and the range underline (U+0332) are
+        // zero-width, so overlay coordinates stay cell coordinates.
         let struck: std::collections::HashSet<(usize, usize)> =
             block.cancel.iter().copied().collect();
+        let selected: std::collections::HashSet<(usize, usize)> = underlined
+            .iter()
+            .flat_map(|&(r, x0, x1)| (x0..x1.max(x0 + 1)).map(move |c| (r, c)))
+            .collect();
         lines
             .into_iter()
             .enumerate()
@@ -177,6 +217,9 @@ impl MasciiEditor {
                     out.push(ch);
                     if ch != CURSOR_CHAR && struck.contains(&(r, c)) {
                         out.push('\u{338}');
+                    }
+                    if selected.contains(&(r, c)) {
+                        out.push('\u{332}');
                     }
                 }
                 out

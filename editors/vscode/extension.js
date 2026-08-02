@@ -63,7 +63,8 @@ function webviewHtml(webview, mediaUri) {
     // style the cursor glyph
     screen.innerHTML = screen.innerHTML
       .replace('▌', '<span class="cursor">▌</span>')
-      .replace(/⟦([^⟧]*)⟧/g, '<span class="sel">⟦$1⟧</span>');
+      // selected cells carry a combining underline (U+0332)
+      .replace(/(.\u0332)/g, '<span class="sel">$1</span>');
     const mb = ed.minibuffer();
     document.getElementById('minibuffer').textContent =
       mb === undefined || mb === null ? '' : '\\\\' + mb + '▌';

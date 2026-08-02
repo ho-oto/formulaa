@@ -767,9 +767,19 @@ impl Parser {
     /// `\begin{env} … \end{env}`.
     fn environment<'a>(&self, t: &'a [Tok], out: &mut Row) -> &'a [Tok] {
         let (name, t) = self.group_text(t);
-        // \begin{array}{ccc} — the column spec is dropped.
+        // \begin{array}{ccc} — the column spec is dropped, but only
+        // when a brace group actually follows: without one the first
+        // cell must not be eaten in its place.
         let t = if name == "array" {
-            self.group_text(t).1
+            let mut i = 0;
+            while t.get(i) == Some(&Tok::Space) {
+                i += 1;
+            }
+            if t.get(i) == Some(&Tok::Open) {
+                self.group_text(t).1
+            } else {
+                t
+            }
         } else {
             t
         };
