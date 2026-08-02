@@ -236,8 +236,6 @@ fn marker_boxes(
     if grid.is_empty() {
         grid.push(Vec::new());
     }
-    let labels = JUMP_LABELS.chars().count() as u32;
-    let is_label = |c: char| (JUMP_CHAR_BASE..JUMP_CHAR_BASE + labels).contains(&(c as u32));
 
     let mut bg: Vec<Vec<Option<Color>>> = grid.iter().map(|row| vec![None; row.len()]).collect();
     // Boxes: pair opens (selection start, ^B label) with closes within
@@ -626,6 +624,13 @@ fn overlay_minibuffer(
 /// backgrounds from `marker_boxes` are applied to plain glyphs. A
 /// struck cell gets its combining U+0338 appended *inside* its span,
 /// so the ligature is never split across style boundaries.
+/// A jump / block label cell: stored as a private-use char so the paint
+/// layer can find it, drawn as its letter.
+fn is_label(c: char) -> bool {
+    let labels = JUMP_LABELS.chars().count() as u32;
+    (JUMP_CHAR_BASE..JUMP_CHAR_BASE + labels).contains(&(c as u32))
+}
+
 /// Display sentinels for the open name box's [ ] fenders: drawn as
 /// green glyphs (the ^O frame color), never as ordinary text.
 const FENDER_L: char = '\u{F8F0}';
@@ -694,11 +699,20 @@ fn decorate_line(
     for (i, &c) in line.iter().enumerate().skip(scroll_x) {
         let u = c as u32;
         let cell_bg = bg.get(i).copied().flatten();
-        // The fender sentinels always show as brackets, whatever branch
-        // (caret included) ends up drawing the cell.
+        // Display chars are resolved to their glyph HERE, before any
+        // branch draws the cell: the caret branch used to print the raw
+        // sentinel of whatever it landed on, and a private-use
+        // codepoint reaching the terminal shows as whatever the font
+        // maps that page to (JuliaMono puts logos there).
         let shown = match c {
             FENDER_L => '[',
             FENDER_R => ']',
+            _ if is_label(c) => JUMP_LABELS
+                .chars()
+                .nth((u - JUMP_CHAR_BASE) as usize)
+                .unwrap_or(' '),
+            // Backstop for every other decoration: blank, never raw.
+            _ if mascii::render::is_display_marker(c) => ' ',
             _ => c,
         };
         let cell = if struck.contains(&(y, i)) {
@@ -733,19 +747,14 @@ fn decorate_line(
                 style = style.bg(color);
             }
             spans.push(Span::styled(cell, style));
-        } else if (JUMP_CHAR_BASE..JUMP_CHAR_BASE + JUMP_LABELS.chars().count() as u32).contains(&u)
-        {
-            let label = JUMP_LABELS
-                .chars()
-                .nth((u - JUMP_CHAR_BASE) as usize)
-                .unwrap();
+        } else if is_label(c) {
             flush(&mut buf, buf_bg, &mut spans);
             // The arrow-selected marker keeps its highlight color.
             let style = match cell_bg {
                 Some(color) => label_style.bg(color),
                 None => label_style,
             };
-            spans.push(Span::styled(label.to_string(), style));
+            spans.push(Span::styled(cell, style));
         } else if frame.is_some_and(|(o, close, t, b)| {
             // The edited grid's frame recolors while grid mode is on.
             // The rectangle is exact (render-placed corners): lattice
@@ -1323,6 +1332,30 @@ mod tests {
     /// The name box never shows the reparse-quoting quotes: typing a
     /// single letter into \rm displays that letter, bare, with the
     /// caret at the box cursor.
+    /// A label cell under the caret prints its letter: private-use
+    /// codepoints must never reach the terminal (fonts map that page
+    /// to logos, so a leak shows as a random glyph).
+    #[test]
+    fn a_label_under_the_caret_still_prints_its_letter() {
+        let label = char::from_u32(JUMP_CHAR_BASE).unwrap();
+        let struck = std::collections::HashSet::new();
+        for cursor in [None, Some(0)] {
+            let spans = decorate_line(
+                &[label, '\u{E0F4}'],
+                0,
+                &struck,
+                &[None, None],
+                cursor,
+                false,
+                false,
+                0,
+                None,
+            );
+            let painted: String = spans.iter().map(|s| s.content.as_ref()).collect();
+            assert_eq!(painted, "a ", "cursor={:?}", cursor);
+        }
+    }
+
     #[test]
     fn op_box_overlay_is_quote_free() {
         let mut ed = Editor::new();

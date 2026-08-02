@@ -180,6 +180,57 @@ fn roundtrip(name: &str, row: &Row) {
 /// A formula with holes exports the holes as holes: the ⬚ marks blank
 /// out when other ink carries the structure, and stay put when they
 /// are the only thing making the picture readable.
+/// `normalize` must be idempotent: it runs again after every merge, so
+/// a rule that lands on a shape another rule would rewrite (a band
+/// collapsing to a one-letter `Func`) makes two exports of one document
+/// disagree.
+#[test]
+fn normalize_is_idempotent() {
+    use mascii::ast::{Field, Node};
+    let cases: Vec<Node> = vec![
+        Node::BigOp {
+            name: "T".into(),
+            lower: vec![],
+            upper: vec![],
+        },
+        Node::BigOp {
+            name: "lim".into(),
+            lower: vec![],
+            upper: vec![],
+        },
+        Node::Func("T".into()),
+        Node::Func("".into()),
+        Node::WideAccent {
+            overs: vec![],
+            unders: vec![],
+            base: vec![Node::Sym('x')],
+        },
+        Node::WideAccent {
+            overs: vec![],
+            unders: vec![],
+            base: vec![],
+        },
+        Node::Sup { arg: vec![] },
+    ];
+    for n in cases {
+        let once = normalize(&vec![n.clone()]);
+        assert_eq!(normalize(&once), once, "not idempotent: {:?}", n);
+        // …and nested in an inset, where the same rules run again.
+        let mut host = Node::Sqrt {
+            index: mascii::symbols::Radical::Sqrt,
+            arg: vec![],
+        };
+        *host.field_mut(Field::SqrtArg) = vec![n.clone()];
+        let once = normalize(&vec![host.clone()]);
+        assert_eq!(
+            normalize(&once),
+            once,
+            "not idempotent in an inset: {:?}",
+            n
+        );
+    }
+}
+
 #[test]
 fn export_blanks_slot_marks_when_safe() {
     use mascii::render::export_aa;

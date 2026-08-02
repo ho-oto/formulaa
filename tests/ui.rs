@@ -892,6 +892,24 @@ fn selection_does_not_survive_leaving_the_row() {
     assert_eq!(latex(&ed), "\\frac{ab}{}^{x}");
 }
 
+/// A formula line break lives only at the top level: a selection may
+/// not span one, so neither a wrap nor a copy can carry one into an
+/// inset (the picture would lose it, breaking the roundtrip).
+#[test]
+fn a_line_break_stays_out_of_insets() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a Enter b S-Left S-Left S-Left");
+    assert_eq!(ed.selection(), Some((2, 3)), "selection stops at the break");
+    type_script(&mut ed, "^");
+    assert_eq!(latex(&ed), "a \\\\ ^{b}");
+    assert_roundtrip(&ed, &[]);
+    // The same guard the other way round: with the cursor right before
+    // the break, Shift+→ refuses to cross it.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a Enter b Left Left S-Right");
+    assert_eq!(ed.selection(), None, "and stops before it too");
+}
+
 #[test]
 fn block_select_mode_selects_a_structure() {
     let mut ed = Editor::new();
@@ -925,6 +943,24 @@ fn block_select_mode_selects_a_structure() {
     type_script(&mut ed, r"1 // 2 Down 3 C-b S-Left");
     assert!(ed.block.is_none(), "mode exits");
     assert_eq!(ed.selection(), Some((0, 2)));
+    // …and the flip is spent after one step: a second shrink collapses.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"1 // 2 Down 3 C-b Enter S-Left S-Right S-Right");
+    assert_eq!(ed.selection(), None, "collapses like any selection");
+    // A hand-made selection keeps the plain semantics: Shift+←/→ back
+    // onto the anchor clears it (the flip is only for whole blocks).
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"abcde Left Left S-Left");
+    assert_eq!(ed.selection(), Some((2, 3)));
+    type_script(&mut ed, "S-Right");
+    assert_eq!(ed.selection(), None, "shrink collapses");
+    assert_eq!(ed.col, 3, "and the cursor stays put");
+    // At a row edge the collapsing step is still available.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"1+2 S-Left");
+    assert_eq!(ed.selection(), Some((2, 3)));
+    type_script(&mut ed, "S-Right");
+    assert_eq!(ed.selection(), None, "edge selection collapses");
     // ^B at the top level has no enclosing block: mode does not start.
     let mut ed = Editor::new();
     type_script(&mut ed, r"x+y C-b");

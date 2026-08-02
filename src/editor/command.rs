@@ -126,8 +126,17 @@ impl Editor {
                 if kind == BoxKind::OpStar {
                     // A band name is one piece: the words are joined so
                     // the bare form reads back as exactly one Func.
+                    let name = words.concat();
+                    // A one-character band is the ∑-class symbol form
+                    // (┈T┈ would read back as a symbol with limits, not
+                    // a named operator), so the picture has no way to
+                    // spell this and the parser rejects it.
+                    if name.chars().count() < 2 {
+                        self.error("\\op* needs a name of two or more characters");
+                        return;
+                    }
                     self.insert_and_enter(Node::BigOp {
-                        name: words.concat(),
+                        name,
                         lower: vec![],
                         upper: vec![],
                     });
@@ -257,7 +266,14 @@ impl Editor {
                     // The selection becomes the node's first field; the
                     // cursor lands in the next empty field (\frac: the
                     // denominator) or after the node (\sqrt, \cancel).
-                    let content = self.take_selection().unwrap();
+                    // A field is always an inset, where a formula line
+                    // break cannot live.
+                    let content: crate::ast::Row = self
+                        .take_selection()
+                        .unwrap()
+                        .into_iter()
+                        .filter(|n| *n != Node::Break)
+                        .collect();
                     let mut node = node;
                     let fields = node.fields();
                     *node.field_mut(fields[0]) = content;

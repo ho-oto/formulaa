@@ -591,6 +591,7 @@ impl Editor {
             self.select_anchor = Some(*i);
             self.select_path = p.clone();
             self.col = i + 1;
+            self.select_whole = true;
         }
         self.clear_message();
     }

@@ -266,6 +266,17 @@ pub fn row_at_mut<'a>(root: &'a mut Row, path: &[(usize, Field)]) -> &'a mut Row
 /// Canonical form: merge adjacent same-kind scripts (x^{a}^{b} == x^{ab} in
 /// the picture, so the parser can only ever return the merged form).
 /// `parse(render(x)) == normalize(x)` is the roundtrip invariant.
+/// The canonical node for an upright name standing on its own: a
+/// one-letter run is `Roman` (its picture — 'd', or a glued d𝑥 — reads
+/// back that way), so `Func` always holds 2+ letters.
+fn bare_upright(name: String) -> Node {
+    let mut cs = name.chars();
+    match (cs.next(), cs.next()) {
+        (Some(c), None) => Node::Roman(c),
+        _ => Node::Func(name),
+    }
+}
+
 pub fn normalize(row: &Row) -> Row {
     // A band with no limits collapses to its bare base — but only when
     // the editor can lift that base back into a band (∑-class atoms and
@@ -282,8 +293,12 @@ pub fn normalize(row: &Row) -> Row {
             Node::BigOpSym { op, lower, upper } if lower.is_empty() && upper.is_empty() => {
                 pre.push(Node::Sym(op))
             }
+            // …and the bare form is then normalized in turn: a
+            // one-letter name is Roman, not Func (this pass runs once,
+            // so the collapse must land on the final shape or
+            // normalize would not be idempotent).
             Node::BigOp { name, lower, upper } if lower.is_empty() && upper.is_empty() => {
-                pre.push(Node::Func(name))
+                pre.push(bare_upright(name))
             }
             // A markless wide accent is just its base.
             Node::WideAccent {
@@ -291,11 +306,7 @@ pub fn normalize(row: &Row) -> Row {
                 unders,
                 base,
             } if overs.is_empty() && unders.is_empty() => pre.extend(base),
-            // A one-letter upright run is Roman: its picture ('d' or a
-            // glued d𝑥) reads back that way, so Func stays 2+ letters.
-            Node::Func(t) if t.chars().count() == 1 => {
-                pre.push(Node::Roman(t.chars().next().unwrap()))
-            }
+            Node::Func(t) => pre.push(bare_upright(t)),
             n => pre.push(n),
         }
     }
@@ -587,6 +598,10 @@ fn normalize_node(node: &Node) -> Node {
             // two would draw the same picture otherwise. Marks stack
             // the same way in both, so the lists carry straight over.
             match &base[..] {
+                // …and a markless one is just that base, or the arm
+                // above would have to run a second time (normalize is
+                // a single pass and must be idempotent).
+                [Node::Sym(c)] if overs.is_empty() && unders.is_empty() => Node::Sym(*c),
                 [Node::Sym(c)] => Node::Accent {
                     overs: overs.clone(),
                     unders: unders.clone(),

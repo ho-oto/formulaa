@@ -92,6 +92,12 @@ impl MasciiEditor {
             lines.push(Vec::new());
         }
         let put = |lines: &mut Vec<Vec<char>>, r: usize, c: usize, ch: char| {
+            // Overlays may land past the last rendered row (the command
+            // preview sits one row below the caret): grow, never index
+            // out of bounds.
+            if r >= lines.len() {
+                lines.resize(r + 1, Vec::new());
+            }
             let row = &mut lines[r];
             if c >= row.len() {
                 row.resize(c + 1, ' ');

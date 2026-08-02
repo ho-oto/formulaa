@@ -77,6 +77,11 @@ pub struct Editor {
     /// while the cursor stays in that row (leaving the row would make the
     /// anchor point into a different — possibly shorter — row).
     select_path: Vec<(usize, Field)>,
+    /// The selection was placed whole (^B commit, Shift+↑), so the
+    /// cursor sits on an end the user did not choose. The next
+    /// Shift+←/→ may flip the ends to grow on the side pressed;
+    /// afterwards the ordinary shrink-to-nothing semantics resume.
+    select_whole: bool,
     /// Editor-internal clipboard (^C/^X/^V): a sibling-node slice, or
     /// a rectangle of grid cells.
     clip: Clip,
@@ -426,6 +431,7 @@ impl Editor {
             ghost: Vec::new(),
             select_anchor: None,
             select_path: Vec::new(),
+            select_whole: false,
             clip: Clip::Nodes(Vec::new()),
         }
     }
@@ -1359,14 +1365,28 @@ impl Editor {
     // ----- selection (Shift+←/→ over sibling nodes) -----
 
     pub fn select_move(&mut self, right: bool) {
+        // A formula line break only exists at the top level, so a
+        // selection may not span one: the picture would have no box to
+        // paint, and wrapping it would splice a Break into an inset.
+        let crossed = if right {
+            Some(self.col)
+        } else {
+            self.col.checked_sub(1)
+        };
+        if crossed.is_some_and(|i| matches!(self.cur_row().get(i), Some(Node::Break))) {
+            return;
+        }
         if self.select_anchor.is_none() || self.select_path != self.path {
             self.select_anchor = Some(self.col);
             self.select_path = self.path.clone();
         }
-        // Stepping onto the anchor would collapse an active selection
-        // (e.g. right after ^B put the cursor on its right end): flip
-        // the ends instead, so the step grows it on the other side.
-        if let Some(a) = self.select_anchor
+        // A whole-node selection (^B, Shift+↑) leaves the cursor on an
+        // end the user did not pick, so the first step toward the
+        // anchor would collapse what they just selected. Flip the ends
+        // once instead, and the step grows the selection on the side
+        // they pressed. Any later step shrinks and collapses normally.
+        if self.select_whole
+            && let Some(a) = self.select_anchor
             && a != self.col
         {
             let next = if right {
@@ -1379,6 +1399,7 @@ impl Editor {
                 self.col = a;
             }
         }
+        self.select_whole = false;
         if right {
             self.col = (self.col + 1).min(self.cur_row().len());
         } else {
@@ -1447,6 +1468,12 @@ impl Editor {
         self.select_anchor = None;
         match self.clip.clone() {
             Clip::Nodes(clip) => {
+                // Formula line breaks only exist at the top level.
+                let clip: Row = if self.path.is_empty() {
+                    clip
+                } else {
+                    clip.into_iter().filter(|n| *n != Node::Break).collect()
+                };
                 let col = self.col;
                 let row = self.cur_row_mut();
                 row.splice(col..col, clip.iter().cloned());
@@ -1475,10 +1502,12 @@ impl Editor {
             self.select_anchor = Some(i);
             self.select_path = self.path.clone();
             self.col = i + 1;
+            self.select_whole = true;
         } else if !self.cur_row().is_empty() {
             self.select_anchor = Some(0);
             self.select_path = self.path.clone();
             self.col = self.cur_row().len();
+            self.select_whole = true;
         }
     }
 }
