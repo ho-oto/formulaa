@@ -62,7 +62,7 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 | ├ `scripts.rs` | インライン上付き/下付き: phf 3枚(base→sup・base→sub・script→base)、テストが全単射を固定 |
 | ├ `alphabets.rs` | スタイル族(12族28綴り×前置/後置)を phf(別綴りは or キー)+規則+例外表で。LaTeX 逆引き(`𝔸`→`\mathbb{A}`)もここ |
 
-| `src/glyphs.rs` | **構造グリフ定数**(綴りテーブルではない描画語彙): 格子(3×3 junction 表・辺・融合マーカー名)・基線マーク `─ ┈ ═ ⬚`・norm/mid/角括弧腕・根号の茎/庇・brace 角 ╭╮╰╯・カーソル文字。symbols は「phf テーブル+分類 enum」専用 |
+| `src/glyphs.rs` | **構造グリフ定数+表示マーカー**(`Mark` enum: `ch`/`decode`/`closer` が私用領域の唯一の綴り。TUI・wasm はこの enum を match する)。以下は定数: 格子(3×3 junction 表・辺・融合マーカー名)・基線マーク `─ ┈ ═ ⬚`・norm/mid/角括弧腕・根号の茎/庇・brace 角 ╭╮╰╯・カーソル文字。symbols は「phf テーブル+分類 enum」専用 |
 | `src/theme.rs` | TUI の配色定数(bin 専用) |
 | `src/main.rs` | メインループ + CLI サブコマンド |
 | `src/tui.rs` | 描画(レイアウト・スクロール・マーカー/選択の塗り・セル装飾) |

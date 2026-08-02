@@ -62,6 +62,11 @@ impl Arrow {
         self.info().right
     }
 
+    /// The editor's canonical `\\name`.
+    pub fn name(self) -> &'static str {
+        self.info().name
+    }
+
     pub fn body(self) -> char {
         self.info().body
     }

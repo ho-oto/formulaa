@@ -780,6 +780,81 @@ fn l_placeholder(cursor: Option<(Field, CursorRef)>) -> bool {
     cursor.is_some()
 }
 
+/// What the delimiter layer needs to know about a `Norm` / `Delim`
+/// node, read off the types once: the glyph layer below works on spec
+/// chars (the slot decides the side), but every *kind* question — does
+/// this pair fuse with a sole grid, is a side an angle (diagonal arms,
+/// no column), a brace (vertex column), is this the norm — is answered
+/// here, not by comparing glyphs.
+struct DelimShape<'a> {
+    left: char,
+    right: char,
+    mids: usize,
+    segs: &'a [Row],
+    fusable: bool,
+    is_norm: bool,
+    angle_sided: bool,
+    curly: bool,
+}
+
+/// The height and baseline a delimiter pair stretches to around a body
+/// of `h` rows baselined at `bl`.
+fn delim_extent(
+    h: usize,
+    bl: usize,
+    angle: bool,
+    curly: bool,
+    inner_norm_full: bool,
+) -> (usize, usize) {
+    if angle {
+        // Diagonal arms: the extent is symmetric about the turn, so it
+        // is always even and the upper turn row is the baseline.
+        let k = (bl + 1).max(h - 1 - bl);
+        (2 * k, k - 1)
+    } else if curly && h == 2 {
+        // A curly column needs hook + ⎨ vertex + hook: a 2-row body
+        // rides in a 3-row extent with the vertex centered.
+        (3, 1)
+    } else if inner_norm_full {
+        // Norm-in-norm: the outer pair must outsize the inner one, or
+        // the parser's extent grouping cannot tell them apart.
+        (h + 2, bl + 1)
+    } else {
+        (h, bl)
+    }
+}
+
+fn delim_shape(node: &Node) -> DelimShape<'_> {
+    match node {
+        Node::Norm { arg } => DelimShape {
+            left: NORM,
+            right: NORM,
+            mids: 0,
+            segs: std::slice::from_ref(arg),
+            fusable: false,
+            is_norm: true,
+            angle_sided: false,
+            curly: false,
+        },
+        Node::Delim {
+            left,
+            right,
+            mids,
+            segs,
+        } => DelimShape {
+            left: left.spec(true),
+            right: right.spec(false),
+            mids: *mids,
+            segs,
+            fusable: left.fuses() && right.fuses(),
+            is_norm: false,
+            angle_sided: *left == Delim::Angle || *right == Delim::Angle,
+            curly: left.col() == Some(ColDelim::Brace) || right.col() == Some(ColDelim::Brace),
+        },
+        _ => unreachable!("delim_shape is for Norm / Delim"),
+    }
+}
+
 fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx) -> Block {
     // Cursor for a specific field of this node.
     let cur = |f: Field| -> Option<CursorRef> {
@@ -1101,36 +1176,16 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
         // is a separate node only because its *parse* needs the extent
         // rule (both sides are the same glyph).
         Node::Norm { .. } | Node::Delim { .. } => {
-            // Only some pair kinds fuse with a sole grid (symbols::Delim
-            // knows which): curly braces keep their vertex column, null
-            // ghosts and norm/angle geometry take a bare lattice.
-            let fusable = matches!(
-                node,
-                Node::Delim { left, right, .. } if left.fuses() && right.fuses()
-            );
-            // The drawn-kind flags come off the types, not the spec
-            // chars: the norm is its own node, angles and braces are
-            // their Delim kinds per side.
-            let is_norm = matches!(node, Node::Norm { .. });
-            let (angle_sided, curly) = match node {
-                Node::Delim { left, right, .. } => (
-                    *left == Delim::Angle || *right == Delim::Angle,
-                    left.col() == Some(ColDelim::Brace) || right.col() == Some(ColDelim::Brace),
-                ),
-                _ => (false, false),
-            };
-            // The glyph layer below works on spec chars; the slot
-            // decides the side, so the typed kinds spell theirs here.
-            let (left, right, mids, segs) = match node {
-                Node::Norm { arg } => (NORM, NORM, 0, std::slice::from_ref(arg)),
-                Node::Delim {
-                    left,
-                    right,
-                    mids,
-                    segs,
-                } => (left.spec(true), right.spec(false), *mids, &segs[..]),
-                _ => unreachable!(),
-            };
+            let DelimShape {
+                left,
+                right,
+                mids,
+                segs,
+                fusable,
+                is_norm,
+                angle_sided,
+                curly,
+            } = delim_shape(node);
             let (left, right) = (&left, &right);
             // A sole Array segment fuses with the delimiter: the delimiter
             // columns absorb the lattice edges (junction rows show ├ ┤,
@@ -1216,18 +1271,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                         .iter()
                         .all(|line| line.get(c).copied() == Some(NORM))
                 });
-            let (ext_h, ext_bl) = if angle {
-                let k = (bl + 1).max(h - 1 - bl);
-                (2 * k, k - 1)
-            } else if curly && h == 2 {
-                // A curly column needs hook + ⎨ vertex + hook: a 2-row
-                // body rides in a 3-row extent with the vertex centered.
-                (3, 1)
-            } else if inner_norm_full {
-                (h + 2, bl + 1)
-            } else {
-                (h, bl)
-            };
+            let (ext_h, ext_bl) = delim_extent(h, bl, angle, curly, inner_norm_full);
             // Pad the body to the delimiter extent, then draw the │
             // middles over the full extent (mid columns must span it).
             let top_pad = ext_bl - bl;

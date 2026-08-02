@@ -21,10 +21,6 @@ use crate::render::unstyle_char;
 use crate::symbols::{ColDelim, Delim};
 use crate::symbols::{unsubscript_char, unsuperscript_char};
 
-fn radical_index(c: char) -> Option<crate::symbols::Radical> {
-    crate::symbols::Radical::of_glyph(c)
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseError {
     pub msg: String,
@@ -572,6 +568,8 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
 
     let first = *occupied.first().unwrap();
     let last = *occupied.last().unwrap();
+    // Most arms defer to a sub-region: one rule, one line.
+    let dive = |t, b, l, r| find_baseline(g, Rect { t, b, l, r });
     match g.at(first, c) {
         // Delimiter columns (any baseline-capable head, or the norm):
         // a fused grid (├ junctions in this column or ┬ markers on the
@@ -584,15 +582,7 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
             {
                 return Ok((first + last) / 2);
             }
-            find_baseline(
-                g,
-                Rect {
-                    t: first,
-                    b: last,
-                    l: c + 1,
-                    r: rect.r,
-                },
-            )
+            dive(first, last, c + 1, rect.r)
         }
         // Brace columns carry their vertex on the baseline row.
         _ if ColDelim::Brace.run_pieces(true).contains(&g.at(first, c)) => {
@@ -617,77 +607,25 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
         // A ┌ directly above a radical stem is the sqrt overline corner
         // (a lattice ┌ has a blank gap below instead): dive into the
         // radicand right of the stem.
-        OVERLINE_CORNER if first < last && is_stem_glyph(g.at(first + 1, c)) => find_baseline(
-            g,
-            Rect {
-                t: first + 1,
-                b: last,
-                l: c + 1,
-                r: rect.r,
-            },
-        ),
+        OVERLINE_CORNER if first < last && is_stem_glyph(g.at(first + 1, c)) => {
+            dive(first + 1, last, c + 1, rect.r)
+        }
         _ if LATTICE_LEFT.contains(&g.at(first, c)) => Ok((first + last) / 2),
         // Accent band: the base owns the baseline on the other side
         // (over marks ride above their base, under marks below).
-        _ if accent_band_run(g, rect, first, c, true).is_some() => find_baseline(
-            g,
-            Rect {
-                t: first + 1,
-                b: rect.b,
-                l: c,
-                r: rect.r,
-            },
-        ),
+        _ if accent_band_run(g, rect, first, c, true).is_some() => {
+            dive(first + 1, rect.b, c, rect.r)
+        }
         _ if first > rect.t && accent_band_run(g, rect, first, c, false).is_some() => {
-            find_baseline(
-                g,
-                Rect {
-                    t: rect.t,
-                    b: first - 1,
-                    l: c,
-                    r: rect.r,
-                },
-            )
+            dive(rect.t, first - 1, c, rect.r)
         }
         // Over/under brace corner: the argument owns the baseline on the
         // other side of the brace row.
-        BRACE_TL => find_baseline(
-            g,
-            Rect {
-                t: first + 1,
-                b: rect.b,
-                l: c,
-                r: rect.r,
-            },
-        ),
-        BRACE_BL if first > rect.t => find_baseline(
-            g,
-            Rect {
-                t: rect.t,
-                b: first - 1,
-                l: c,
-                r: rect.r,
-            },
-        ),
+        BRACE_TL => dive(first + 1, rect.b, c, rect.r),
+        BRACE_BL if first > rect.t => dive(rect.t, first - 1, c, rect.r),
         // Sqrt: stem covers exactly the content rows; recurse into content.
-        STEM => find_baseline(
-            g,
-            Rect {
-                t: first,
-                b: last,
-                l: c + 1,
-                r: rect.r,
-            },
-        ),
-        ch if radical_index(ch).is_some() => find_baseline(
-            g,
-            Rect {
-                t: first,
-                b: last,
-                l: c + 1,
-                r: rect.r,
-            },
-        ),
+        STEM => dive(first, last, c + 1, rect.r),
+        ch if crate::symbols::Radical::of_glyph(ch).is_some() => dive(first, last, c + 1, rect.r),
         _ => {
             if occupied.len() == 1 {
                 Ok(first)
@@ -703,6 +641,64 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
             }
         }
     }
+}
+
+/// Rightmost column of the \cancel block starting at `col`: the
+/// canonical "maximal cancel" form is a run of struck baseline cells,
+/// extended across blank-baseline stretches only when everything there
+/// is struck too (a partially struck script belongs to a sibling, and
+/// its own Cancel is found when that script's argument is parsed).
+fn cancel_extent(g: &Grid, rect: Rect, bl: usize, col: usize) -> usize {
+    let fully_struck = |l: usize, r: usize| {
+        (l..=r).all(|c| {
+            rect.rows()
+                .all(|row| g.at(row, c) == ' ' || g.cancelled(row, c))
+        })
+    };
+    let mut end = col;
+    loop {
+        while end < rect.r && g.cancelled(bl, end + 1) {
+            end += 1;
+        }
+        // Next baseline content after the blank-baseline stretch.
+        let mut j = end + 1;
+        while j <= rect.r && g.at(bl, j) == ' ' {
+            j += 1;
+        }
+        // Struck baseline continues past a fully struck stretch
+        // (spaced operators or struck scripts inside the argument).
+        if j <= rect.r && g.cancelled(bl, j) && fully_struck(end + 1, j - 1) {
+            end = j;
+            continue;
+        }
+        // Otherwise absorb trailing fully struck script segments.
+        let mut c = end + 1;
+        let mut extended = false;
+        loop {
+            while c < j.min(rect.r + 1) && col_blank(g, rect, c) {
+                c += 1;
+            }
+            if c >= j || c > rect.r {
+                break;
+            }
+            let s0 = c;
+            let mut s1 = c;
+            while s1 + 1 < j && !col_blank(g, rect, s1 + 1) {
+                s1 += 1;
+            }
+            if fully_struck(s0, s1) {
+                end = s1;
+                extended = true;
+                c = s1 + 1;
+            } else {
+                break;
+            }
+        }
+        if !extended {
+            break;
+        }
+    }
+    end
 }
 
 /// Parse a region. `baseline` may be passed down when the caller already
@@ -726,55 +722,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
         // too (a partially struck script belongs to a sibling, and its own
         // Cancel is found when the script argument is parsed).
         if !in_cancel && g.cancelled(bl, col) {
-            let fully_struck = |l: usize, r: usize| {
-                (l..=r).all(|c| {
-                    rect.rows()
-                        .all(|row| g.at(row, c) == ' ' || g.cancelled(row, c))
-                })
-            };
-            let mut end = col;
-            loop {
-                while end < rect.r && g.cancelled(bl, end + 1) {
-                    end += 1;
-                }
-                // Next baseline content after the blank-baseline stretch.
-                let mut j = end + 1;
-                while j <= rect.r && g.at(bl, j) == ' ' {
-                    j += 1;
-                }
-                // Struck baseline continues past a fully struck stretch
-                // (spaced operators or struck scripts inside the argument).
-                if j <= rect.r && g.cancelled(bl, j) && fully_struck(end + 1, j - 1) {
-                    end = j;
-                    continue;
-                }
-                // Otherwise absorb trailing fully struck script segments.
-                let mut c = end + 1;
-                let mut extended = false;
-                loop {
-                    while c < j.min(rect.r + 1) && col_blank(g, rect, c) {
-                        c += 1;
-                    }
-                    if c >= j || c > rect.r {
-                        break;
-                    }
-                    let s0 = c;
-                    let mut s1 = c;
-                    while s1 + 1 < j && !col_blank(g, rect, s1 + 1) {
-                        s1 += 1;
-                    }
-                    if fully_struck(s0, s1) {
-                        end = s1;
-                        extended = true;
-                        c = s1 + 1;
-                    } else {
-                        break;
-                    }
-                }
-                if !extended {
-                    break;
-                }
-            }
+            let end = cancel_extent(g, rect, bl, col);
             let inner = Rect {
                 l: col,
                 r: end,
@@ -943,7 +891,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
                 // band; anything else is a named one.
                 let one = base.chars().count() == 1;
                 let c0 = base.chars().next().unwrap_or(' ');
-                out.push(if one && crate::symbols::bigop_by_char(c0) {
+                out.push(if one && crate::symbols::is_bigop(c0) {
                     Node::BigOpSym {
                         op: c0,
                         lower,
@@ -1094,7 +1042,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
                     top -= 1;
                 }
                 let mut bot = bl;
-                while radical_index(g.at(bot, col)).is_none() {
+                while crate::symbols::Radical::of_glyph(g.at(bot, col)).is_none() {
                     if bot == rect.b {
                         return err("radical stem without √", bl, col);
                     }
@@ -1103,7 +1051,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
                 if top == 0 || g.at(top - 1, col) != OVERLINE_CORNER {
                     return err("radical without its ┌─ overline", top, col);
                 }
-                let index = radical_index(g.at(bot, col)).unwrap();
+                let index = crate::symbols::Radical::of_glyph(g.at(bot, col)).unwrap();
                 // The overline run measures the radicand's width. A stem
                 // in the region's last column has no room for one, so
                 // there is nothing to cover — an empty radicand, not a

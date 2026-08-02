@@ -40,11 +40,11 @@ pub use scripts::*;
 /// the tables are static and the atoms test proves they never hand
 /// out a structural glyph.
 pub fn symbol_by_name(name: &str) -> Option<char> {
-    named_char(name).or_else(|| alphabets::styled_char(name))
+    named_char(name).or_else(|| alphabets::alphabet_char(name))
 }
 
 /// Is this char a ∑-class operator (band-promotable)?
-pub fn bigop_by_char(c: char) -> bool {
+pub fn is_bigop(c: char) -> bool {
     atom_of(c).is_some_and(|a| a.kind == AtomKind::BigOp)
 }
 

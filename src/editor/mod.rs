@@ -9,7 +9,7 @@ use crate::glyphs::Mark;
 pub type CursorPos = (Vec<(usize, Field)>, usize);
 /// A block-select target: (parent row path, node index).
 pub type BlockRef = (Vec<(usize, Field)>, usize);
-use crate::symbols::{Accent, ColDelim, Delim, bigop_by_char, is_func_name, symbol_by_name};
+use crate::symbols::{Accent, ColDelim, Delim, is_bigop, is_func_name, symbol_by_name};
 
 mod command;
 mod modes;
@@ -729,7 +729,7 @@ impl Editor {
         if self.col > 0 {
             let col = self.col - 1;
             let promotable = match &self.cur_row()[col] {
-                Node::Sym(c) => bigop_by_char(*c),
+                Node::Sym(c) => is_bigop(*c),
                 Node::Func(name) => crate::symbols::func_takes_limits(name),
                 _ => false,
             };

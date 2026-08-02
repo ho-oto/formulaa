@@ -20,7 +20,7 @@ pub fn row_to_latex(row: &Row) -> String {
             _ => None,
         };
         let absorbs = match n {
-            Node::Sym(c) if crate::symbols::bigop_by_char(*c) => next_script.is_some(),
+            Node::Sym(c) if crate::symbols::is_bigop(*c) => next_script.is_some(),
             Node::BigOpSym { lower, upper, .. } | Node::BigOp { lower, upper, .. } => {
                 match next_script {
                     Some(true) => upper.is_empty(),

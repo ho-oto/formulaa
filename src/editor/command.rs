@@ -462,7 +462,7 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
             } else if let Some(c) = symbol_by_name(cmd) {
                 // The atom table decides how a character materializes:
                 // ∑-class operators come in as their band.
-                if bigop_by_char(c) {
+                if is_bigop(c) {
                     ins(Node::BigOpSym {
                         op: c,
                         lower: vec![],

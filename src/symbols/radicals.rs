@@ -63,6 +63,11 @@ impl Radical {
         RADICAL_NAMES.get(name).copied()
     }
 
+    /// The editor's canonical `\\name`.
+    pub fn name(self) -> &'static str {
+        self.info().name
+    }
+
     pub fn glyph(self) -> char {
         self.info().glyph
     }

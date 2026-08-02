@@ -166,11 +166,6 @@ pub fn alphabet_char(name: &str) -> Option<char> {
     of(ALPHABETS.get(&name[first.len_utf8()..])?, first)
 }
 
-/// Any styled character (today: the alphabet families).
-pub fn styled_char(name: &str) -> Option<char> {
-    alphabet_char(name)
-}
-
 /// The LaTeX spelling of a styled letter (`𝔸` -> `\mathbb{A}`), found
 /// by walking the families back — this is what keeps the char -> LaTeX
 /// direction total for the ~700 characters they generate. The digit

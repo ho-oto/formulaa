@@ -15,7 +15,7 @@
 //! sub-parse never runs past its own region.
 
 use crate::ast::{Node, Row};
-use crate::symbols::{Accent, Arrow, ColDelim, Delim, Radical, bigop_by_char, symbol_by_name};
+use crate::symbols::{Accent, Arrow, ColDelim, Delim, Radical, is_bigop, symbol_by_name};
 
 /// Read a LaTeX math string into a Row, best-effort. Callers that care
 /// about canonical trees normalize the result.
@@ -533,7 +533,7 @@ impl Parser {
                     return t;
                 }
                 if let Some(c) = symbol_by_name(name) {
-                    out.push(if bigop_by_char(c) {
+                    out.push(if is_bigop(c) {
                         Node::BigOpSym {
                             op: c,
                             lower: vec![],
