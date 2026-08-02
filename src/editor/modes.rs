@@ -25,7 +25,7 @@ impl Editor {
     /// The cursor's own display cell (in the display frame).
     fn nearest_position_of_cursor(&self) -> Option<(CursorPos, (usize, usize))> {
         let cands = self.jump_candidates();
-        let coords = self.display_coords(&cands);
+        let coords = self.display_coords(&cands, true);
         let i = cands.iter().position(|c| c.is_cursor)?;
         coords[i].map(|xy| (cands[i].pos.clone(), xy))
     }
@@ -48,7 +48,7 @@ impl Editor {
         // parent row), with hysteresis (R_IN/R_OUT) so the expansion
         // shift cannot make the test oscillate.
         let cands = self.jump_candidates();
-        let disp = self.display_coords(&cands);
+        let disp = self.display_coords(&cands, true);
         let coord_of = |pos: &CursorPos| {
             cands
                 .iter()
@@ -95,7 +95,7 @@ impl Editor {
         let mut at = at;
         if let Some(prev) = &self.free {
             let cands2 = self.jump_candidates();
-            let disp2 = self.display_coords(&cands2);
+            let disp2 = self.display_coords(&cands2, true);
             if let Some((ny, nx)) = cands2
                 .iter()
                 .position(|c| c.pos == prev.snap)
@@ -314,36 +314,9 @@ impl Editor {
         out
     }
 
-    /// Physical cell coordinates of the given document-ordered
-    /// positions: one render with every position carrying a zero-width
-    /// probe mark — the geometry (and thus every coordinate) is
-    /// identical to the displayed render.
-    fn position_coords(&self, positions: &[&CursorPos]) -> Vec<Option<(usize, usize)>> {
-        use crate::render::{RenderCtx, render_root};
-        let n = positions.len().min(0x800);
-        let mut root = self.root.clone();
-        for (idx, (p, c)) in positions.iter().take(n).enumerate().rev() {
-            let mark = char::from_u32(PROBE_BASE + idx as u32).unwrap();
-            row_at_mut(&mut root, p).insert(*c, Node::Sym(mark));
-        }
-        let b = render_root(&root, None, &RenderCtx::canonical());
-        let mut out = vec![None; positions.len()];
-        for &(y, x, ch) in &b.marks {
-            let u = ch as u32;
-            if u >= PROBE_BASE {
-                let i = (u - PROBE_BASE) as usize;
-                if i < out.len() {
-                    out[i] = Some((y, x));
-                }
-            }
-        }
-        out
-    }
-
     pub fn start_jump(&mut self) {
         let cands = self.jump_candidates();
-        let positions: Vec<&CursorPos> = cands.iter().map(|c| &c.pos).collect();
-        let coords = self.position_coords(&positions);
+        let coords = self.display_coords(&cands, false);
         let Some(cur_i) = cands.iter().position(|c| c.is_cursor) else {
             self.info("no jump targets");
             return;
@@ -408,7 +381,7 @@ impl Editor {
         let mut chosen: Vec<usize> = Vec::new();
         let cursor_pos = (self.path.clone(), self.col);
         for &i in &order {
-            if chosen.len() >= JUMP_MAX_RANKS {
+            if chosen.len() >= crate::glyphs::RANK_MAX {
                 break;
             }
             let pos = &cands[i].pos;
@@ -499,11 +472,9 @@ impl Editor {
         let b = render_root(&root, cur, &RenderCtx::canonical());
         b.marks
             .iter()
-            .filter_map(|&(y, x, ch)| {
-                let u = ch as u32;
-                (JUMP_RANK_BASE..JUMP_RANK_BASE + JUMP_MAX_RANKS as u32)
-                    .contains(&u)
-                    .then(|| ((u - JUMP_RANK_BASE) as usize, (y, x)))
+            .filter_map(|&(y, x, ch)| match Mark::decode(ch) {
+                Some(Mark::Rank { rank }) => Some((rank, (y, x))),
+                _ => None,
             })
             .collect()
     }
@@ -734,7 +705,7 @@ impl Editor {
                 .map(|(lo, hi)| ((self.path.clone(), lo), (self.path.clone(), hi)));
             // Reverse document order keeps not-yet-inserted positions valid.
             for (rank, (p, c)) in targets.iter().rev() {
-                let mark = char::from_u32(JUMP_RANK_BASE + *rank as u32).unwrap();
+                let mark = Mark::Rank { rank: *rank }.ch();
                 row_at_mut(&mut root, p).insert(*c, Node::Sym(mark));
                 bump(&mut path, &mut col, p, *c);
                 if let Some(((lp, lc), (hp, hc))) = &mut sel {
@@ -744,8 +715,8 @@ impl Editor {
             }
             if let Some(((lp, lo), (_, hi))) = sel {
                 let row = row_at_mut(&mut root, &lp);
-                row.insert(hi, Node::Sym(SEL_CLOSE));
-                row.insert(lo, Node::Sym(SEL_OPEN));
+                row.insert(hi, Node::Sym(Mark::Sel { open: false }.ch()));
+                row.insert(lo, Node::Sym(Mark::Sel { open: true }.ch()));
                 // The cursor may sit inside this row (or deeper): thread
                 // it through both insertions like any other marker.
                 bump(&mut path, &mut col, &lp, hi);
@@ -761,9 +732,9 @@ impl Editor {
             // Targets are innermost first = deepest first: inserting into
             // a deep row never shifts a shallower target's position.
             for (idx, (p, i)) in targets.iter().enumerate() {
-                let mark = char::from_u32(JUMP_CHAR_BASE + idx as u32).unwrap();
+                let mark = Mark::Label { rank: idx }.ch();
                 let row = row_at_mut(&mut root, p);
-                row.insert(i + 1, Node::Sym(BLK_CLOSE));
+                row.insert(i + 1, Node::Sym(Mark::BlockClose.ch()));
                 row.insert(*i, Node::Sym(mark));
                 bump(&mut path, &mut col, p, i + 1);
                 bump(&mut path, &mut col, p, *i);
@@ -782,8 +753,8 @@ impl Editor {
             // (fused or not), so one pair serves every layout.
             {
                 let prow = row_at_mut(&mut root, &parent_path);
-                prow.insert(i + 1, Node::Sym(FRAME_CLOSE));
-                prow.insert(i, Node::Sym(FRAME_OPEN));
+                prow.insert(i + 1, Node::Sym(Mark::Frame { open: false }.ch()));
+                prow.insert(i, Node::Sym(Mark::Frame { open: true }.ch()));
             }
             if path.len() > k {
                 path[k].0 += 1;
@@ -806,16 +777,20 @@ impl Editor {
                     return (root, Some((path, col)));
                 };
                 let (op, cl) = match gs {
-                    GridSel::Cells { .. } => (CELLS_OPEN, CELLS_CLOSE),
-                    GridSel::Lanes { cols: true, .. } => (LANE_OPEN, LANE_CLOSE),
-                    GridSel::Lanes { cols: false, .. } => (ROWLANE_OPEN, ROWLANE_CLOSE),
+                    GridSel::Cells { .. } => {
+                        (Mark::Cells { open: true }, Mark::Cells { open: false })
+                    }
+                    GridSel::Lanes { cols, .. } => (
+                        Mark::Lane { open: true, cols },
+                        Mark::Lane { open: false, cols },
+                    ),
                 };
                 for r in r0..=r1 {
                     for j in j0..=j1 {
                         let cell = &mut cells[r * cols + j];
                         let hi = cell.len();
-                        cell.insert(hi, Node::Sym(cl));
-                        cell.insert(0, Node::Sym(op));
+                        cell.insert(hi, Node::Sym(cl.ch()));
+                        cell.insert(0, Node::Sym(op.ch()));
                         if r * cols + j == c {
                             // The cursor lives in this cell: the open
                             // mark at 0 shifts it right once.
@@ -839,7 +814,7 @@ impl Editor {
                 unreachable!()
             };
             let g = pos / 2;
-            let mark = if cmode { GRID_GAP } else { GRID_GAP_ROW };
+            let mark = Mark::Gap { cols: cmode }.ch();
             let ghost = || vec![Node::Sym(mark), Node::Spacer];
             if cmode {
                 for r in (0..rows).rev() {
@@ -867,15 +842,15 @@ impl Editor {
         let mut ghosts: Vec<&Vec<(usize, Field)>> = self.ghost.iter().collect();
         ghosts.sort_by_key(|p| std::cmp::Reverse(p.len()));
         for p in ghosts {
-            row_at_mut(&mut root, p).insert(0, Node::Sym(SLOT_GHOST));
+            row_at_mut(&mut root, p).insert(0, Node::Sym(Mark::SlotGhost.ch()));
         }
         let adjusted = ghost_adjust(&self.ghost, &path, col);
         path = adjusted.0;
         col = adjusted.1;
         if let Some((lo, hi)) = self.selection() {
             let row = row_at_mut(&mut root, &path);
-            row.insert(hi, Node::Sym(SEL_CLOSE));
-            row.insert(lo, Node::Sym(SEL_OPEN));
+            row.insert(hi, Node::Sym(Mark::Sel { open: false }.ch()));
+            row.insert(lo, Node::Sym(Mark::Sel { open: true }.ch()));
             col = if col >= hi {
                 col + 2
             } else if col > lo {

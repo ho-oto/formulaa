@@ -7,14 +7,15 @@
 
 use crate::ast::{Field, Node, Row};
 use crate::glyphs::{
-    COL_MARK_BOT, COL_MARK_TOP, CROSSING, HEAD_LEFT, HEAD_RIGHT, MID, NORM, ROW_JUNCTION_L,
-    ROW_JUNCTION_R, STEM, brace_corners, lattice_char,
+    COL_MARK_BOT, COL_MARK_TOP, CROSSING, DOUBLE_BODY, FRAC_BAR, HEAD_LEFT, HEAD_RIGHT, MID, Mark,
+    NORM, OP_BAND, PLACEHOLDER, ROW_JUNCTION_L, ROW_JUNCTION_R, STEM, brace_corners,
+    is_display_marker, lattice_char,
 };
 use crate::symbols::{Accent, ColDelim, Delim, DrawnForm, subscript_char, superscript_char};
 
 // The structural glyph vocabulary lives in crate::glyphs; re-exported
 // here for the callers that grew up importing it from the render side.
-pub use crate::glyphs::{CURSOR_CHAR, DOUBLE_BODY, FRAC_BAR, OP_BAND, PLACEHOLDER};
+pub use crate::glyphs::CURSOR_CHAR;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
@@ -37,12 +38,6 @@ pub struct Block {
     /// these annotations, so decorations never move the layout. Always
     /// empty in canonical output.
     pub marks: Vec<(usize, usize, char)>,
-}
-
-/// Private-use characters the editor uses for display decorations and
-/// coordinate probes (the whole BMP private-use area).
-pub fn is_display_marker(c: char) -> bool {
-    (0xE000..=0xF8FF).contains(&(c as u32))
 }
 
 /// A display-marker atom (zero-width; transparent to layout decisions).
@@ -523,31 +518,26 @@ pub fn render_row(
     // mode). The render owns the geometry, so the pair converts to the
     // node's exact corners here — the display reads the rectangle
     // straight off the two marks, whatever later compositions do.
+    let frame_open = Mark::Frame { open: true }.ch();
+    let frame_close = Mark::Frame { open: false }.ch();
     for m in 0..row.len() {
-        if !matches!(&row[m], Node::Sym(c) if *c == crate::editor::FRAME_OPEN) {
+        if !matches!(&row[m], Node::Sym(c) if *c == frame_open) {
             continue;
         }
         let Some(t) = (m + 1..row.len()).find(|&t| !is_marker_node(&row[t])) else {
             continue;
         };
-        let close = (t + 1..row.len())
-            .find(|&c| matches!(&row[c], Node::Sym(ch) if *ch == crate::editor::FRAME_CLOSE));
+        let close =
+            (t + 1..row.len()).find(|&c| matches!(&row[c], Node::Sym(ch) if *ch == frame_close));
         let Some(close) = close else { continue };
         let (h, w) = (blocks[t].0.height(), blocks[t].0.width());
-        blocks[m]
+        blocks[m].0.marks.retain(|&(_, _, c)| c != frame_open);
+        blocks[close].0.marks.retain(|&(_, _, c)| c != frame_close);
+        blocks[t].0.marks.push((0, 0, frame_open));
+        blocks[t]
             .0
             .marks
-            .retain(|&(_, _, c)| c != crate::editor::FRAME_OPEN);
-        blocks[close]
-            .0
-            .marks
-            .retain(|&(_, _, c)| c != crate::editor::FRAME_CLOSE);
-        blocks[t].0.marks.push((0, 0, crate::editor::FRAME_OPEN));
-        blocks[t].0.marks.push((
-            h.saturating_sub(1),
-            w.saturating_sub(1),
-            crate::editor::FRAME_CLOSE,
-        ));
+            .push((h.saturating_sub(1), w.saturating_sub(1), frame_close));
     }
     if let Some(col) = cursor_col {
         blocks.insert(
@@ -1174,14 +1164,13 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                         if let Node::Sym(c) = n
                             && is_display_marker(*c)
                         {
-                            let (y, x) = if *c == crate::editor::FRAME_OPEN {
-                                (0, 0)
-                            } else if *c == crate::editor::FRAME_CLOSE {
-                                (h.saturating_sub(1), w.saturating_sub(1))
-                            } else if i < ai {
-                                (bl, 1)
-                            } else {
-                                (bl, w.saturating_sub(2))
+                            let (y, x) = match Mark::decode(*c) {
+                                Some(Mark::Frame { open: true }) => (0, 0),
+                                Some(Mark::Frame { open: false }) => {
+                                    (h.saturating_sub(1), w.saturating_sub(1))
+                                }
+                                _ if i < ai => (bl, 1),
+                                _ => (bl, w.saturating_sub(2)),
                             };
                             b.marks.push((y, x, *c));
                         }

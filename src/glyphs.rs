@@ -116,3 +116,169 @@ pub const COL_MARK_BOT: char = LATTICE[2][1]; // ┴
 pub const ROW_JUNCTION_L: char = LATTICE[1][0]; // ├
 pub const ROW_JUNCTION_R: char = LATTICE[1][2]; // ┤
 pub const CROSSING: char = LATTICE[1][1]; // ┼
+
+// ----- display markers (never part of the format) -----
+
+/// A display-time decoration, carried through the render as a
+/// zero-width private-use atom and read back from `Block.marks`. The
+/// wire form is a `char` so the marker can ride the ordinary AST; this
+/// enum is the only place that mapping is written, so a new kind
+/// cannot be handled in one host and silently dropped in the other.
+///
+/// Never let a wire char reach a screen: fonts map the private-use
+/// page to logos, so every drawing path resolves through `decode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mark {
+    /// Selection range ends (drawn as a background-colored box).
+    Sel { open: bool },
+    /// End of a ^B block, paired with the label that opened it.
+    BlockClose,
+    /// Keeps an empty slot materialized (⬚) after jump mode ends, so
+    /// re-entering ^G does not shift the layout. No label, no box.
+    SlotGhost,
+    /// Grid cell-rectangle ends (contents, not structure).
+    Cells { open: bool },
+    /// Grid lane ends — the lane *itself*, filled to the matrix edge
+    /// along its axis, which is why the axis is part of the mark.
+    Lane { open: bool, cols: bool },
+    /// The edited Array's frame corners: the grid-mode signal.
+    Frame { open: bool },
+    /// The ghost lane previewing an insertion at a lane gap. The one
+    /// decoration with real width.
+    Gap { cols: bool },
+    /// A jump / ^B label: `rank` indexes `JUMP_LABELS`.
+    Label { rank: usize },
+    /// A jump candidate beyond the label alphabet — reachable with the
+    /// arrows, drawn as a plain highlight.
+    Rank { rank: usize },
+    /// Coordinate probe: never drawn, read straight off `Block.marks`
+    /// to build the position → cell table.
+    Probe { index: usize },
+}
+
+const SEL_BASE: u32 = 0xE0F0;
+/// Jump / ^B label chars start the private-use page.
+pub const LABEL_BASE: u32 = 0xE000;
+/// Ranks past the label alphabet.
+pub const RANK_BASE: u32 = 0xE100;
+/// Capacity of the rank block (E100..E4FF).
+pub const RANK_MAX: usize = 0x400;
+/// Coordinate probes.
+pub const PROBE_BASE: u32 = 0xF000;
+/// Capacity of the probe block.
+pub const PROBE_MAX: usize = 0x800;
+
+impl Mark {
+    /// The wire char this mark rides as.
+    pub fn ch(self) -> char {
+        let u = match self {
+            Mark::Sel { open } => SEL_BASE + u32::from(!open),
+            Mark::BlockClose => SEL_BASE + 2,
+            Mark::SlotGhost => SEL_BASE + 3,
+            Mark::Gap { cols: true } => SEL_BASE + 4,
+            Mark::Lane { open, cols: true } => SEL_BASE + 5 + u32::from(!open),
+            Mark::Cells { open } => SEL_BASE + 7 + u32::from(!open),
+            Mark::Frame { open } => SEL_BASE + 9 + u32::from(!open),
+            Mark::Lane { open, cols: false } => SEL_BASE + 13 + u32::from(!open),
+            Mark::Gap { cols: false } => SEL_BASE + 15,
+            Mark::Label { rank } => LABEL_BASE + rank as u32,
+            Mark::Rank { rank } => RANK_BASE + rank as u32,
+            Mark::Probe { index } => PROBE_BASE + index as u32,
+        };
+        char::from_u32(u).expect("marker chars are private-use scalars")
+    }
+
+    /// The mark a wire char carries, if any.
+    pub fn decode(c: char) -> Option<Mark> {
+        let u = c as u32;
+        let open = |n: u32| n.is_multiple_of(2);
+        match u {
+            _ if (SEL_BASE..SEL_BASE + 16).contains(&u) => Some(match u - SEL_BASE {
+                n @ (0 | 1) => Mark::Sel { open: open(n) },
+                2 => Mark::BlockClose,
+                3 => Mark::SlotGhost,
+                4 => Mark::Gap { cols: true },
+                n @ (5 | 6) => Mark::Lane {
+                    open: open(n - 5),
+                    cols: true,
+                },
+                n @ (7 | 8) => Mark::Cells { open: open(n - 7) },
+                n @ (9 | 10) => Mark::Frame { open: open(n - 9) },
+                n @ (13 | 14) => Mark::Lane {
+                    open: open(n - 13),
+                    cols: false,
+                },
+                15 => Mark::Gap { cols: false },
+                _ => return None,
+            }),
+            _ if (LABEL_BASE..SEL_BASE).contains(&u) => Some(Mark::Label {
+                rank: (u - LABEL_BASE) as usize,
+            }),
+            _ if (RANK_BASE..RANK_BASE + RANK_MAX as u32).contains(&u) => Some(Mark::Rank {
+                rank: (u - RANK_BASE) as usize,
+            }),
+            _ if (PROBE_BASE..PROBE_BASE + PROBE_MAX as u32).contains(&u) => Some(Mark::Probe {
+                index: (u - PROBE_BASE) as usize,
+            }),
+            _ => None,
+        }
+    }
+
+    /// The mark that closes this one, for the pairing the display does.
+    pub fn closer(self) -> Option<Mark> {
+        match self {
+            Mark::Sel { open: true } => Some(Mark::Sel { open: false }),
+            Mark::Cells { open: true } => Some(Mark::Cells { open: false }),
+            Mark::Lane { open: true, cols } => Some(Mark::Lane { open: false, cols }),
+            Mark::Frame { open: true } => Some(Mark::Frame { open: false }),
+            // A ^B label opens a box that BlockClose ends.
+            Mark::Label { .. } => Some(Mark::BlockClose),
+            _ => None,
+        }
+    }
+}
+
+/// Every private-use codepoint is a display decoration: no marker char
+/// may ever reach a screen as a glyph.
+pub fn is_display_marker(c: char) -> bool {
+    (0xE000..=0xF8FF).contains(&(c as u32))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// The wire mapping is a bijection over every kind, and no mark
+    /// escapes the private-use page (where fonts keep their logos).
+    #[test]
+    fn marks_round_trip_through_their_wire_chars() {
+        let mut all: Vec<Mark> = vec![Mark::BlockClose, Mark::SlotGhost];
+        for open in [true, false] {
+            all.push(Mark::Sel { open });
+            all.push(Mark::Cells { open });
+            all.push(Mark::Frame { open });
+            for cols in [true, false] {
+                all.push(Mark::Lane { open, cols });
+            }
+        }
+        for cols in [true, false] {
+            all.push(Mark::Gap { cols });
+        }
+        all.extend([
+            Mark::Label { rank: 0 },
+            Mark::Label { rank: 61 },
+            Mark::Rank { rank: 0 },
+            Mark::Rank { rank: RANK_MAX - 1 },
+            Mark::Probe { index: 0 },
+            Mark::Probe {
+                index: PROBE_MAX - 1,
+            },
+        ]);
+        let mut seen = std::collections::HashSet::new();
+        for m in all {
+            let c = m.ch();
+            assert!(is_display_marker(c), "{:?} escapes the marker page", m);
+            assert!(seen.insert(c), "{:?} shares a wire char", m);
+            assert_eq!(Mark::decode(c), Some(m));
+        }
+    }
+}

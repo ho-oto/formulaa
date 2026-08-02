@@ -7,9 +7,8 @@
 //!   webviews (see editors/ in the repository).
 
 use mascii::ast::normalize;
-use mascii::editor::{
-    Editor, BLK_CLOSE, JUMP_CHAR_BASE, JUMP_LABELS, JUMP_RANK_BASE, SEL_CLOSE, SEL_OPEN,
-};
+use mascii::editor::{Editor, JUMP_LABELS};
+use mascii::glyphs::Mark;
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
 use mascii::render::{render_root, RenderCtx, CURSOR_CHAR};
@@ -104,30 +103,28 @@ impl MasciiEditor {
             }
             row[c] = ch;
         };
-        use mascii::editor::{
-            CELLS_CLOSE, CELLS_OPEN, GRID_GAP, GRID_GAP_ROW, LANE_CLOSE, LANE_OPEN, ROWLANE_CLOSE,
-            ROWLANE_OPEN,
-        };
         for &(r, c, m) in &block.marks {
-            let ch = match m {
-                SEL_OPEN | CELLS_OPEN | LANE_OPEN | ROWLANE_OPEN => '⟦',
-                SEL_CLOSE | BLK_CLOSE | CELLS_CLOSE | LANE_CLOSE | ROWLANE_CLOSE => '⟧',
+            let ch = match Mark::decode(m) {
+                Some(Mark::Sel { open } | Mark::Cells { open } | Mark::Lane { open, .. }) => {
+                    if open {
+                        '⟦'
+                    } else {
+                        '⟧'
+                    }
+                }
+                Some(Mark::BlockClose) => '⟧',
                 // The lane-gap ghost: a visible insert cursor even on
                 // the colorless text screen.
-                GRID_GAP | GRID_GAP_ROW => '◇',
-                m => {
-                    let u = m as u32;
-                    let idx = if (JUMP_RANK_BASE..JUMP_RANK_BASE + 0x400).contains(&u) {
-                        (u - JUMP_RANK_BASE) as usize
-                    } else {
-                        u.wrapping_sub(JUMP_CHAR_BASE) as usize
-                    };
-                    match JUMP_LABELS.chars().nth(idx) {
+                Some(Mark::Gap { .. }) => '◇',
+                Some(Mark::Label { rank } | Mark::Rank { rank }) => {
+                    match JUMP_LABELS.chars().nth(rank) {
                         Some(l) => l,
-                        // Ghost slots / unlabeled markers: no overlay.
+                        // Beyond the label alphabet: no overlay.
                         None => continue,
                     }
                 }
+                // Frame corners and ghosts have no colorless form.
+                _ => continue,
             };
             put(&mut lines, r, c, ch);
         }

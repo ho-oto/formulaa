@@ -9,10 +9,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block as UiBlock, Borders, Paragraph};
 
-use mascii::editor::{
-    BLK_CLOSE, Editor, JUMP_CHAR_BASE, JUMP_LABELS, JUMP_RANK_BASE, SEL_CLOSE, SEL_OPEN,
-};
-use mascii::glyphs::is_lattice_glyph;
+use mascii::editor::{Editor, JUMP_LABELS};
+use mascii::glyphs::{Mark, is_display_marker, is_lattice_glyph};
 use mascii::render::{RenderCtx, render_root};
 
 use crate::theme;
@@ -242,7 +240,7 @@ fn marker_boxes(
     // each row, nesting by position. Selection pairs consume extents in
     // encounter order (rows top-down, columns left-right) — the same
     // order the editor lists them in (one per grid cell, or one).
-    let mut boxes: Vec<(usize, usize, usize, Color, usize, usize)> = Vec::new();
+    let mut boxes: Vec<(usize, usize, Color, usize, usize)> = Vec::new();
     let mut order: Vec<usize> = Vec::new(); // paint order key: depth
     let mut by_row: std::collections::BTreeMap<usize, Vec<(usize, char)>> =
         std::collections::BTreeMap::new();
@@ -263,101 +261,98 @@ fn marker_boxes(
     // FRAME_CLOSE on its bottom-right (delimiters included when fused).
     let tl = marks
         .iter()
-        .find(|&&(_, _, c)| c == mascii::editor::FRAME_OPEN);
+        .find(|&&(_, _, c)| Mark::decode(c) == Some(Mark::Frame { open: true }));
     let br = marks
         .iter()
-        .find(|&&(_, _, c)| c == mascii::editor::FRAME_CLOSE);
+        .find(|&&(_, _, c)| Mark::decode(c) == Some(Mark::Frame { open: false }));
     let frame: Option<(usize, usize, usize, usize)> = match (tl, br) {
         (Some(&(t, x0, _)), Some(&(b, x1, _))) => Some((x0, x1, t, b)),
         _ => None,
     };
     for (y, mut row_marks) in by_row {
         row_marks.sort_unstable();
-        let mut stack: Vec<(usize, char)> = Vec::new();
+        let mut stack: Vec<(usize, Mark)> = Vec::new();
         for (x, c) in row_marks {
-            // A close mark pops its *matching* open — standalone marks
-            // (jump ranks, gap ghosts) must never satisfy a pair.
-            let pop_matching = |stack: &mut Vec<(usize, char)>,
-                                ok: &dyn Fn(char) -> bool|
-             -> Option<(usize, char)> {
-                let at = stack.iter().rposition(|&(_, c)| ok(c))?;
-                Some(stack.remove(at))
+            let Some(mark) = Mark::decode(c) else {
+                continue;
             };
-            if c == mascii::editor::FRAME_CLOSE || c == mascii::editor::FRAME_OPEN {
-                // Handled by the corner scan below the loop.
-                continue;
-            }
-            if c == mascii::editor::LANE_CLOSE
-                || c == mascii::editor::ROWLANE_CLOSE
-                || c == mascii::editor::CELLS_CLOSE
-            {
-                let open_of = match c {
-                    mascii::editor::LANE_CLOSE => mascii::editor::LANE_OPEN,
-                    mascii::editor::ROWLANE_CLOSE => mascii::editor::ROWLANE_OPEN,
-                    _ => mascii::editor::CELLS_OPEN,
-                };
-                if let Some((o, _)) = pop_matching(&mut stack, &|k| k == open_of) {
-                    let (t, b) = match extents.get(sel_seq) {
-                        Some(&(above, below, _)) => (
-                            y.saturating_sub(above),
-                            (y + below).min(grid.len().saturating_sub(1)),
-                        ),
-                        None => (y, y),
-                    };
-                    sel_seq += 1;
-                    // An empty cell's pair is zero-width: keep one
-                    // cell so the selection stays visible.
-                    let entry = (o, x.max(o + 1), t, b);
-                    if c == mascii::editor::CELLS_CLOSE {
-                        cell_boxes.push(entry);
-                    } else if c == mascii::editor::LANE_CLOSE {
-                        lane_boxes.push(entry);
-                    } else {
-                        row_lane_boxes.push(entry);
-                    }
-                }
-                continue;
-            }
-            if c == SEL_CLOSE || c == BLK_CLOSE {
-                if let Some((o, oc)) = pop_matching(&mut stack, &|k| {
-                    if c == SEL_CLOSE {
-                        k == SEL_OPEN
-                    } else {
-                        is_label(k)
-                    }
-                }) {
-                    let (color, depth, ext) = if oc == SEL_OPEN {
+            // The vertical reach of a pair comes from the extents list,
+            // in the same encounter order the editor built it.
+            let mut extent = |seq: Option<usize>| {
+                let e = match seq {
+                    Some(i) => extents.get(i),
+                    None => {
                         let e = extents.get(sel_seq);
                         sel_seq += 1;
-                        (theme::SELECTION_BG, 0, e)
-                    } else {
-                        let idx = (oc as u32 - JUMP_CHAR_BASE) as usize;
-                        let e = extents.get(idx);
-                        let d = e.map_or(0, |&(_, _, d)| d);
-                        let c = if block_selected == Some(idx) {
-                            theme::SELECTED_BG
-                        } else {
-                            theme::DEPTH_BG[d % theme::DEPTH_BG.len()]
-                        };
-                        (c, d, e)
+                        e
+                    }
+                };
+                let (t, b) = match e {
+                    Some(&(above, below, _)) => (
+                        y.saturating_sub(above),
+                        (y + below).min(grid.len().saturating_sub(1)),
+                    ),
+                    None => (y, y),
+                };
+                (t, b, e.map_or(0, |&(_, _, d)| d))
+            };
+            match mark {
+                // The frame corners are read by the scan above.
+                Mark::Frame { .. } => {}
+                // A close pops its *matching* open — a standalone mark
+                // (a rank, a gap ghost) must never satisfy a pair.
+                Mark::Cells { open: false } | Mark::Lane { open: false, .. } => {
+                    let opener = match mark {
+                        Mark::Cells { .. } => Mark::Cells { open: true },
+                        Mark::Lane { cols, .. } => Mark::Lane { open: true, cols },
+                        _ => unreachable!(),
                     };
-                    let (t, b) = match ext {
-                        Some(&(above, below, _)) => (
-                            y.saturating_sub(above),
-                            (y + below).min(grid.len().saturating_sub(1)),
-                        ),
-                        None => (y, y),
-                    };
-                    boxes.push((y, o, x, color, t, b));
-                    order.push(depth);
+                    if let Some((o, _)) = pop_matching(&mut stack, |k| k == opener) {
+                        let (t, b, _) = extent(None);
+                        // An empty cell's pair is zero-width: keep one
+                        // cell so the selection stays visible.
+                        let entry = (o, x.max(o + 1), t, b);
+                        match mark {
+                            Mark::Cells { .. } => cell_boxes.push(entry),
+                            Mark::Lane { cols: true, .. } => lane_boxes.push(entry),
+                            _ => row_lane_boxes.push(entry),
+                        }
+                    }
                 }
-            } else if c == SEL_OPEN
-                || c == mascii::editor::LANE_OPEN
-                || c == mascii::editor::ROWLANE_OPEN
-                || c == mascii::editor::CELLS_OPEN
-                || is_label(c)
-            {
-                stack.push((x, c));
+                Mark::Sel { open: false } | Mark::BlockClose => {
+                    let is_sel = mark == Mark::Sel { open: false };
+                    let opener = |k: Mark| {
+                        if is_sel {
+                            k == Mark::Sel { open: true }
+                        } else {
+                            matches!(k, Mark::Label { .. })
+                        }
+                    };
+                    if let Some((o, oc)) = pop_matching(&mut stack, opener) {
+                        let (color, depth, t, b) = match oc {
+                            Mark::Label { rank } => {
+                                let (t, b, d) = extent(Some(rank));
+                                let color = if block_selected == Some(rank) {
+                                    theme::SELECTED_BG
+                                } else {
+                                    theme::DEPTH_BG[d % theme::DEPTH_BG.len()]
+                                };
+                                (color, d, t, b)
+                            }
+                            _ => {
+                                let (t, b, _) = extent(None);
+                                (theme::SELECTION_BG, 0, t, b)
+                            }
+                        };
+                        boxes.push((o, x, color, t, b));
+                        order.push(depth);
+                    }
+                }
+                Mark::Sel { open: true }
+                | Mark::Cells { open: true }
+                | Mark::Lane { open: true, .. }
+                | Mark::Label { .. } => stack.push((x, mark)),
+                _ => {}
             }
         }
     }
@@ -367,7 +362,7 @@ fn marker_boxes(
     let mut idx: Vec<usize> = (0..boxes.len()).collect();
     idx.sort_by_key(|&i| std::cmp::Reverse(order[i]));
     for i in idx {
-        let (_, o, close, color, t, b) = boxes[i];
+        let (o, close, color, t, b) = boxes[i];
         for row in bg.iter_mut().take(b + 1).skip(t) {
             for x in o..close {
                 if x < row.len() {
@@ -417,26 +412,13 @@ fn marker_boxes(
         let (x0, x1) = frame.map_or((x0, x1), |(fo, fc, _, _)| (fo, fc + 1));
         fill(x0, x1, t, b);
     }
-    // Labels overlay the glyph at their position. Jump markers carry
-    // their rank: within the label alphabet they show the label letter,
-    // beyond it a highlight cell; the arrow-selected marker gets its
-    // own color either way.
-    let rank_of = |c: char| {
-        let u = c as u32;
-        (JUMP_RANK_BASE..JUMP_RANK_BASE + 0x400)
-            .contains(&u)
-            .then(|| (u - JUMP_RANK_BASE) as usize)
-    };
     // The grid lane-gap cursor: the ghost lane paints with exactly the
     // lane-selection geometry (edge-to-edge along its axis, slot
     // padding sideways for columns), just in the insert green.
-    for (mark, is_col) in [
-        (mascii::editor::GRID_GAP, true),
-        (mascii::editor::GRID_GAP_ROW, false),
-    ] {
+    for is_col in [true, false] {
         let gaps: Vec<(usize, usize)> = marks
             .iter()
-            .filter(|&&(_, _, c)| c == mark)
+            .filter(|&&(_, _, c)| Mark::decode(c) == Some(Mark::Gap { cols: is_col }))
             .map(|&(y, x, _)| (y, x))
             .collect();
         if gaps.is_empty() {
@@ -461,45 +443,45 @@ fn marker_boxes(
             }
         }
     }
+    // Labels overlay the glyph at their position. A jump candidate
+    // carries its rank: within the label alphabet it shows the letter,
+    // beyond it a plain highlight; the arrow-selected one gets its own
+    // color either way.
     for &(y, x, c) in marks {
-        if c == mascii::editor::GRID_GAP {
-            continue;
-        }
-        let rank = rank_of(c);
-        if !(is_label(c) || rank.is_some()) {
-            continue;
-        }
+        let mark = match Mark::decode(c) {
+            Some(m @ (Mark::Label { .. } | Mark::Rank { .. })) => m,
+            _ => continue,
+        };
         let row = &mut grid[y];
         if x >= row.len() {
             row.resize(x + 1, ' ');
             bg[y].resize(x + 1, None);
         }
-        match rank {
+        match mark {
             // A ^B label: same look as the ^G labels — its cell keeps
             // the label ground (the depth box would swallow the black
             // glyph otherwise), or the selection color when its
             // ancestor is the arrow-picked one.
-            None => {
+            Mark::Label { rank } => {
                 row[x] = c;
-                let idx = (c as u32 - JUMP_CHAR_BASE) as usize;
-                bg[y][x] = Some(if block_selected == Some(idx) {
+                bg[y][x] = Some(if block_selected == Some(rank) {
                     theme::SELECTED_BG
                 } else {
                     theme::LABEL_BG
                 });
             }
-            Some(r) => {
-                let is_sel = selected == Some(r);
-                if let Some(label) = JUMP_LABELS.chars().nth(r) {
-                    // Re-encode as a display label char for styling.
-                    row[x] = char::from_u32(JUMP_CHAR_BASE + r as u32).unwrap_or(label);
+            Mark::Rank { rank } => {
+                if JUMP_LABELS.chars().nth(rank).is_some() {
+                    // Re-encode as a label so the paint layer styles it.
+                    row[x] = Mark::Label { rank }.ch();
                 } else if bg[y][x].is_none() {
                     bg[y][x] = Some(theme::UNLABELED_BG);
                 }
-                if is_sel {
+                if selected == Some(rank) {
                     bg[y][x] = Some(theme::SELECTED_BG);
                 }
             }
+            _ => unreachable!(),
         }
     }
     // The caret cell (padded blank at the row end).
@@ -624,11 +606,14 @@ fn overlay_minibuffer(
 /// backgrounds from `marker_boxes` are applied to plain glyphs. A
 /// struck cell gets its combining U+0338 appended *inside* its span,
 /// so the ligature is never split across style boundaries.
-/// A jump / block label cell: stored as a private-use char so the paint
-/// layer can find it, drawn as its letter.
-fn is_label(c: char) -> bool {
-    let labels = JUMP_LABELS.chars().count() as u32;
-    (JUMP_CHAR_BASE..JUMP_CHAR_BASE + labels).contains(&(c as u32))
+/// A close mark pops its *matching* open; standalone marks in between
+/// (ranks, gap ghosts) stay on the stack.
+fn pop_matching(
+    stack: &mut Vec<(usize, Mark)>,
+    ok: impl Fn(Mark) -> bool,
+) -> Option<(usize, Mark)> {
+    let at = stack.iter().rposition(|&(_, m)| ok(m))?;
+    Some(stack.remove(at))
 }
 
 /// Display sentinels for the open name box's [ ] fenders: drawn as
@@ -697,22 +682,18 @@ fn decorate_line(
         }
     };
     for (i, &c) in line.iter().enumerate().skip(scroll_x) {
-        let u = c as u32;
         let cell_bg = bg.get(i).copied().flatten();
         // Display chars are resolved to their glyph HERE, before any
         // branch draws the cell: the caret branch used to print the raw
         // sentinel of whatever it landed on, and a private-use
         // codepoint reaching the terminal shows as whatever the font
         // maps that page to (JuliaMono puts logos there).
-        let shown = match c {
-            FENDER_L => '[',
-            FENDER_R => ']',
-            _ if is_label(c) => JUMP_LABELS
-                .chars()
-                .nth((u - JUMP_CHAR_BASE) as usize)
-                .unwrap_or(' '),
+        let shown = match (c, Mark::decode(c)) {
+            (FENDER_L, _) => '[',
+            (FENDER_R, _) => ']',
+            (_, Some(Mark::Label { rank })) => JUMP_LABELS.chars().nth(rank).unwrap_or(' '),
             // Backstop for every other decoration: blank, never raw.
-            _ if mascii::render::is_display_marker(c) => ' ',
+            _ if is_display_marker(c) => ' ',
             _ => c,
         };
         let cell = if struck.contains(&(y, i)) {
@@ -747,7 +728,7 @@ fn decorate_line(
                 style = style.bg(color);
             }
             spans.push(Span::styled(cell, style));
-        } else if is_label(c) {
+        } else if matches!(Mark::decode(c), Some(Mark::Label { .. })) {
             flush(&mut buf, buf_bg, &mut spans);
             // The arrow-selected marker keeps its highlight color.
             let style = match cell_bg {
@@ -1337,11 +1318,11 @@ mod tests {
     /// to logos, so a leak shows as a random glyph).
     #[test]
     fn a_label_under_the_caret_still_prints_its_letter() {
-        let label = char::from_u32(JUMP_CHAR_BASE).unwrap();
+        let label = Mark::Label { rank: 0 }.ch();
         let struck = std::collections::HashSet::new();
         for cursor in [None, Some(0)] {
             let spans = decorate_line(
-                &[label, '\u{E0F4}'],
+                &[label, Mark::Gap { cols: true }.ch()],
                 0,
                 &struck,
                 &[None, None],
@@ -1538,7 +1519,10 @@ mod tests {
     #[test]
     fn selection_box_paints_without_touching_the_text() {
         let lines: Vec<Vec<char>> = vec![" ab ".chars().collect()];
-        let marks = [(0, 1, SEL_OPEN), (0, 3, SEL_CLOSE)];
+        let marks = [
+            (0, 1, Mark::Sel { open: true }.ch()),
+            (0, 3, Mark::Sel { open: false }.ch()),
+        ];
         let (out, bg, _, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None, None, None);
         assert_eq!(out, lines, "text must be untouched");
         assert_eq!(
@@ -1562,7 +1546,10 @@ mod tests {
             "───".chars().collect(),
             " 2 ".chars().collect(),
         ];
-        let marks = [(1, 0, SEL_OPEN), (1, 3, SEL_CLOSE)];
+        let marks = [
+            (1, 0, Mark::Sel { open: true }.ch()),
+            (1, 3, Mark::Sel { open: false }.ch()),
+        ];
         let (_, bg, _, _) = marker_boxes(&lines, &[(1, 1, 0)], &marks, None, None, None);
         assert!(bg.iter().all(|row| row.iter().all(|c| c.is_some())));
         let (_, bg, _, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None, None, None);
@@ -1574,7 +1561,7 @@ mod tests {
 
     #[test]
     fn labels_overlay_and_caret_pads() {
-        let label = char::from_u32(JUMP_CHAR_BASE).unwrap();
+        let label = Mark::Label { rank: 0 }.ch();
         let lines: Vec<Vec<char>> = vec!["xy".chars().collect()];
         let (out, _, cursor, _) =
             marker_boxes(&lines, &[], &[(0, 0, label)], Some((0, 2)), None, None);

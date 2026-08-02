@@ -3,6 +3,7 @@
 //! the same model LyX uses for math insets.
 
 use crate::ast::{Field, Node, Row, row_at, row_at_mut};
+use crate::glyphs::Mark;
 
 /// A cursor position: path into nested rows plus a column.
 pub type CursorPos = (Vec<(usize, Field)>, usize);
@@ -88,56 +89,8 @@ pub struct Editor {
 
 /// Label keys for jump mode, most reachable first.
 pub const JUMP_LABELS: &str = "asdfghjklqwertyuiopzxcvbnmASDFGHJKLQWERTYUIOPZXCVBNM0123456789";
-/// Private-use chars used as display-time markers (never in a real AST):
-/// jump label placeholders …
-pub const JUMP_CHAR_BASE: u32 = 0xE000;
-/// Selection range markers (drawn as a background-colored box).
-pub const SEL_OPEN: char = '\u{E0F0}';
-pub const SEL_CLOSE: char = '\u{E0F1}';
-/// End-of-block marker paired with a ^B label (display only, like the
-/// labels themselves; the TUI turns the pair into a colored box).
-pub const BLK_CLOSE: char = '\u{E0F2}';
-/// Ghost-slot marker: keeps an empty slot materialized (⬚) after jump
-/// mode ends, so re-entering ^G does not shift the layout. No label,
-/// no box — just the slot.
-pub const SLOT_GHOST: char = '\u{E0F3}';
-/// Grid lane-gap cursor: marks the ghost lane previewing an insertion
-/// (painted as the green insert band, same shape as a lane selection).
-/// Column and row gaps use separate chars so the display knows which
-/// axis to stretch along.
-pub const GRID_GAP: char = '\u{E0F4}';
-pub const GRID_GAP_ROW: char = '\u{E0FF}';
-/// Grid lane selection markers: like SEL_OPEN/SEL_CLOSE per cell, but
-/// the display fills the union rectangle of all pairs — a whole-lane
-/// band including the lattice gaps, not per-cell patches.
-pub const LANE_OPEN: char = '\u{E0F5}';
-pub const LANE_CLOSE: char = '\u{E0F6}';
-/// Cell-rectangle selection markers (contents, not structure): same
-/// union-fill display as the lane pairs, painted in the ordinary
-/// selection color so "every cell of the column" and "the column
-/// itself" stay tellable apart.
-pub const CELLS_OPEN: char = '\u{E0F7}';
-pub const CELLS_CLOSE: char = '\u{E0F8}';
-/// Grid-mode frame markers: wrap the edited Array node so the display
-/// can recolor its lattice frame (the mode signal). The render owns
-/// the geometry: it converts the pair into the framed block's exact
-/// top-left / bottom-right corners (the fused branch uses the whole
-/// fused block, delimiters included), and the display reads the
-/// rectangle straight off the two marks.
-pub const FRAME_OPEN: char = '\u{E0F9}';
-pub const FRAME_CLOSE: char = '\u{E0FA}';
-/// Row-lane selection markers (LANE_* marks columns): the display
-/// stretches a lane band to the matrix region's far edges along its
-/// axis, so it needs to know which axis that is.
-pub const ROWLANE_OPEN: char = '\u{E0FD}';
-pub const ROWLANE_CLOSE: char = '\u{E0FE}';
-/// Jump markers encode their rank as JUMP_RANK_BASE + rank (rank 0 =
-/// label 'a'; ranks beyond the label alphabet display as unlabeled
-/// highlights, reachable via arrow-key selection).
-pub const JUMP_RANK_BASE: u32 = 0xE100;
-/// Coordinate-probe marks (never displayed): one render with every
-/// candidate marked yields the position → cell coordinate table.
-const PROBE_BASE: u32 = 0xF000;
+/// The display markers themselves live in `glyphs::Mark` — the one
+/// place their wire chars are spelled, so both front-ends decode alike.
 /// docs/jump-spec.md §5 — tuning knobs.
 const JUMP_W_Y: usize = 3;
 const JUMP_R_MIN: usize = 2;
@@ -150,8 +103,6 @@ const JUMP_C_GHOST: usize = 4;
 /// frame, so the expansion itself cannot oscillate the test).
 const FREE_EXPAND_IN: usize = 3;
 const FREE_EXPAND_OUT: usize = 8;
-/// Rank-char capacity (E100..E4FF).
-const JUMP_MAX_RANKS: usize = 0x400;
 
 /// Free-cursor mode (^F): a display-cell cursor moved with the arrow
 /// keys; Enter snaps to the nearest editable position. Both the free
@@ -510,7 +461,7 @@ impl Editor {
     /// coordinates match the display exactly.
     fn nearest_position(&self, x: usize, y: usize) -> Option<(CursorPos, (usize, usize))> {
         let cands = self.jump_candidates();
-        let coords = self.display_coords(&cands);
+        let coords = self.display_coords(&cands, true);
         (0..cands.len())
             .filter_map(|i| coords[i].map(|xy| (i, xy)))
             .min_by_key(|&(_, (cy, cx))| cy.abs_diff(y) * 1000 + cx.abs_diff(x))
@@ -553,7 +504,14 @@ impl Editor {
 
     /// Coordinates in the *display* geometry: ghost rows materialized,
     /// probes only on visible positions (invisible ones get None).
-    fn display_coords(&self, cands: &[JumpCand]) -> Vec<Option<(usize, usize)>> {
+    /// `visible_only` drops candidates the current frame hides (the
+    /// free cursor measures what is on screen); jump keeps them,
+    /// because labeling them is what materializes their slots.
+    fn display_coords(
+        &self,
+        cands: &[JumpCand],
+        visible_only: bool,
+    ) -> Vec<Option<(usize, usize)>> {
         use crate::render::{RenderCtx, render_root};
         let n = cands.len().min(0x800);
         let mut root = self.root.clone();
@@ -608,27 +566,25 @@ impl Editor {
         let mut ghosts: Vec<&Vec<(usize, Field)>> = self.ghost.iter().collect();
         ghosts.sort_by_key(|p| std::cmp::Reverse(p.len()));
         for p in ghosts {
-            row_at_mut(&mut root, p).insert(0, Node::Sym(SLOT_GHOST));
+            row_at_mut(&mut root, p).insert(0, Node::Sym(Mark::SlotGhost.ch()));
         }
         for (idx, cand) in cands.iter().take(n).enumerate().rev() {
-            if !self.display_visible(&cand.pos) {
+            if visible_only && !self.display_visible(&cand.pos) {
                 continue;
             }
             let (p, c) = &cand.pos;
             let (mut p2, c2) = ghost_adjust(&self.ghost, p, *c);
             gap_fix(&mut p2);
-            let mark = char::from_u32(PROBE_BASE + idx as u32).unwrap();
+            let mark = Mark::Probe { index: idx }.ch();
             row_at_mut(&mut root, &p2).insert(c2, Node::Sym(mark));
         }
         let b = render_root(&root, None, &RenderCtx::canonical());
         let mut out = vec![None; cands.len()];
         for &(y, x, ch) in &b.marks {
-            let u = ch as u32;
-            if u >= PROBE_BASE {
-                let i = (u - PROBE_BASE) as usize;
-                if i < out.len() {
-                    out[i] = Some((y, x));
-                }
+            if let Some(Mark::Probe { index: i }) = Mark::decode(ch)
+                && i < out.len()
+            {
+                out[i] = Some((y, x));
             }
         }
         out
@@ -800,7 +756,7 @@ impl Editor {
             };
             let Some(target) = target else { return };
             let cands = self.jump_candidates();
-            let coords = self.display_coords(&cands);
+            let coords = self.display_coords(&cands, true);
             let Some(my) = cands
                 .iter()
                 .position(|c| c.is_cursor)
