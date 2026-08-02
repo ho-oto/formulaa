@@ -25,7 +25,7 @@ impl Editor {
     /// The cursor's own display cell (in the display frame).
     fn nearest_position_of_cursor(&self) -> Option<(CursorPos, (usize, usize))> {
         let cands = self.jump_candidates();
-        let coords = self.display_coords(&cands, true);
+        let coords = self.coords_displayed(&cands);
         let i = cands.iter().position(|c| c.is_cursor)?;
         coords[i].map(|xy| (cands[i].pos.clone(), xy))
     }
@@ -48,7 +48,7 @@ impl Editor {
         // parent row), with hysteresis (R_IN/R_OUT) so the expansion
         // shift cannot make the test oscillate.
         let cands = self.jump_candidates();
-        let disp = self.display_coords(&cands, true);
+        let disp = self.coords_displayed(&cands);
         let coord_of = |pos: &CursorPos| {
             cands
                 .iter()
@@ -95,7 +95,7 @@ impl Editor {
         let mut at = at;
         if let Some(prev) = &self.free {
             let cands2 = self.jump_candidates();
-            let disp2 = self.display_coords(&cands2, true);
+            let disp2 = self.coords_displayed(&cands2);
             if let Some((ny, nx)) = cands2
                 .iter()
                 .position(|c| c.pos == prev.snap)
@@ -316,7 +316,7 @@ impl Editor {
 
     pub fn start_jump(&mut self) {
         let cands = self.jump_candidates();
-        let coords = self.display_coords(&cands, false);
+        let coords = self.coords_raw(&cands);
         let Some(cur_i) = cands.iter().position(|c| c.is_cursor) else {
             self.info("no jump targets");
             return;
@@ -750,7 +750,7 @@ impl Editor {
     fn decorate_grid(&self) -> (Row, Option<CursorPos>) {
         let mut root = self.root.clone();
         let gs = self.grid.expect("grid mode");
-        let Some((k, i, rows, cols, c)) = self.grid_info() else {
+        let Some((k, i, _rows, cols, c)) = self.grid_info() else {
             return self.decorate_plain();
         };
         let mut path = self.path.clone();
@@ -812,22 +812,18 @@ impl Editor {
             return (root, Some((path, col)));
         }
         // Gap cursor: a ghost lane previews the insert (a Spacer
-        // cell painted by the gap mark). The ghost has real
-        // width, so the parked cell's index shifts with it.
-        let GridSel::Lanes {
-            cols: cmode, pos, ..
-        } = gs
-        else {
-            unreachable!()
-        };
-        let g = pos / 2;
-        let mark = Mark::Gap { cols: cmode }.ch();
-        (*nr, *nc) = splice_lane(cells, rows, cols, cmode, g, || {
+        // cell painted by the gap mark). The ghost has real width, so
+        // the parked cell's index shifts with it — the splice numbers
+        // come from gap_splice, the same source the coordinate probes
+        // read, so paint and probe cannot disagree.
+        let gsp = self.gap_splice().expect("lane gap state");
+        let mark = Mark::Gap { cols: gsp.cmode }.ch();
+        (*nr, *nc) = splice_lane(cells, gsp.rows, gsp.cols, gsp.cmode, gsp.g, || {
             vec![Node::Sym(mark), Node::Spacer]
         });
         if let Field::Cell(cell) = path[k].1 {
-            let _ = c;
-            path[k].1 = Field::Cell(gap_shift_cell(cell, cmode, g, rows, cols));
+            let _ = (c, gs);
+            path[k].1 = Field::Cell(gap_shift_cell(cell, gsp.cmode, gsp.g, gsp.rows, gsp.cols));
         }
         (root, Some((path, col)))
     }

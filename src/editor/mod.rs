@@ -173,6 +173,53 @@ pub struct FreeCursor {
     pub snap_at: (usize, usize),
 }
 
+/// The grid's lane-gap preview, as numbers: where the ghost lane
+/// splices in and how cell indices shift past it. Built by
+/// `Editor::gap_splice` — the ONE place that decides whether the
+/// displayed frame carries the extra lane — and consumed by both the
+/// paint (`decorate_grid`) and the coordinate probes (`Frame`), so
+/// they cannot disagree about the geometry.
+pub(crate) struct GapSplice {
+    pub k: usize,
+    pub i: usize,
+    pub cmode: bool,
+    pub g: usize,
+    pub rows: usize,
+    pub cols: usize,
+    pub parent: Vec<(usize, Field)>,
+}
+
+/// How the *displayed* picture's geometry differs from the raw tree:
+/// the kept ghost slots and (in lane-gap state) the grid's preview
+/// lane. `map` carries a raw position into the frame. A `Frame::raw`
+/// has no corrections — that is what jump measures, because
+/// `decorated` dispatches jump ahead of grid, so the labeled picture
+/// shows neither the gap lane nor the ghosts-as-ghosts (labeling a
+/// hidden candidate is what materializes its slot).
+struct Frame {
+    gap: Option<GapSplice>,
+    ghosts: Vec<Vec<(usize, Field)>>,
+}
+
+impl Frame {
+    fn map(&self, p: &[(usize, Field)], c: usize) -> (Vec<(usize, Field)>, usize) {
+        let (mut p2, c2) = ghost_adjust(&self.ghosts, p, c);
+        self.gap_fix(&mut p2);
+        (p2, c2)
+    }
+
+    fn gap_fix(&self, p: &mut [(usize, Field)]) {
+        let Some(gs) = &self.gap else { return };
+        if p.len() > gs.k
+            && p[..gs.k] == gs.parent[..]
+            && p[gs.k].0 == gs.i
+            && let Field::Cell(cell) = p[gs.k].1
+        {
+            p[gs.k].1 = Field::Cell(modes_gap_shift(cell, gs.cmode, gs.g, gs.rows, gs.cols));
+        }
+    }
+}
+
 /// Adjust a position for one ghost mark inserted at col 0 of every
 /// ghost row. All comparisons use the *original* coordinates — nudging
 /// incrementally breaks on nested ghosts (an outer adjustment makes the
@@ -502,7 +549,7 @@ impl Editor {
     /// coordinates match the display exactly.
     fn nearest_position(&self, x: usize, y: usize) -> Option<(CursorPos, (usize, usize))> {
         let cands = self.jump_candidates();
-        let coords = self.display_coords(&cands, true);
+        let coords = self.coords_displayed(&cands);
         (0..cands.len())
             .filter_map(|i| coords[i].map(|xy| (i, xy)))
             .min_by_key(|&(_, (cy, cx))| cy.abs_diff(y) * 1000 + cx.abs_diff(x))
@@ -543,85 +590,97 @@ impl Editor {
         true
     }
 
-    /// Coordinates in the *display* geometry: ghost rows materialized,
-    /// probes only on visible positions (invisible ones get None).
-    /// With `as_displayed`, the probe render carries the corrections
-    /// the current frame shows — the ghost slots and the grid gap
-    /// lane — and hidden candidates are dropped: this is the geometry
-    /// the free cursor and a mouse click land in.
-    ///
-    /// Without it, the raw tree is measured and every candidate is
-    /// probed. That is what jump wants: `decorated` dispatches jump
-    /// ahead of grid, so the labeled picture has no gap lane, and
-    /// labeling a hidden candidate is what materializes its slot.
-    fn display_coords(
+    /// The lane-gap preview's splice, when the grid is parked on a
+    /// gap. The single source of the decision AND the numbers.
+    pub(crate) fn gap_splice(&self) -> Option<GapSplice> {
+        match self.grid {
+            Some(GridSel::Lanes {
+                cols: cmode, pos, ..
+            }) if pos.is_multiple_of(2) => {
+                self.grid_info().map(|(k, i, rows, cols, _)| GapSplice {
+                    k,
+                    i,
+                    cmode,
+                    g: pos / 2,
+                    rows,
+                    cols,
+                    parent: self.path[..k].to_vec(),
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// Materialize the displayed frame's corrections into `root` (a
+    /// clone of the raw tree) and return the map that carries raw
+    /// positions into it.
+    fn displayed_frame(&self, root: &mut Row) -> Frame {
+        let gap = self.gap_splice();
+        if let Some(gs) = &gap {
+            let Node::Array {
+                rows: nr,
+                cols: nc,
+                cells,
+            } = &mut row_at_mut(root, &gs.parent)[gs.i]
+            else {
+                unreachable!()
+            };
+            (*nr, *nc) = modes::splice_lane(cells, gs.rows, gs.cols, gs.cmode, gs.g, || {
+                vec![Node::Spacer]
+            });
+        }
+        let frame = Frame {
+            gap,
+            ghosts: self.ghost.clone(),
+        };
+        // Ghosts deepest-first (an ancestor insertion would shift a
+        // deeper path), each carried past the gap lane.
+        let mut ghosts: Vec<&Vec<(usize, Field)>> = self.ghost.iter().collect();
+        ghosts.sort_by_key(|p| std::cmp::Reverse(p.len()));
+        for p in ghosts {
+            let mut p = p.clone();
+            frame.gap_fix(&mut p);
+            row_at_mut(root, &p).insert(0, Node::Sym(Mark::SlotGhost.ch()));
+        }
+        frame
+    }
+
+    /// Cell coordinates of the candidates in the *displayed* frame
+    /// (ghosts and the gap lane materialized; hidden candidates get
+    /// None). This is the geometry the free cursor and a mouse click
+    /// land in.
+    fn coords_displayed(&self, cands: &[JumpCand]) -> Vec<Option<(usize, usize)>> {
+        let mut root = self.root.clone();
+        let frame = self.displayed_frame(&mut root);
+        self.probe(root, cands, Some(&frame))
+    }
+
+    /// Cell coordinates of the candidates in the *raw* tree, every
+    /// candidate probed. This is what jump wants: `decorated`
+    /// dispatches jump ahead of grid, so the labeled picture has no
+    /// gap lane, and labeling a hidden candidate is what materializes
+    /// its slot.
+    fn coords_raw(&self, cands: &[JumpCand]) -> Vec<Option<(usize, usize)>> {
+        self.probe(self.root.clone(), cands, None)
+    }
+
+    fn probe(
         &self,
+        mut root: Row,
         cands: &[JumpCand],
-        as_displayed: bool,
+        frame: Option<&Frame>,
     ) -> Vec<Option<(usize, usize)>> {
         use crate::render::{RenderCtx, render_root};
         let n = cands.len().min(crate::glyphs::PROBE_MAX);
-        let mut root = self.root.clone();
-        // The gap-cursor ghost lane has real width: the probe render
-        // must include it (and probe paths shift past it), or every
-        // coordinate right of / below the ghost is off by a lane.
-        let gap = match self.grid.filter(|_| as_displayed) {
-            Some(GridSel::Lanes {
-                cols: cmode, pos, ..
-            }) if pos % 2 == 0 => self.grid_info().map(|(k, i, rows, cols, _)| {
-                let g = pos / 2;
-                let parent = self.path[..k].to_vec();
-                let Node::Array {
-                    rows: nr,
-                    cols: nc,
-                    cells,
-                } = &mut row_at_mut(&mut root, &parent)[i]
-                else {
-                    unreachable!()
-                };
-                (*nr, *nc) = modes::splice_lane(cells, rows, cols, cmode, g, || vec![Node::Spacer]);
-                (k, i, cmode, g, rows, cols, parent)
-            }),
-            _ => None,
-        };
-        let gap_fix = |p: &mut Vec<(usize, Field)>| {
-            let Some((k, i, cmode, g, rows, cols, parent)) = &gap else {
-                return;
-            };
-            if p.len() > *k
-                && p[..*k] == parent[..]
-                && p[*k].0 == *i
-                && let Field::Cell(cell) = p[*k].1
-            {
-                p[*k].1 = Field::Cell(modes_gap_shift(cell, *cmode, *g, *rows, *cols));
-            }
-        };
-        // Ghosts first (deepest rows first), then the probes with their
-        // paths nudged past the ghost insertions — mixing the orders
-        // corrupts whichever set is inserted second.
-        let mut ghosts: Vec<&Vec<(usize, Field)>> = self.ghost.iter().collect();
-        ghosts.sort_by_key(|p| std::cmp::Reverse(p.len()));
-        if as_displayed {
-            for p in ghosts {
-                // …and past the gap lane too: a ghost whose path was
-                // not shifted lands in the wrong cell, and the probe
-                // that follows it then indexes past that cell's end.
-                let mut p = p.clone();
-                gap_fix(&mut p);
-                row_at_mut(&mut root, &p).insert(0, Node::Sym(Mark::SlotGhost.ch()));
-            }
-        }
         for (idx, cand) in cands.iter().take(n).enumerate().rev() {
-            if as_displayed && !self.display_visible(&cand.pos) {
+            if frame.is_some() && !self.display_visible(&cand.pos) {
                 continue;
             }
             let (p, c) = &cand.pos;
-            let (mut p2, c2) = if as_displayed {
-                ghost_adjust(&self.ghost, p, *c)
-            } else {
-                (p.clone(), *c)
+            let (p2, c2) = match frame {
+                Some(f) => f.map(p, *c),
+                None => (p.clone(), *c),
             };
-            gap_fix(&mut p2);
             let mark = Mark::Probe { index: idx }.ch();
             row_at_mut(&mut root, &p2).insert(c2, Node::Sym(mark));
         }
@@ -803,7 +862,7 @@ impl Editor {
             };
             let Some(target) = target else { return };
             let cands = self.jump_candidates();
-            let coords = self.display_coords(&cands, true);
+            let coords = self.coords_displayed(&cands);
             let Some(my) = cands
                 .iter()
                 .position(|c| c.is_cursor)
