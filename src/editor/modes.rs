@@ -672,158 +672,169 @@ impl Editor {
 
     // ----- display decoration (jump labels / selection) -----
 
-    /// A copy of the AST with display markers inserted, plus the cursor
-    /// adjusted for the insertions (None while jump mode hides it).
-    /// Markers are private-use `Sym`s that the TUI turns into colored
-    /// labels / brackets; they never appear in a real document.
+    /// A copy of the AST with display markers inserted, plus the
+    /// cursor adjusted for those insertions. Markers are private-use
+    /// `Sym`s the display turns into labels and colored boxes; they
+    /// never appear in a real document. One branch per mode — they
+    /// share only `bump`, which threads a position past an insertion.
     pub fn decorated(&self) -> (Row, Option<CursorPos>) {
+        if self.jump.is_some() {
+            self.decorate_jump()
+        } else if self.block.is_some() {
+            self.decorate_block()
+        } else if self.grid.is_some() {
+            self.decorate_grid()
+        } else {
+            self.decorate_plain()
+        }
+    }
+
+    /// ^G: a rank marker at every candidate, and the live selection threaded through the insertions.
+    fn decorate_jump(&self) -> (Row, Option<CursorPos>) {
         let mut root = self.root.clone();
-        // Nudge the cursor position past a marker inserted at slot `k`
-        // of the row at `at`, so the cursor can stay threaded through
-        // mode displays (keeping the editing-view geometry: ⬚ limit
-        // slots, unfused matrices, expanded inline scripts).
-        fn bump(path: &mut [(usize, Field)], col: &mut usize, at: &[(usize, Field)], k: usize) {
-            let d = at.len();
-            if path.len() >= d && path[..d] == *at {
-                if path.len() > d {
-                    if path[d].0 >= k {
-                        path[d].0 += 1;
-                    }
-                } else if *col > k {
-                    *col += 1;
-                }
+        let targets = self.jump.as_ref().expect("jump mode");
+
+        let mut path = self.path.clone();
+        let mut col = self.col;
+        // A live selection is tracked through the marker insertions
+        // like the cursor, then painted with the same SEL markers
+        // as the normal branch.
+        let mut sel = self
+            .selection()
+            .map(|(lo, hi)| ((self.path.clone(), lo), (self.path.clone(), hi)));
+        // Reverse document order keeps not-yet-inserted positions valid.
+        for (rank, (p, c)) in targets.iter().rev() {
+            let mark = Mark::Rank { rank: *rank }.ch();
+            row_at_mut(&mut root, p).insert(*c, Node::Sym(mark));
+            bump(&mut path, &mut col, p, *c);
+            if let Some(((lp, lc), (hp, hc))) = &mut sel {
+                bump(lp, lc, p, *c);
+                bump(hp, hc, p, *c);
             }
         }
-        if let Some(targets) = &self.jump {
-            let mut path = self.path.clone();
-            let mut col = self.col;
-            // A live selection is tracked through the marker insertions
-            // like the cursor, then painted with the same SEL markers
-            // as the normal branch.
-            let mut sel = self
-                .selection()
-                .map(|(lo, hi)| ((self.path.clone(), lo), (self.path.clone(), hi)));
-            // Reverse document order keeps not-yet-inserted positions valid.
-            for (rank, (p, c)) in targets.iter().rev() {
-                let mark = Mark::Rank { rank: *rank }.ch();
-                row_at_mut(&mut root, p).insert(*c, Node::Sym(mark));
-                bump(&mut path, &mut col, p, *c);
-                if let Some(((lp, lc), (hp, hc))) = &mut sel {
-                    bump(lp, lc, p, *c);
-                    bump(hp, hc, p, *c);
-                }
-            }
-            if let Some(((lp, lo), (_, hi))) = sel {
-                let row = row_at_mut(&mut root, &lp);
-                row.insert(hi, Node::Sym(Mark::Sel { open: false }.ch()));
-                row.insert(lo, Node::Sym(Mark::Sel { open: true }.ch()));
-                // The cursor may sit inside this row (or deeper): thread
-                // it through both insertions like any other marker.
-                bump(&mut path, &mut col, &lp, hi);
-                bump(&mut path, &mut col, &lp, lo);
-            }
-            return (root, Some((path, col)));
+        if let Some(((lp, lo), (_, hi))) = sel {
+            let row = row_at_mut(&mut root, &lp);
+            row.insert(hi, Node::Sym(Mark::Sel { open: false }.ch()));
+            row.insert(lo, Node::Sym(Mark::Sel { open: true }.ch()));
+            // The cursor may sit inside this row (or deeper): thread
+            // it through both insertions like any other marker.
+            bump(&mut path, &mut col, &lp, hi);
+            bump(&mut path, &mut col, &lp, lo);
         }
-        if let Some(targets) = &self.block {
-            let mut path = self.path.clone();
-            let mut col = self.col;
-            // Label sits immediately left of its block and a close marker
-            // right after it, so the display can paint the block's extent.
-            // Targets are innermost first = deepest first: inserting into
-            // a deep row never shifts a shallower target's position.
-            for (idx, (p, i)) in targets.iter().enumerate() {
-                let mark = Mark::Label { rank: idx }.ch();
-                let row = row_at_mut(&mut root, p);
-                row.insert(i + 1, Node::Sym(Mark::BlockClose.ch()));
-                row.insert(*i, Node::Sym(mark));
-                bump(&mut path, &mut col, p, i + 1);
-                bump(&mut path, &mut col, p, *i);
-            }
-            return (root, Some((path, col)));
+        (root, Some((path, col)))
+    }
+
+    /// ^B: a label left of each ancestor block and a close marker right of it.
+    fn decorate_block(&self) -> (Row, Option<CursorPos>) {
+        let mut root = self.root.clone();
+        let targets = self.block.as_ref().expect("block mode");
+
+        let mut path = self.path.clone();
+        let mut col = self.col;
+        // Label sits immediately left of its block and a close marker
+        // right after it, so the display can paint the block's extent.
+        // Targets are innermost first = deepest first: inserting into
+        // a deep row never shifts a shallower target's position.
+        for (idx, (p, i)) in targets.iter().enumerate() {
+            let mark = Mark::Label { rank: idx }.ch();
+            let row = row_at_mut(&mut root, p);
+            row.insert(i + 1, Node::Sym(Mark::BlockClose.ch()));
+            row.insert(*i, Node::Sym(mark));
+            bump(&mut path, &mut col, p, i + 1);
+            bump(&mut path, &mut col, p, *i);
         }
-        if let Some(gs) = self.grid
-            && let Some((k, i, rows, cols, c)) = self.grid_info()
+        (root, Some((path, col)))
+    }
+
+    /// ^O: the frame corners, the cell/lane selection pair, and the gap ghost (the one decoration with real width).
+    fn decorate_grid(&self) -> (Row, Option<CursorPos>) {
+        let mut root = self.root.clone();
+        let gs = self.grid.expect("grid mode");
+        let Some((k, i, rows, cols, c)) = self.grid_info() else {
+            return self.decorate_plain();
+        };
+        let mut path = self.path.clone();
+        let mut col = self.col;
+        let parent_path = self.path[..k].to_vec();
+        // The frame pair around the Array node lets the display
+        // recolor its lattice — the "grid mode is on" signal. The
+        // render resolves the pair to the framed block's corners
+        // (fused or not), so one pair serves every layout.
         {
-            let mut path = self.path.clone();
-            let mut col = self.col;
-            let parent_path = self.path[..k].to_vec();
-            // The frame pair around the Array node lets the display
-            // recolor its lattice — the "grid mode is on" signal. The
-            // render resolves the pair to the framed block's corners
-            // (fused or not), so one pair serves every layout.
-            {
-                let prow = row_at_mut(&mut root, &parent_path);
-                prow.insert(i + 1, Node::Sym(Mark::Frame { open: false }.ch()));
-                prow.insert(i, Node::Sym(Mark::Frame { open: true }.ch()));
-            }
-            if path.len() > k {
-                path[k].0 += 1;
-            }
-            let i = i + 1;
-            let Node::Array {
-                rows: nr,
-                cols: nc,
-                cells,
-            } = &mut row_at_mut(&mut root, &parent_path)[i]
-            else {
-                unreachable!()
+            let prow = row_at_mut(&mut root, &parent_path);
+            prow.insert(i + 1, Node::Sym(Mark::Frame { open: false }.ch()));
+            prow.insert(i, Node::Sym(Mark::Frame { open: true }.ch()));
+        }
+        if path.len() > k {
+            path[k].0 += 1;
+        }
+        let i = i + 1;
+        let Node::Array {
+            rows: nr,
+            cols: nc,
+            cells,
+        } = &mut row_at_mut(&mut root, &parent_path)[i]
+        else {
+            unreachable!()
+        };
+        // The painted cells: the cell rectangle, or the full-axis
+        // rectangle of the selected lane(s) — one source of truth
+        // (`grid_rect`) shared with the editing ops.
+        let gap = matches!(gs, GridSel::Lanes { pos, .. } if pos % 2 == 0);
+        if !gap {
+            let Some((r0, j0, r1, j1)) = self.grid_rect() else {
+                return (root, Some((path, col)));
             };
-            // The painted cells: the cell rectangle, or the full-axis
-            // rectangle of the selected lane(s) — one source of truth
-            // (`grid_rect`) shared with the editing ops.
-            let gap = matches!(gs, GridSel::Lanes { pos, .. } if pos % 2 == 0);
-            if !gap {
-                let Some((r0, j0, r1, j1)) = self.grid_rect() else {
-                    return (root, Some((path, col)));
-                };
-                let (op, cl) = match gs {
-                    GridSel::Cells { .. } => {
-                        (Mark::Cells { open: true }, Mark::Cells { open: false })
-                    }
-                    GridSel::Lanes { cols, .. } => (
-                        Mark::Lane { open: true, cols },
-                        Mark::Lane { open: false, cols },
-                    ),
-                };
-                for r in r0..=r1 {
-                    for j in j0..=j1 {
-                        let cell = &mut cells[r * cols + j];
-                        let hi = cell.len();
-                        cell.insert(hi, Node::Sym(cl.ch()));
-                        cell.insert(0, Node::Sym(op.ch()));
-                        if r * cols + j == c {
-                            // The cursor lives in this cell: the open
-                            // mark at 0 shifts it right once.
-                            if path.len() > k + 1 {
-                                path[k + 1].0 += 1;
-                            } else {
-                                col += 1;
-                            }
+            let (op, cl) = match gs {
+                GridSel::Cells { .. } => (Mark::Cells { open: true }, Mark::Cells { open: false }),
+                GridSel::Lanes { cols, .. } => (
+                    Mark::Lane { open: true, cols },
+                    Mark::Lane { open: false, cols },
+                ),
+            };
+            for r in r0..=r1 {
+                for j in j0..=j1 {
+                    let cell = &mut cells[r * cols + j];
+                    let hi = cell.len();
+                    cell.insert(hi, Node::Sym(cl.ch()));
+                    cell.insert(0, Node::Sym(op.ch()));
+                    if r * cols + j == c {
+                        // The cursor lives in this cell: the open
+                        // mark at 0 shifts it right once.
+                        if path.len() > k + 1 {
+                            path[k + 1].0 += 1;
+                        } else {
+                            col += 1;
                         }
                     }
                 }
-                return (root, Some((path, col)));
-            }
-            // Gap cursor: a ghost lane previews the insert (a Spacer
-            // cell painted by the GRID_GAP mark). The ghost has real
-            // width, so the parked cell's index shifts with it.
-            let GridSel::Lanes {
-                cols: cmode, pos, ..
-            } = gs
-            else {
-                unreachable!()
-            };
-            let g = pos / 2;
-            let mark = Mark::Gap { cols: cmode }.ch();
-            (*nr, *nc) = splice_lane(cells, rows, cols, cmode, g, || {
-                vec![Node::Sym(mark), Node::Spacer]
-            });
-            if let Field::Cell(cell) = path[k].1 {
-                let _ = c;
-                path[k].1 = Field::Cell(gap_shift_cell(cell, cmode, g, rows, cols));
             }
             return (root, Some((path, col)));
         }
+        // Gap cursor: a ghost lane previews the insert (a Spacer
+        // cell painted by the GRID_GAP mark). The ghost has real
+        // width, so the parked cell's index shifts with it.
+        let GridSel::Lanes {
+            cols: cmode, pos, ..
+        } = gs
+        else {
+            unreachable!()
+        };
+        let g = pos / 2;
+        let mark = Mark::Gap { cols: cmode }.ch();
+        (*nr, *nc) = splice_lane(cells, rows, cols, cmode, g, || {
+            vec![Node::Sym(mark), Node::Spacer]
+        });
+        if let Field::Cell(cell) = path[k].1 {
+            let _ = c;
+            path[k].1 = Field::Cell(gap_shift_cell(cell, cmode, g, rows, cols));
+        }
+        (root, Some((path, col)))
+    }
+
+    /// No mode: the ghost slots kept open since ^G, plus the selection.
+    fn decorate_plain(&self) -> (Row, Option<CursorPos>) {
+        let mut root = self.root.clone();
         let mut path = self.path.clone();
         let mut col = self.col;
         // Deepest rows first: inserting into an ancestor row would shift
@@ -1123,6 +1134,23 @@ pub(crate) fn splice_lane(
             cells.insert(g.min(rows) * cols + j, fill());
         }
         (rows + 1, cols)
+    }
+}
+
+// Nudge the cursor position past a marker inserted at slot `k`
+// of the row at `at`, so the cursor can stay threaded through
+// mode displays (keeping the editing-view geometry: ⬚ limit
+// slots, unfused matrices, expanded inline scripts).
+fn bump(path: &mut [(usize, Field)], col: &mut usize, at: &[(usize, Field)], k: usize) {
+    let d = at.len();
+    if path.len() >= d && path[..d] == *at {
+        if path.len() > d {
+            if path[d].0 >= k {
+                path[d].0 += 1;
+            }
+        } else if *col > k {
+            *col += 1;
+        }
     }
 }
 

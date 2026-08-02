@@ -85,6 +85,9 @@ impl Editor {
         if let Some(e) = self.op_box_keys(key, ctrl) {
             return e;
         }
+        if let Some(e) = self.grid_keys(key, shift, ctrl) {
+            return e;
+        }
         self.base_keys(key, shift, ctrl)
     }
 
@@ -256,7 +259,71 @@ impl Editor {
         Some(Effect::None)
     }
 
-    /// Base layer: ctrl chords, the grid-edit layer, then ordinary keys.
+    /// Grid edit mode (^O): a key layer for matrix surgery. The ctrl
+    /// chords are handled ahead of it (grid mode swallows bare c/r for
+    /// its column/row submodes), and the mode ends when the cursor
+    /// leaves the grid (jump, click, …).
+    fn grid_keys(&mut self, key: Key, shift: bool, ctrl: bool) -> Option<Effect> {
+        let gs = self.grid?;
+        if ctrl {
+            return None;
+        }
+        if self.enclosing_array().is_none() {
+            self.grid = None;
+            return None;
+        }
+        self.clear_message();
+        match gs {
+            crate::editor::GridSel::Cells { .. } => match key {
+                Key::Left if shift => self.grid_select_move(0, -1),
+                Key::Right if shift => self.grid_select_move(0, 1),
+                Key::Up if shift => self.grid_select_move(-1, 0),
+                Key::Down if shift => self.grid_select_move(1, 0),
+                Key::Left => self.grid_cell_move(0, -1),
+                Key::Right => self.grid_cell_move(0, 1),
+                Key::Up => self.grid_cell_move(-1, 0),
+                Key::Down => self.grid_cell_move(1, 0),
+                Key::Char('c') | Key::Char('|') => self.grid_lanes(true),
+                Key::Char('r') | Key::Char('-') => self.grid_lanes(false),
+                Key::Backspace | Key::Delete => self.grid_clear_cells(),
+                // Enter: leave the mode and edit this cell.
+                Key::Enter | Key::Esc | Key::Tab => self.grid = None,
+                // Any other key: the help line already spells
+                // the mode's keys (the key layer does not
+                // author user-facing text).
+                _ => {}
+            },
+            crate::editor::GridSel::Lanes { cols, .. } => {
+                let (fwd, back) = if cols {
+                    (Key::Right, Key::Left)
+                } else {
+                    (Key::Down, Key::Up)
+                };
+                match key {
+                    k if k == fwd && shift => self.lane_extend(1),
+                    k if k == back && shift => self.lane_extend(-1),
+                    k if k == fwd => self.lane_step(1),
+                    k if k == back => self.lane_step(-1),
+                    // The cross-axis arrows drop back to cells.
+                    Key::Left | Key::Right | Key::Up | Key::Down => self.lane_demote(),
+                    Key::Enter => self.lane_commit(),
+                    Key::Backspace | Key::Delete | Key::Char('d') => self.lane_delete_sel(),
+                    Key::Char('c') | Key::Char('|') if !cols => self.grid_lanes(true),
+                    Key::Char('r') | Key::Char('-') if cols => self.grid_lanes(false),
+                    // Esc leaves grid mode altogether; the
+                    // same-axis letter drops back to cells.
+                    Key::Esc | Key::Tab => self.grid = None,
+                    Key::Char('c') | Key::Char('|') | Key::Char('r') | Key::Char('-') => {
+                        self.grid = Some(crate::editor::GridSel::Cells { anchor: None })
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Some(Effect::None)
+    }
+
+    /// Base layer: ctrl chords, then ordinary keys.
     fn base_keys(&mut self, key: Key, shift: bool, ctrl: bool) -> Effect {
         // Ghost slots survive only until the next real input; ^G itself
         // re-labels the identical picture.
@@ -286,65 +353,6 @@ impl Editor {
                 _ => {}
             }
             return Effect::None;
-        }
-
-        // Grid edit mode (^O): a key layer for matrix surgery. Ctrl
-        // chords above still work; the mode ends when the cursor leaves
-        // the grid (jump, click, …).
-        if let Some(gs) = self.grid {
-            if self.enclosing_array().is_none() {
-                self.grid = None;
-            } else {
-                self.clear_message();
-                match gs {
-                    crate::editor::GridSel::Cells { .. } => match key {
-                        Key::Left if shift => self.grid_select_move(0, -1),
-                        Key::Right if shift => self.grid_select_move(0, 1),
-                        Key::Up if shift => self.grid_select_move(-1, 0),
-                        Key::Down if shift => self.grid_select_move(1, 0),
-                        Key::Left => self.grid_cell_move(0, -1),
-                        Key::Right => self.grid_cell_move(0, 1),
-                        Key::Up => self.grid_cell_move(-1, 0),
-                        Key::Down => self.grid_cell_move(1, 0),
-                        Key::Char('c') | Key::Char('|') => self.grid_lanes(true),
-                        Key::Char('r') | Key::Char('-') => self.grid_lanes(false),
-                        Key::Backspace | Key::Delete => self.grid_clear_cells(),
-                        // Enter: leave the mode and edit this cell.
-                        Key::Enter | Key::Esc | Key::Tab => self.grid = None,
-                        // Any other key: the help line already spells
-                        // the mode's keys (the key layer does not
-                        // author user-facing text).
-                        _ => {}
-                    },
-                    crate::editor::GridSel::Lanes { cols, .. } => {
-                        let (fwd, back) = if cols {
-                            (Key::Right, Key::Left)
-                        } else {
-                            (Key::Down, Key::Up)
-                        };
-                        match key {
-                            k if k == fwd && shift => self.lane_extend(1),
-                            k if k == back && shift => self.lane_extend(-1),
-                            k if k == fwd => self.lane_step(1),
-                            k if k == back => self.lane_step(-1),
-                            // The cross-axis arrows drop back to cells.
-                            Key::Left | Key::Right | Key::Up | Key::Down => self.lane_demote(),
-                            Key::Enter => self.lane_commit(),
-                            Key::Backspace | Key::Delete | Key::Char('d') => self.lane_delete_sel(),
-                            Key::Char('c') | Key::Char('|') if !cols => self.grid_lanes(true),
-                            Key::Char('r') | Key::Char('-') if cols => self.grid_lanes(false),
-                            // Esc leaves grid mode altogether; the
-                            // same-axis letter drops back to cells.
-                            Key::Esc | Key::Tab => self.grid = None,
-                            Key::Char('c') | Key::Char('|') | Key::Char('r') | Key::Char('-') => {
-                                self.grid = Some(crate::editor::GridSel::Cells { anchor: None })
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                return Effect::None;
-            }
         }
 
         self.clear_message();
