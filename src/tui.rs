@@ -259,7 +259,6 @@ enum CaretStyle {
 /// selection in theme::SELECTION_BG, ^B blocks in the depth palette
 /// by nesting depth). Nothing is inserted or removed, so the geometry
 /// always equals the undecorated render.
-#[allow(clippy::type_complexity)]
 fn marker_boxes(
     block: &mascii::render::Block,
     extents: &[(usize, usize, usize)],
@@ -609,7 +608,9 @@ fn overlay_minibuffer(ed: &Editor, d: &mut Decor) {
         d.open_rows(at, block.height());
         for (dy, bline) in block.lines.iter().enumerate() {
             let y = at + dy;
-            d.widen(y, cx + bline.len());
+            if !bline.is_empty() {
+                d.widen(y, cx + bline.len() - 1);
+            }
             for (dx, &ch) in bline.iter().enumerate() {
                 d.lines[y][cx + dx] = ch;
                 d.bg[y][cx + dx] = Some(theme::PREVIEW_BG);
@@ -799,7 +800,7 @@ mod tests {
         let v = render(&ed, 24, 12);
         assert!(v.scroll_x > 0, "no horizontal scroll: {}", v.scroll_x);
         assert_eq!(v.scroll_y, 0);
-        // Tall: many display d.lines, cursor on the last one.
+        // Tall: many display lines, cursor on the last one.
         let mut ed = Editor::new();
         for _ in 0..12 {
             ed.input(Key::Char('x'), false, false);
@@ -929,7 +930,7 @@ mod tests {
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
         let d = marker_boxes(&block, &ed.marker_extents(), None, None);
-        assert!(d.frame.is_some(), "grid mode reports its d.frame rect");
+        assert!(d.frame.is_some(), "grid mode reports its frame rect");
         // The gap's green bar runs unbroken through the lattice rows:
         // every display row between the first and last green cell has
         // green in it (a 2-row matrix has a separator row between).
@@ -996,7 +997,7 @@ mod tests {
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
         let d = marker_boxes(&block, &ed.marker_extents(), None, None);
-        let (o, close, t, b) = d.frame.expect("d.frame rect survives the gap row");
+        let (o, close, t, b) = d.frame.expect("frame rect survives the gap row");
         assert!(close - o >= 6, "full-width frame: {:?}", (o, close));
         assert!(b - t >= 2, "full-height frame: {:?}", (t, b));
     }
@@ -1014,7 +1015,7 @@ mod tests {
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
         let d = marker_boxes(&block, &ed.marker_extents(), None, None);
-        let (o, close, t, b) = d.frame.expect("d.frame rect");
+        let (o, close, t, b) = d.frame.expect("frame rect");
         // Walk every framed row and collect which columns the draw
         // pass would tint; the leftmost and rightmost delimiter pieces
         // must both be inside the scan range.
@@ -1069,7 +1070,7 @@ mod tests {
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
         let d = marker_boxes(&block, &ed.marker_extents(), None, None);
-        let (o, close, t, b) = d.frame.expect("d.frame rect");
+        let (o, close, t, b) = d.frame.expect("frame rect");
         let mut tinted = std::collections::HashSet::new();
         for line in d.lines.iter().take(b + 1).skip(t) {
             for (i, &c) in line.iter().enumerate() {
@@ -1112,7 +1113,7 @@ mod tests {
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
         let d = marker_boxes(&block, &ed.marker_extents(), None, None);
-        let (o, close, t, b) = d.frame.expect("outer d.frame rect");
+        let (o, close, t, b) = d.frame.expect("outer frame rect");
         let mut tinted = std::collections::HashSet::new();
         for line in d.lines.iter().take(b + 1).skip(t) {
             for (i, &c) in line.iter().enumerate() {

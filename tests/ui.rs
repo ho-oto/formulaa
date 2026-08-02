@@ -918,6 +918,23 @@ fn a_minibuffer_insert_clears_a_stale_selection() {
     assert_eq!(latex(&ed), "\\widehat{ab}");
 }
 
+/// A mode layer that consumes a key owes the same ghost clear the base
+/// layer does: a jump ghost path recorded before grid surgery outlives
+/// the array it points into, and the next render walks a dead index.
+#[test]
+fn grid_keys_clear_the_jump_ghosts() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\matrix");
+    type_script(&mut ed, "C-o C-g Esc");
+    assert!(!ed.ghost.is_empty(), "cancelled jump keeps its ghosts");
+    type_script(&mut ed, "c");
+    assert!(ed.ghost.is_empty(), "a grid-mode key clears them");
+    // …and the sequence that used to panic on the next render.
+    type_script(&mut ed, "Delete Esc");
+    let _ = ed.decorated();
+    assert_roundtrip(&ed, &[]);
+}
+
 /// A formula line break lives only at the top level: a selection may
 /// not span one, so neither a wrap nor a copy can carry one into an
 /// inset (the picture would lose it, breaking the roundtrip).

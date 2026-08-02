@@ -272,6 +272,11 @@ impl Editor {
             self.grid = None;
             return None;
         }
+        // Ghost slots survive only until the next real input — this
+        // layer consumes its keys, so it owes the same clear the base
+        // layer does (a stale ghost path outlives the grid surgery
+        // that shrank the array under it).
+        self.ghost.clear();
         self.clear_message();
         match gs {
             crate::editor::GridSel::Cells { .. } => match key {
