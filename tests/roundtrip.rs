@@ -180,6 +180,31 @@ fn roundtrip(name: &str, row: &Row) {
 /// A formula with holes exports the holes as holes: the ⬚ marks blank
 /// out when other ink carries the structure, and stay put when they
 /// are the only thing making the picture readable.
+/// Malformed pictures are errors, never panics: `parse` is the public
+/// entry for the CLI and the wasm bindings, where an abort is fatal.
+#[test]
+fn malformed_pictures_do_not_panic() {
+    for aa in [
+        // A fused-grid row junction on the very first row: the cell
+        // above it is empty, and its edge sits one row "above" zero.
+        "├   ┤\n⎝ 𝑏 ⎠",
+        "⎛ 𝑎 ⎞\n├   ┤",
+        // A radical stem in the region's last column: no overline run
+        // to measure, so the radicand is empty.
+        " ┌\n𝑥│\n √",
+        " ┌\n │\n √",
+        // Assorted truncated pictures.
+        "┌\n√",
+        "⎡\n⎣",
+        "┬",
+        "╱\n╲",
+    ] {
+        let got = parse(aa);
+        // Either reading is fine; aborting is not.
+        assert!(got.is_ok() || got.is_err(), "{:?}", aa);
+    }
+}
+
 /// `normalize` must be idempotent: it runs again after every merge, so
 /// a rule that lands on a shape another rule would rewrite (a band
 /// collapsing to a one-letter `Func`) makes two exports of one document
@@ -585,6 +610,14 @@ fn text_spaces_and_operator_names() {
     assert_eq!(
         render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text(),
         "\"a\\\"b\\\\c\""
+    );
+    // …and so is every char LaTeX would read as syntax: a raw % would
+    // comment out the rest of the document it is pasted into.
+    let row = cat(&[n(Node::Text("50% {of} $x_1$".into()))]);
+    roundtrip("text-syntax-chars", &row);
+    assert_eq!(
+        row_to_latex(&normalize(&row)),
+        "\\text{50\\% \\{of\\} \\$x\\_1\\$}"
     );
     // KaTeX-known names emit \name; declared operators \operatorname.
     assert_eq!(

@@ -312,11 +312,10 @@ impl Editor {
                         Key::Backspace | Key::Delete => self.grid_clear_cells(),
                         // Enter: leave the mode and edit this cell.
                         Key::Enter | Key::Esc | Key::Tab => self.grid = None,
-                        _ => {
-                            self.message =
-                                "grid: ←→↑↓ cells  ⇧ select (past the edge = lane)  c/| columns  r/- rows  ^C/^X/^V cells  ⌫ clear  Enter edit  Esc exit"
-                                    .into();
-                        }
+                        // Any other key: the help line already spells
+                        // the mode's keys (the key layer does not
+                        // author user-facing text).
+                        _ => {}
                     },
                     crate::editor::GridSel::Lanes { cols, .. } => {
                         let (fwd, back) = if cols {
@@ -341,13 +340,7 @@ impl Editor {
                             Key::Char('c') | Key::Char('|') | Key::Char('r') | Key::Char('-') => {
                                 self.grid = Some(crate::editor::GridSel::Cells { anchor: None })
                             }
-                            _ => {
-                                self.info(if cols {
-                                    "columns: ←→ gap/column  Enter on gap = insert  ⌫ delete  ⇧←→ extend  ↑↓ back to cells  Esc exit"
-                                } else {
-                                    "rows: ↑↓ gap/row  Enter on gap = insert  ⌫ delete  ⇧↑↓ extend  ←→ back to cells  Esc exit"
-                                });
-                            }
+                            _ => {}
                         }
                     }
                 }

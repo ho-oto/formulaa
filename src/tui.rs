@@ -17,7 +17,7 @@ use mascii::render::{RenderCtx, render_root};
 
 use crate::theme;
 
-const HELP: &str = "^G jump  ^F free move  ^B select block  \\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ⇧←→/⇧↑ select  ^Z/^R undo/redo  ^T italic  ^Y copy AA  ^S save  Esc/^Q quit";
+const HELP: &str = "^G jump  ^F free move  ^B select block  \\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ⇧←→/⇧↑ select  ^Z/^R undo/redo  ^T italic  ^Y copy AA  Esc/^Q quit";
 
 /// Context-sensitive last line: generic keys normally, the relevant
 /// commands when the cursor is inside a grid cell or a delimiter.
@@ -46,10 +46,10 @@ pub fn help_line(ed: &Editor) -> &'static str {
                 "grid: ←→↑↓ cells  ⇧ select (past the edge = lane)  c/| columns  r/- rows  ^C/^X/^V cells  ⌫ clear  Enter edit  Esc/^O exit"
             }
             mascii::editor::GridSel::Lanes { cols: true, .. } => {
-                "columns: ←→ gap/column  Enter on gap = insert here  ⌫ delete column  ⇧←→ extend  ↑↓ cells  Esc back"
+                "columns: ←→ gap/column  Enter on gap = insert here  ⌫ delete column  ⇧←→ extend  ↑↓ cells  c/| cells  Esc exit"
             }
             mascii::editor::GridSel::Lanes { cols: false, .. } => {
-                "rows: ↑↓ gap/row  Enter on gap = insert here  ⌫ delete row  ⇧↑↓ extend  ←→ cells  Esc back"
+                "rows: ↑↓ gap/row  Enter on gap = insert here  ⌫ delete row  ⇧↑↓ extend  ←→ cells  r/- cells  Esc exit"
             }
         };
     }

@@ -892,6 +892,32 @@ fn selection_does_not_survive_leaving_the_row() {
     assert_eq!(latex(&ed), "\\frac{ab}{}^{x}");
 }
 
+/// A command that inserts without consuming the selection must clear
+/// it: the insert shifts every index, so a surviving anchor would
+/// designate a different range and the next Backspace would eat it.
+#[test]
+fn a_minibuffer_insert_clears_a_stale_selection() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a b S-Left S-Left");
+    assert_eq!(ed.selection(), Some((0, 2)));
+    type_script(&mut ed, r"\alpha");
+    assert_eq!(
+        ed.selection(),
+        None,
+        "the anchor does not survive the insert"
+    );
+    type_script(&mut ed, "Backspace");
+    assert_eq!(
+        latex(&ed),
+        "ab",
+        "Backspace deletes the α, not the old range"
+    );
+    // A wrapping command still consumes the selection it was given.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a b S-Left S-Left \hat");
+    assert_eq!(latex(&ed), "\\widehat{ab}");
+}
+
 /// A formula line break lives only at the top level: a selection may
 /// not span one, so neither a wrap nor a copy can carry one into an
 /// inset (the picture would lose it, breaking the roundtrip).

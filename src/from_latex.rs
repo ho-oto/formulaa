@@ -213,6 +213,11 @@ impl Parser {
                                 *slot = arg;
                                 continue;
                             }
+                            // A script the host could not take ends its
+                            // reach: it now sits between them, so a
+                            // later script belongs to the script, not
+                            // back to the band.
+                            host = Host::None;
                             out.push(if up {
                                 Node::Sup { arg }
                             } else {
@@ -230,6 +235,7 @@ impl Parser {
                                 host = Host::None;
                                 continue;
                             }
+                            host = Host::None;
                             out.push(if up {
                                 Node::Sup { arg }
                             } else {
@@ -639,10 +645,28 @@ impl Parser {
             return (String::new(), &t[t.len()..]);
         };
         let mut s = String::new();
-        for tok in &t[i + 1..i + 1 + end] {
+        let body = &t[i + 1..i + 1 + end];
+        let mut k = 0;
+        while k < body.len() {
+            let tok = &body[k];
+            k += 1;
             match tok {
                 Tok::Ch(c) => s.push(*c),
                 Tok::Space => s.push(' '),
+                // An escaped syntax char (\% \{ …) is that char; a real
+                // command keeps its backslash (best effort — \text is
+                // not a math context, so nothing else expands here).
+                Tok::Cmd(w) if w.chars().count() == 1 && !w.starts_with(char::is_alphabetic) => {
+                    s.push_str(w)
+                }
+                Tok::Cmd(w) if w == "textbackslash" => {
+                    s.push('\\');
+                    // …and its empty group, which only exists to end
+                    // the command name.
+                    if body.get(k) == Some(&Tok::Open) && body.get(k + 1) == Some(&Tok::Close) {
+                        k += 2;
+                    }
+                }
                 Tok::Cmd(w) => {
                     s.push('\\');
                     s.push_str(w);

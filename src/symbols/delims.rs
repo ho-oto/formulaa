@@ -18,6 +18,8 @@
 //! apart by extent — `glyphs::NORM`).
 
 /// The column-drawn pairs.
+use std::sync::OnceLock;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColDelim {
     Paren,
@@ -90,6 +92,12 @@ pub static DELIM_SPECS: phf::Map<char, (Delim, Option<bool>)> = phf::phf_map! {
     '|' => (Delim::Col(ColDelim::Bar), None),
     '.' => (Delim::Col(ColDelim::Null), None),
 };
+
+fn sorted(mut v: Vec<char>) -> Vec<char> {
+    v.sort_unstable();
+    v.dedup();
+    v
+}
 
 impl ColDelim {
     pub const ALL: [ColDelim; 7] = [
@@ -182,33 +190,60 @@ impl ColDelim {
     }
 
     /// Every glyph this side can show, in any height: the one-line
-    /// short, the tall pieces and the vertex.
-    pub fn glyphs(self, left: bool) -> Vec<char> {
-        let info = self.info();
-        let side = |p: (char, char)| if left { p.0 } else { p.1 };
-        let mut v = vec![side(info.short)];
-        let (t, e, b) = info.tall[usize::from(!left)];
-        v.extend([t, e, b]);
-        if let Some(vx) = info.vertex {
-            v.push(side(vx));
-        }
-        v.sort_unstable();
-        v.dedup();
-        v
+    /// short, the tall pieces and the vertex. Cached — the parser asks
+    /// this per column cell, and building it allocates.
+    pub fn glyphs(self, left: bool) -> &'static [char] {
+        static SETS: OnceLock<[[Vec<char>; 2]; ColDelim::ALL.len()]> = OnceLock::new();
+        let sets = SETS.get_or_init(|| {
+            ColDelim::ALL.map(|d| {
+                [true, false].map(|left| {
+                    let info = d.info();
+                    let side = |p: (char, char)| if left { p.0 } else { p.1 };
+                    let mut v = vec![side(info.short)];
+                    v.extend(d.run_pieces(left));
+                    sorted(v)
+                })
+            })
+        });
+        &sets[self as usize][usize::from(!left)]
     }
 
     /// The glyphs this pair's tall column shows on one side: the tall
     /// pieces and the vertex — never the one-line short.
-    pub fn run_pieces(self, left: bool) -> Vec<char> {
-        let info = self.info();
-        let (t, e, b) = info.tall[usize::from(!left)];
-        let mut p = vec![t, e, b];
-        if let Some(vx) = info.vertex {
-            p.push(if left { vx.0 } else { vx.1 });
-        }
-        p.sort_unstable();
-        p.dedup();
-        p
+    pub fn run_pieces(self, left: bool) -> &'static [char] {
+        static SETS: OnceLock<[[Vec<char>; 2]; ColDelim::ALL.len()]> = OnceLock::new();
+        let sets = SETS.get_or_init(|| {
+            ColDelim::ALL.map(|d| {
+                [true, false].map(|left| {
+                    let info = d.info();
+                    let (t, e, b) = info.tall[usize::from(!left)];
+                    let mut p = vec![t, e, b];
+                    if let Some(vx) = info.vertex {
+                        p.push(if left { vx.0 } else { vx.1 });
+                    }
+                    sorted(p)
+                })
+            })
+        });
+        &sets[self as usize][usize::from(!left)]
+    }
+
+    /// How many (pair, side) rows show this glyph. One owner names its
+    /// pair outright; more than one needs the column walk (`of_run`).
+    fn owners(c: char) -> usize {
+        static COUNTS: OnceLock<std::collections::HashMap<char, usize>> = OnceLock::new();
+        let counts = COUNTS.get_or_init(|| {
+            let mut m = std::collections::HashMap::new();
+            for d in ColDelim::ALL {
+                for left in [true, false] {
+                    for &g in d.glyphs(left) {
+                        *m.entry(g).or_insert(0) += 1;
+                    }
+                }
+            }
+            m
+        });
+        counts.get(&c).copied().unwrap_or(0)
     }
 
     /// A piece several pairs share on this side (⎡ ⎢ ⎣ / ⎤ ⎥ ⎦): its
@@ -225,19 +260,16 @@ impl ColDelim {
     /// Every glyph a tall delimiter column can contain on this side —
     /// the union of `run_pieces` over all pairs.
     pub fn run_glyphs(left: bool) -> &'static [char] {
-        use std::sync::OnceLock;
         static RUNS: OnceLock<[Vec<char>; 2]> = OnceLock::new();
         let runs = RUNS.get_or_init(|| {
-            let build = |left: bool| {
-                let mut v: Vec<char> = ColDelim::ALL
-                    .iter()
-                    .flat_map(|d| d.run_pieces(left))
-                    .collect();
-                v.sort_unstable();
-                v.dedup();
-                v
-            };
-            [build(true), build(false)]
+            [true, false].map(|left| {
+                sorted(
+                    ColDelim::ALL
+                        .iter()
+                        .flat_map(|d| d.run_pieces(left).iter().copied())
+                        .collect(),
+                )
+            })
         });
         &runs[usize::from(!left)]
     }
@@ -251,15 +283,11 @@ impl ColDelim {
     /// convention the tall columns encode (⌈ repeats its foot, ⌊ its
     /// head, the bar both).
     pub fn of_run(has: impl Fn(char) -> bool, left: bool) -> ColDelim {
-        let owners = |g: char| {
-            ColDelim::ALL
-                .iter()
-                .flat_map(|d| [d.glyphs(true), d.glyphs(false)])
-                .filter(|v| v.contains(&g))
-                .count()
-        };
         for d in ColDelim::ALL {
-            if d.glyphs(left).into_iter().any(|g| owners(g) == 1 && has(g)) {
+            if d.glyphs(left)
+                .iter()
+                .any(|&g| ColDelim::owners(g) == 1 && has(g))
+            {
                 return d;
             }
         }
@@ -366,10 +394,15 @@ impl Delim {
     /// Every glyph this side can show, in any height. The angles show
     /// only their one-line char — the ╱ ╲ arms are shared diagonals
     /// the parser resolves contextually.
-    pub fn glyphs(self, left: bool) -> Vec<char> {
+    pub fn glyphs(self, left: bool) -> &'static [char] {
+        static ANGLE: OnceLock<[Vec<char>; 2]> = OnceLock::new();
         match self {
             Delim::Col(c) => c.glyphs(left),
-            Delim::Angle => vec![self.spec(left)],
+            Delim::Angle => {
+                let a =
+                    ANGLE.get_or_init(|| [true, false].map(|left| vec![Delim::Angle.spec(left)]));
+                &a[usize::from(!left)]
+            }
         }
     }
 
@@ -394,17 +427,16 @@ impl Delim {
 
     /// Every glyph any pair can show on either side, in any height.
     pub fn all_pieces() -> &'static [char] {
-        use std::sync::OnceLock;
         static PIECES: OnceLock<Vec<char>> = OnceLock::new();
         PIECES.get_or_init(|| {
-            let mut v: Vec<char> = Delim::ALL
-                .iter()
-                .flat_map(|d| [d.glyphs(true), d.glyphs(false)])
-                .flatten()
-                .collect();
-            v.sort_unstable();
-            v.dedup();
-            v
+            sorted(
+                Delim::ALL
+                    .iter()
+                    .flat_map(|d| [d.glyphs(true), d.glyphs(false)])
+                    .flatten()
+                    .copied()
+                    .collect(),
+            )
         })
     }
 }

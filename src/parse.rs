@@ -135,9 +135,8 @@ fn side_glyphs(left: bool) -> &'static [char] {
         let build = |left: bool| {
             let mut v: Vec<char> = Delim::ALL
                 .iter()
-                .flat_map(|d| d.glyphs(left))
+                .flat_map(|d| d.glyphs(left).iter().copied())
                 .filter(|&c| c != '⎪')
-                .chain([Delim::Angle.spec(left)])
                 .chain(if left { LATTICE_LEFT } else { LATTICE_RIGHT })
                 .collect();
             v.sort_unstable();
@@ -298,8 +297,8 @@ fn left_family(spec: char) -> Vec<char> {
     match spec {
         NORM => vec![NORM],
         _ => {
-            let mut v = Delim::of_spec(spec)
-                .map(|(d, _)| d.glyphs(true))
+            let mut v: Vec<char> = Delim::of_spec(spec)
+                .map(|(d, _)| d.glyphs(true).to_vec())
                 .unwrap_or_default();
             // A fused-grid junction can sit anywhere in the column…
             v.push(ROW_JUNCTION_L);
@@ -495,7 +494,7 @@ fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
     }
     let family: Vec<char> = [true, false]
         .into_iter()
-        .flat_map(|side| ColDelim::Brace.run_pieces(side))
+        .flat_map(|side| ColDelim::Brace.run_pieces(side).iter().copied())
         .collect();
     let mut r = row;
     while r > 0 && family.contains(&g.at(r - 1, col)) {
@@ -921,6 +920,14 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
                     );
                 };
                 let base: String = (l0..=r0).map(|c| unstyle_char(g.at(bl, c))).collect();
+                // A named band is an upright run, so its glyphs are
+                // atoms like any other run — otherwise a structural
+                // glyph would ride into the name (and into the LaTeX).
+                if base.chars().count() > 1
+                    && let Some(bad) = base.chars().find(|&c| !crate::symbols::is_atom(c))
+                {
+                    return err(format!("{:?} is not a valid atom", bad), bl, col);
+                }
                 let span = Rect {
                     t: rect.t,
                     b: rect.b,
@@ -1101,17 +1108,28 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
                     return err("radical without its ┌─ overline", top, col);
                 }
                 let index = radical_index(g.at(bot, col)).unwrap();
-                let w = scan_while(g, top - 1, col + 1, rect.r, |c| c == FRAC_BAR) - col;
-                let inner = Rect {
-                    t: top,
-                    b: bot,
-                    l: col + 1,
-                    r: col + w,
+                // The overline run measures the radicand's width. A stem
+                // in the region's last column has no room for one, so
+                // there is nothing to cover — an empty radicand, not a
+                // scan past the edge (scan_while returns its start when
+                // the range is empty).
+                let w = if col < rect.r {
+                    scan_while(g, top - 1, col + 1, rect.r, |c| c == FRAC_BAR) - col
+                } else {
+                    0
                 };
-                out.push(Node::Sqrt {
-                    arg: parse_region(g, inner, Some(bl), in_cancel)?,
-                    index,
-                });
+                let arg = if w == 0 {
+                    vec![]
+                } else {
+                    let inner = Rect {
+                        t: top,
+                        b: bot,
+                        l: col + 1,
+                        r: col + w,
+                    };
+                    parse_region(g, inner, Some(bl), in_cancel)?
+                };
+                out.push(Node::Sqrt { arg, index });
                 col += w + 1;
             }
             _ if ch == PLACEHOLDER => {
@@ -1868,15 +1886,21 @@ fn parse_delim(
             let mut cells = Vec::with_capacity(rows_n * cols_n);
             for ri in 0..rows_n {
                 for ci in 0..cols_n {
-                    let cell = Rect {
-                        t: (row_edges[ri] + 1) as usize,
-                        b: (row_edges[ri + 1] - 1) as usize,
-                        l: col_edges[ci] + 1,
-                        r: col_edges[ci + 1] - 1,
-                    };
-                    let row = if cell.t > cell.b || cell.l > cell.r {
+                    // Edges are signed because the first one sits one
+                    // row above the cell area; an empty cell (a junction
+                    // on the very first row) must stay empty rather
+                    // than wrap through zero.
+                    let (t, b) = (row_edges[ri] + 1, row_edges[ri + 1] - 1);
+                    let (l, r) = (col_edges[ci] + 1, col_edges[ci + 1]);
+                    let row = if t > b || l + 1 > r {
                         vec![]
                     } else {
+                        let cell = Rect {
+                            t: t as usize,
+                            b: b as usize,
+                            l,
+                            r: r - 1,
+                        };
                         parse_region(g, cell, None, in_cancel)?
                     };
                     cells.push(row);

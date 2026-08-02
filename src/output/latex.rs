@@ -45,14 +45,30 @@ fn braced(row: &Row) -> String {
     format!("{{{}}}", row_to_latex(row))
 }
 
+/// Characters LaTeX reads as syntax wherever they appear — a raw % would
+/// comment out the rest of the document, a stray { would swallow it.
+fn escaped(c: char) -> Option<String> {
+    match c {
+        '#' | '$' | '%' | '&' | '{' | '}' | '_' => Some(format!("\\{}", c)),
+        '\\' => Some("\\textbackslash{}".into()),
+        _ => None,
+    }
+}
+
+/// Text-mode run (`\text{…}`): the same escapes, everything else
+/// verbatim.
+fn text_to_latex(t: &str) -> String {
+    t.chars()
+        .map(|c| escaped(c).unwrap_or_else(|| c.to_string()))
+        .collect()
+}
+
 fn sym_to_latex(c: char) -> String {
     if c == '␣' {
         return "\\ ".into();
     }
-    // Ordinary characters that LaTeX reads as syntax (a raw % would
-    // comment out the rest of the document).
-    if matches!(c, '#' | '$' | '%' | '&') {
-        return format!("\\{}", c);
+    if let Some(e) = escaped(c) {
+        return e;
     }
     // A curated name, or a styled letter spelled through its family;
     // anything left over is emitted raw (unicode-math renders it).
@@ -154,7 +170,7 @@ fn node_to_latex(node: &Node) -> String {
             upper,
         ),
         Node::Roman(c) => format!("\\mathrm{{{}}}", c),
-        Node::Text(t) => format!("\\text{{{}}}", t),
+        Node::Text(t) => format!("\\text{{{}}}", text_to_latex(t)),
         Node::Brace { over, arg, label } => {
             let (cmd, att) = if *over {
                 ("overbrace", '^')

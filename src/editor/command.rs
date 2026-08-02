@@ -256,6 +256,14 @@ impl Editor {
     /// Apply a resolved edit to the tree. All command-driven mutation
     /// funnels through here; `resolve` decides *what*, this does *how*.
     pub fn apply(&mut self, edit: Edit) {
+        // An edit that does not consume the selection still shifts the
+        // row under it, so a surviving anchor would designate a
+        // different range afterwards (the plain-key path clears it the
+        // same way). Only the two wrapping edits keep it.
+        let wraps = matches!(edit, Edit::Insert { wrap: true, .. } | Edit::Accent(_));
+        if !wraps {
+            self.select_anchor = None;
+        }
         match edit {
             Edit::Insert { node, wrap } => {
                 let has_empty_slot = {

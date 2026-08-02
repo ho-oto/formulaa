@@ -1280,7 +1280,12 @@ impl Editor {
             *cells = grown;
             Some((nr, nc, r0 * nc + j0))
         });
-        self.grid = Some(GridSel::Cells { anchor: None });
+        // A cell paste is also reachable from a plain ^V outside grid
+        // mode: land on the pasted cell there, but do not switch the
+        // mode on behind the user's back.
+        if self.grid.is_some() {
+            self.grid = Some(GridSel::Cells { anchor: None });
+        }
     }
 
     /// `\mid`: split the current Delim segment at the cursor, inserting a

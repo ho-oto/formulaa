@@ -5,7 +5,7 @@
 //! horizontal extent of limits explicit and the two now differ.
 //! Run: cargo run --example ambig
 
-use mascii::ast::{Node, Row};
+use mascii::ast::{Node, Row, normalize};
 use mascii::parse::parse;
 use mascii::render::{RenderCtx, render_row};
 
@@ -50,7 +50,9 @@ fn main() {
     let b = show("AST2  \\int_{\\sum_{n=1}}", &ast2);
 
     assert_ne!(a, b, "the band notation must keep these distinguishable");
-    assert_eq!(parse(&a).unwrap(), ast1);
-    assert_eq!(parse(&b).unwrap(), ast2);
+    // …against the normal form, since that is what the picture spells
+    // (an empty-limit band renders bare, so it reads back bare).
+    assert_eq!(parse(&a).unwrap(), normalize(&ast1));
+    assert_eq!(parse(&b).unwrap(), normalize(&ast2));
     println!("distinct pictures, both parse back to their own AST ✓");
 }
