@@ -943,6 +943,25 @@ fn jump_from_a_grid_gap_measures_the_undecorated_picture() {
     assert_roundtrip(&ed, &[]);
 }
 
+/// `\!` is \cancel, and `!`-prefixed spellings are the slashed
+/// relations (`\!=` is ≠, `\!in` is ∉ — the slash through the whole
+/// operator).
+#[test]
+fn bang_is_cancel_and_negates_relations() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"ab S-Left \!");
+    assert_eq!(latex(&ed), "a\\cancel{b}");
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a \!= b");
+    assert_eq!(latex(&ed), "a\\ne b");
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a \!in B");
+    assert_eq!(latex(&ed), "a\\notin B");
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a \!le b");
+    assert_eq!(latex(&ed), "a\\nleq b");
+}
+
 /// \rm of a digit has no upright/italic distinction to preserve: it
 /// canonicalizes to the plain atom, so gluing it to a letter cannot
 /// break the roundtrip (Roman('1') next to an alpha once did).

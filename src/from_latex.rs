@@ -412,6 +412,8 @@ impl Parser {
                         '⊇' => '⊉',
                         '∼' => '≁',
                         '≅' => '≇',
+                        '∥' => '∦',
+                        '∃' => '∄',
                         // Negations without a KaTeX/MathJax spelling
                         // (⊄ ≢ ≉ …) keep the bare relation instead.
                         _ => return None,

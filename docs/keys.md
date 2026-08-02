@@ -149,7 +149,7 @@ Backspace は中身クリアではなく構造の削除)。
 | `\frac` | 分数(選択中はそれが分子に) |
 | `\sqrt` `\cbrt` `\qdrt` | √ ∛ ∜ |
 | `\tex` / `\latex` | LaTeX 入力ボックス: 打ち込むかペーストして Enter で確定(best-effort 読み込み。KaTeX/MathJax 方言、不明コマンドは無視) |
-| `\cancel` | 打ち消し(選択を包める) |
+| `\cancel` / `\!` | 打ち消し(選択を包める) |
 | `\matrix` / `\array` / `\smallmatrix` | 裸の格子(2×2。`\matrix34` で 3行×4列) |
 | `\pmatrix` `\bmatrix` `\Bmatrix` `\vmatrix` `\Vmatrix` `\cases` `\rcases` | 括弧付きの行列(同様に `\cases32` などサイズ指定可)。`\Vmatrix` は ‖ ‖ |
 | `\overbrace` `\underbrace` | ╭──╮ / ╰──╯(ラベル付き) |
@@ -188,6 +188,9 @@ Backspace は中身クリアではなく構造の削除)。
 
 `\alpha` `\infty` `\to` `\in` `\bbR` … 約450綴りの記号+スタイル族の合成(`->` `+-` `oo` のような
 ASCII 名も)。上の名前と重ならなければすべて記号テーブル引きです。
+演算子全体に斜線が付く否定形は `!` 前置でも綴れます:
+`\!=`→≠ `\!in`→∉ `\!le`→≰ `\!sim`→≁ `\!exists`→∄ など
+(正式名は `\ne` `\notin` `\nleq` `\nsim` `\nexists` …)。
 
 ## モードの重なり(内部構造)
 

@@ -396,7 +396,7 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
             num: vec![],
             den: vec![],
         }),
-        "cancel" => wrap(Node::Cancel { arg: vec![] }),
+        "cancel" | "!" => wrap(Node::Cancel { arg: vec![] }),
         "norm" | "Vert" => ins(Node::Norm { arg: vec![] }),
         "overbrace" | "underbrace" => wrap(Node::Brace {
             over: cmd == "overbrace",
