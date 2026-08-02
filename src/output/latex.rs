@@ -1,8 +1,9 @@
 //! Serialize the AST to a LaTeX string.
 //!
-//! Symbols with a curated LaTeX name become `\name`; other Unicode symbols
-//! (from the large generated table) are emitted verbatim, which assumes a
-//! unicode-math toolchain (lualatex/xelatex).
+//! Every symbol the format can spell has a LaTeX name (curated in
+//! `symbols::atoms`, or derived for a styled letter) — the "typeable
+//! implies spellable" invariant, pinned by a test in `symbols`. The
+//! raw-emit fallback below is therefore unreachable for atoms.
 
 use crate::ast::{Node, Row};
 

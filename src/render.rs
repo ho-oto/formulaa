@@ -10,10 +10,7 @@ use crate::glyphs::{
     COL_MARK_BOT, COL_MARK_TOP, CROSSING, HEAD_LEFT, HEAD_RIGHT, MID, NORM, ROW_JUNCTION_L,
     ROW_JUNCTION_R, STEM, brace_corners, lattice_char,
 };
-pub use crate::symbols::scripts::{
-    subscript_char, superscript_char, unsubscript_char, unsuperscript_char,
-};
-use crate::symbols::{Accent, ColDelim, Delim, DrawnForm};
+use crate::symbols::{Accent, ColDelim, Delim, DrawnForm, subscript_char, superscript_char};
 
 // The structural glyph vocabulary lives in crate::glyphs; re-exported
 // here for the callers that grew up importing it from the render side.
@@ -327,10 +324,6 @@ impl RenderCtx {
     pub fn canonical() -> Self {
         RenderCtx { italic: true }
     }
-
-    fn placeholder(&self) -> char {
-        PLACEHOLDER
-    }
 }
 
 /// Cursor position relative to the row being rendered: the remaining path
@@ -444,8 +437,8 @@ pub fn render_row(
         let mut b = match (cursor_col, placeholder, row.is_empty()) {
             // Caret on the placeholder cell; the geometry matches the
             // cursor-less render.
-            (Some(_), _, _) => Block::from_chars(vec![ctx.placeholder()]).with_caret(0, 0),
-            (None, true, _) | (None, false, false) => Block::from_chars(vec![ctx.placeholder()]),
+            (Some(_), _, _) => Block::from_chars(vec![PLACEHOLDER]).with_caret(0, 0),
+            (None, true, _) | (None, false, false) => Block::from_chars(vec![PLACEHOLDER]),
             (None, false, true) => Block::empty(),
         };
         for n in row {
@@ -522,7 +515,7 @@ pub fn render_row(
         // (markers are invisible to "start of a row").
         let first_real = row.iter().position(|n| !is_marker_node(n)).unwrap_or(0);
         if i == first_real && info.script {
-            block = hcat(&[Block::from_chars(vec![ctx.placeholder()]), block]);
+            block = hcat(&[Block::from_chars(vec![PLACEHOLDER]), block]);
         }
         blocks.push((block, info));
     }
@@ -652,7 +645,7 @@ pub fn render_row(
         };
         let anchor = matches!(prev, Some(p) if p.cancel) && info.script_2d;
         if anchor {
-            spaced.push(Block::from_chars(vec![ctx.placeholder()]));
+            spaced.push(Block::from_chars(vec![PLACEHOLDER]));
         } else if need {
             spaced.push(Block::from_chars(vec![' ']));
         }
@@ -1228,8 +1221,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             // pair must outsize the inner one — whenever the body holds
             // a full-height ‖ column, grow the extent by a row on each
             // side (the parser groups ‖ columns by vertical extent).
-            let norm = is_norm;
-            let inner_norm_full = norm
+            let inner_norm_full = is_norm
                 && (0..body.width()).any(|c| {
                     body.lines
                         .iter()
@@ -1353,7 +1345,6 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
 /// - one column: ├ ┤ junctions in the delimiter columns
 ///
 /// The older ┬┴+junction mixed shape stays legal input; fmt tightens it.
-#[allow(clippy::too_many_arguments)]
 fn render_fused_grid(
     left: char,
     right: char,

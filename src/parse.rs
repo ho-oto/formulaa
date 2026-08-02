@@ -17,8 +17,9 @@ use crate::glyphs::{
     OP_BAND, OVERLINE_CORNER, PLACEHOLDER, ROW_JUNCTION_L, ROW_JUNCTION_R, STEM, is_stem_glyph,
     lattice_char,
 };
-use crate::render::{unstyle_char, unsubscript_char, unsuperscript_char};
+use crate::render::unstyle_char;
 use crate::symbols::{ColDelim, Delim};
+use crate::symbols::{unsubscript_char, unsuperscript_char};
 
 fn radical_index(c: char) -> Option<crate::symbols::Radical> {
     crate::symbols::Radical::of_glyph(c)
@@ -168,7 +169,6 @@ fn open_spec(c: char) -> Option<char> {
 /// but blanks and its marker (a nested structure always shows some other
 /// glyph on that row). Returns (marker_cols, marker_rows, t, b) with the
 /// cell area rows t..=b.
-#[allow(clippy::type_complexity)]
 fn fused_grid_markers(
     g: &Grid,
     top: usize,
@@ -517,13 +517,10 @@ fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
 /// (relative to rect.l). Such columns are never treated as matrix cell
 /// separators or script-chunk boundaries even when fully blank — this is
 /// what keeps a nested matrix's internal gaps from splitting its parent.
-fn protected_cols(g: &Grid, rect: Rect, skip_row: Option<usize>) -> Vec<bool> {
+fn protected_cols(g: &Grid, rect: Rect) -> Vec<bool> {
     let w = rect.r - rect.l + 1;
     let mut protected = vec![false; w];
     for r in rect.rows() {
-        if Some(r) == skip_row {
-            continue;
-        }
         let mut depth: i32 = 0;
         for c in rect.cols() {
             let side = delim_side(g, r, c);
@@ -710,7 +707,6 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
 
 /// Parse a region. `baseline` may be passed down when the caller already
 /// knows it (paren/sqrt interiors share the caller's baseline row).
-#[allow(clippy::too_many_arguments)]
 fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) -> Result<Row> {
     let rect = match trim(g, rect) {
         Some(r) => r,
@@ -907,7 +903,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
                 // ┈ without spaces takes over/under limits (`┈∑┈`,
                 // `┈lim┈`, `┈argmax┈`). The piece is exactly one run, so
                 // the bare picture reads back as exactly one node.
-                let (pieces, end) = scan_band(g, rect, bl, col, OP_BAND)?;
+                let (pieces, end) = scan_band(g, rect, bl, col)?;
                 let [(l0, r0)] = pieces[..] else {
                     return err(
                         if pieces.is_empty() {
@@ -1298,7 +1294,7 @@ fn parse_script_run(
         ),
     ] {
         let Some(side) = side_rect else { continue };
-        let protected = protected_cols(g, side, None);
+        let protected = protected_cols(g, side);
         // A segment boundary is a blank column that belongs to an
         // opposite-side script. Columns blank on BOTH sides are internal
         // spacers/padding of a single script argument and must not split
@@ -1350,29 +1346,23 @@ fn parse_script_run(
 /// band char. Returns the piece spans and the column of the final band
 /// char. A piece not closed by another band char is an error (canonical
 /// bands always are).
-fn scan_band(
-    g: &Grid,
-    rect: Rect,
-    bl: usize,
-    col: usize,
-    band: char,
-) -> Result<(Vec<(usize, usize)>, usize)> {
+fn scan_band(g: &Grid, rect: Rect, bl: usize, col: usize) -> Result<(Vec<(usize, usize)>, usize)> {
     let mut pieces = Vec::new();
-    let mut end = scan_while(g, bl, col, rect.r, |c| c == band);
+    let mut end = scan_while(g, bl, col, rect.r, |c| c == OP_BAND);
     loop {
         let pstart = end + 1;
         if pstart > rect.r || g.at(bl, pstart) == ' ' {
             break;
         }
         let mut pend = pstart;
-        while pend < rect.r && g.at(bl, pend + 1) != ' ' && g.at(bl, pend + 1) != band {
+        while pend < rect.r && g.at(bl, pend + 1) != ' ' && g.at(bl, pend + 1) != OP_BAND {
             pend += 1;
         }
-        if pend == rect.r || g.at(bl, pend + 1) != band {
+        if pend == rect.r || g.at(bl, pend + 1) != OP_BAND {
             return err("band piece without a closing band char", bl, pstart);
         }
         pieces.push((pstart, pend));
-        end = scan_while(g, bl, pend + 1, rect.r, |c| c == band);
+        end = scan_while(g, bl, pend + 1, rect.r, |c| c == OP_BAND);
     }
     Ok((pieces, end))
 }
@@ -1827,7 +1817,6 @@ fn parse_lattice(g: &Grid, rect: Rect, col: usize, in_cancel: bool) -> Result<(N
 /// full-height │ middles, matching right column (possibly of a different
 /// family — mismatched pairs are legal). Returns the node and the close
 /// column.
-#[allow(clippy::too_many_arguments)]
 fn parse_delim(
     g: &Grid,
     rect: Rect,
@@ -1989,7 +1978,7 @@ fn parse_delim(
 /// extent (a √ stem never spans the extent — its top row is the overline
 /// row — and a nested delimiter's middles are bracket-protected).
 fn mid_columns(g: &Grid, interior: Rect) -> Vec<usize> {
-    let protected = protected_cols(g, interior, None);
+    let protected = protected_cols(g, interior);
     interior
         .cols()
         .filter(|&c| interior.rows().all(|r| g.at(r, c) == MID) && !protected[c - interior.l])

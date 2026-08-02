@@ -12,7 +12,7 @@ TUI エディタ相当の構造編集ができる」。数式は Markdown の
                      │  wasm-pack
                      ▼
         wasm/  mascii-wasm (wasm-bindgen バインディング)
-          ├── aa_to_latex / aa_to_typst / aa_format / aa_check
+          ├── aa_to_latex / latex_to_aa / aa_format / aa_check
           └── MasciiEditor: key(key, shift) で駆動する構造エディタ
                      │
    ┌─────────────────┼──────────────────────┐
@@ -22,7 +22,7 @@ editors/vscode   editors/obsidian       editors/zed
 ```
 
 - エディタ本体のロジック(カーソル・コマンド・選択)はすべて Rust 側
-  (`src/editor.rs`)にあり、JS はキーイベント転送と画面表示だけを行う。
+  (`src/editor/mod.rs`)にあり、JS はキーイベント転送と画面表示だけを行う。
   `MasciiEditor.screen()` はカーソル `▌`・選択 `⟦ ⟧` 込みのテキストを返す。
 - フェンス検出は各エディタ側で行う(````math` / ````mascii`)。
   確定時にブロック内容を正準 AA で書き戻す。
@@ -47,7 +47,7 @@ ratatui(TUI 専用、feature "tui")は wasm ビルドに含まれない。
 ## 動作確認の状況
 
 - `mascii-wasm` は wasm32 でビルドでき、Node 上で
-  変換 API と `MasciiEditor`(キー駆動で x²+1/2 を構築 → screen/aa/latex/typst)
+  変換 API と `MasciiEditor`(キー駆動で x²+1/2 を構築 → screen/aa/latex)
   の動作を確認済み。
 - VSCode / Obsidian 拡張は**プロトタイプ**(コードレビュー済み・実機未検証)。
   受け入れテスト: 拡張を dev モードで起動 → ```math ブロックで

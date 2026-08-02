@@ -115,8 +115,12 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 - ratatui のイベントは `KeyEventKind::Press` のみ処理(Windows の重複対策)。
 - ジャンプ(Ctrl+G)・ブロック選択(Ctrl+B)・選択範囲は私用領域文字の
   マーカー原子を表示用クローン AST に挿入する方式(editor.rs `decorated`)。
-  U+E000–E0FF は表示マーカー予約(選択/^B/ジャンプに加え、グリッド編集の
-  セル/レーン選択ペア・フレーム角・隙間ゴーストが E0F4–E0FF を使う)。
+  私用領域 **U+E000–F8FF 全域**が表示用予約(`render::is_display_marker`):
+  E000+ ジャンプ/^B ラベル、E0F0–E0FF 選択・グリッドのセル/レーン対・
+  フレーム角・隙間ゴースト、E100+ ランク、F000+ 座標プローブ、
+  F8F0/F8F1 は tui のボックス囲み。**生のまま端末に出してはならない**
+  (フォントが私用領域にロゴを持つ — decorate_line が描画前に必ず
+  グリフへ解決する)。
   マーカー原子は**幅ゼロで描画**され
   `Block.marks` として伝搬(レイアウト不変)。TUI 側は marks から
   ラベル重ね書きと背景ボックスを塗る(tui.rs `marker_boxes`)。

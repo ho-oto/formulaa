@@ -621,8 +621,8 @@ mod tests {
             | '˳'                   // U+02F3 MODIFIER LETTER LOW RING: ring
             | '․'                   // U+2024 ONE DOT LEADER: dot / ddot (․․)
             | '￫' // U+FFEB HALFWIDTH RIGHTWARDS ARROW: vec
-        ) || crate::render::unsuperscript_char(c).is_some()
-            || crate::render::unsubscript_char(c).is_some()
+        ) || crate::symbols::scripts::unsuperscript_char(c).is_some()
+            || crate::symbols::scripts::unsubscript_char(c).is_some()
     }
 
     /// Every character the tables hand out is an honest atom: no

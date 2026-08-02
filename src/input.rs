@@ -70,7 +70,7 @@ impl Editor {
     /// the key (Some) or lets it fall through (None). Adding a mode =
     /// adding one handler here.
     fn dispatch(&mut self, key: Key, shift: bool, ctrl: bool) -> Effect {
-        if let Some(e) = self.free_keys(key, shift, ctrl) {
+        if let Some(e) = self.free_keys(key, ctrl) {
             return e;
         }
         if let Some(e) = self.jump_keys(key, ctrl) {
@@ -141,7 +141,7 @@ impl Editor {
     /// Free-cursor mode: arrows move the cell cursor, Enter snaps.
     /// ^G toggles jump markers; while they are up, a label letter or
     /// the arrows+Enter jump there and free motion continues.
-    fn free_keys(&mut self, key: Key, _shift: bool, ctrl: bool) -> Option<Effect> {
+    fn free_keys(&mut self, key: Key, ctrl: bool) -> Option<Effect> {
         self.free.as_ref()?;
         let markers = self.jump.is_some();
         match key {
@@ -199,7 +199,6 @@ impl Editor {
     /// Space separates band pieces in \op* (`ess sup` → ┈ess┈sup┈) but
     /// simply commits a plain \op (one word is the whole name there).
     fn op_box_keys(&mut self, key: Key, ctrl: bool) -> Option<Effect> {
-        use crate::editor::BoxKind;
         let kind = self.op_entry.as_ref()?.0;
         // What may be typed into the box: operator/roman names are
         // alphanumerics plus dots (i.i.d.); \text takes any glyph but

@@ -10,6 +10,7 @@
 //! - [`accents`] — accent marks and their LaTeX commands
 //! - [`delims`] — the delimiter pairs (glyph columns, LaTeX)
 //! - [`arrows`] — the stretchy labeled arrows
+//! - [`radicals`] — the root signs
 //! - [`scripts`] — the inline super/subscript bijections
 //!
 //! Everything is re-exported flat (`symbols::is_atom`), so callers
@@ -25,11 +26,13 @@ pub mod radicals;
 pub mod scripts;
 
 pub use accents::*;
+pub use alphabets::*;
 pub use arrows::*;
 pub use atoms::*;
 pub use delims::*;
 pub use funcs::*;
 pub use radicals::*;
+pub use scripts::*;
 
 /// Resolve an input spelling to its character: the input table
 /// (`NAMES`, canonical spellings and their aliases alike), then the

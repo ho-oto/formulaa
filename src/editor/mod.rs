@@ -69,7 +69,6 @@ pub struct Editor {
     /// ^G labeled stay visible until the next input, so toggling ^G
     /// twice does not shift the layout).
     pub ghost: Vec<Vec<(usize, Field)>>,
-    /// Structure view: paint every block's background by nesting depth (Ctrl+O).
     /// Selection anchor column in the current row (Shift+←/→). The selected
     /// node range is between the anchor and the cursor column.
     pub select_anchor: Option<usize>,

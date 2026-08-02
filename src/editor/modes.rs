@@ -341,7 +341,6 @@ impl Editor {
     }
 
     pub fn start_jump(&mut self) {
-        use std::cmp::Reverse;
         let cands = self.jump_candidates();
         let positions: Vec<&CursorPos> = cands.iter().map(|c| &c.pos).collect();
         let coords = self.position_coords(&positions);
@@ -451,7 +450,6 @@ impl Editor {
             .map(|(rank, &i)| (rank, cands[i].pos.clone()))
             .collect();
         picked.sort_by_key(|&(rank, _)| chosen[rank]);
-        let _ = Reverse(0); // (kept for potential ordering tweaks)
         self.info("jump: label key / arrows + Enter (Esc cancels)");
         self.jump = Some(picked);
         self.jump_selected = 0;

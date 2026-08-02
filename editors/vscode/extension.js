@@ -143,15 +143,15 @@ function editFormula(context) {
   });
 }
 
-async function convertSelection(kind) {
+async function convertSelection() {
   const editor = vscode.window.activeTextEditor;
   if (!editor) return;
   const text = editor.document.getText(editor.selection);
   try {
     const wasm = require('./media/pkg-node/mascii_wasm.js');
-    const out = kind === 'latex' ? wasm.aa_to_latex(text) : wasm.aa_to_typst(text);
+    const out = wasm.aa_to_latex(text);
     await vscode.env.clipboard.writeText(out);
-    vscode.window.showInformationMessage(`mascii: copied ${kind} to clipboard: ${out}`);
+    vscode.window.showInformationMessage(`mascii: copied latex to clipboard: ${out}`);
   } catch (e) {
     vscode.window.showErrorMessage(`mascii: ${e.message || e}`);
   }
@@ -160,8 +160,7 @@ async function convertSelection(kind) {
 function activate(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand('mascii.editFormula', () => editFormula(context)),
-    vscode.commands.registerCommand('mascii.toLatex', () => convertSelection('latex')),
-    vscode.commands.registerCommand('mascii.toTypst', () => convertSelection('typst'))
+    vscode.commands.registerCommand('mascii.toLatex', () => convertSelection())
   );
 }
 

@@ -5,12 +5,10 @@
 /// carries everything the rest of the crate needs to know:
 /// - `limits`: the \lim class — the minibuffer command opens a ┈band┈
 ///   with an under-limit, and ↑/↓ re-promotes a bare one
-///   (ast::promotable_base)
 /// - `spaced`: inner text for \operatorname when the name reads as
 ///   several words (`argmax` -> `arg\,max`); None = the name verbatim
 ///
-/// ∑-class *symbol* operators live in `ATOMS` (kind BigOp); multi-word
-/// \op* bases are assembled in `ast::op_words`.
+/// ∑-class *symbol* operators live in `ATOMS` (kind BigOp).
 pub struct FuncSpec {
     pub limits: bool,
     pub spaced: Option<&'static str>,

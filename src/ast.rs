@@ -263,9 +263,6 @@ pub fn row_at_mut<'a>(root: &'a mut Row, path: &[(usize, Field)]) -> &'a mut Row
     row
 }
 
-/// Canonical form: merge adjacent same-kind scripts (x^{a}^{b} == x^{ab} in
-/// the picture, so the parser can only ever return the merged form).
-/// `parse(render(x)) == normalize(x)` is the roundtrip invariant.
 /// The canonical node for an upright name standing on its own: a
 /// one-letter run is `Roman` (its picture — 'd', or a glued d𝑥 — reads
 /// back that way), so `Func` always holds 2+ letters.
@@ -277,6 +274,11 @@ fn bare_upright(name: String) -> Node {
     }
 }
 
+/// Canonical form: merge adjacent same-kind scripts (x^{a}^{b} == x^{ab} in
+/// the picture, so the parser can only ever return the merged form).
+/// `parse(render(x)) == normalize(x)` is the roundtrip invariant, and
+/// this must be idempotent — it runs again after every merge, so a rule
+/// has to land on the shape the next pass would leave alone.
 pub fn normalize(row: &Row) -> Row {
     // A band with no limits collapses to its bare base — but only when
     // the editor can lift that base back into a band (∑-class atoms and
