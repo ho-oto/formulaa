@@ -111,43 +111,32 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
     let (root, cursor) = ed.decorated();
     let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
     let block = render_root(&root, cursor_ref, &ctx);
-    let (lines, mut bg, mut cursor_cell, frame) = marker_boxes(
-        &block.lines,
+    let mut d = marker_boxes(
+        &block,
         &ed.marker_extents(),
-        &block.marks,
-        block.caret,
         ed.jump.is_some().then_some(ed.jump_selected),
         ed.block.is_some().then_some(ed.block_sel),
     );
-    let mut struck: std::collections::HashSet<(usize, usize)> =
-        block.cancel.iter().copied().collect();
-    let mut lines = lines;
     // ^F: the free cursor itself gets the prominent caret style; the
     // snap preview is the subtler colored cell.
     if let Some(f) = &ed.free {
         let (sy, sx) = f.snap_at;
-        if sy < lines.len() {
-            if sx >= lines[sy].len() {
-                lines[sy].resize(sx + 1, ' ');
-                bg[sy].resize(sx + 1, None);
-            }
-            let last = bg[sy].len().saturating_sub(1);
-            bg[sy][sx.min(last)] = Some(theme::FREE_BG);
+        if sy < d.height() {
+            d.widen(sy, sx);
+            let last = d.bg[sy].len().saturating_sub(1);
+            d.bg[sy][sx.min(last)] = Some(theme::FREE_BG);
         }
         let (fy, fx) = f.at;
-        if fy < lines.len() {
-            if fx >= lines[fy].len() {
-                lines[fy].resize(fx + 1, ' ');
-                bg[fy].resize(fx + 1, None);
-            }
-            cursor_cell = Some((fy, fx));
+        if fy < d.height() {
+            d.widen(fy, fx);
+            d.caret = Some((fy, fx));
         }
     }
 
-    overlay_minibuffer(ed, &mut lines, &mut bg, &mut struck, &mut cursor_cell);
+    overlay_minibuffer(ed, &mut d);
 
-    let width = (block.width() as u16).max(lines.iter().map(|l| l.len() as u16).max().unwrap_or(0));
-    let height = lines.len() as u16;
+    let width = (block.width() as u16).max(d.width() as u16);
+    let height = d.height() as u16;
     // A formula larger than the canvas scrolls, following the cursor
     // (the free cursor included) with a few cells of margin; one that
     // fits is centered on that axis and its scroll resets. `scroll`
@@ -171,39 +160,96 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
     let left = scroll(
         width,
         inner.width,
-        cursor_cell.map(|(_, cx)| cx),
+        d.caret.map(|(_, cx)| cx),
         &mut view.scroll_x,
     );
     let top = scroll(
         height,
         inner.height,
-        cursor_cell.map(|(cy, _)| cy),
+        d.caret.map(|(cy, _)| cy),
         &mut view.scroll_y,
     );
 
-    let mut text: Vec<Line> = Vec::with_capacity(top as usize + lines.len());
+    let mut text: Vec<Line> = Vec::with_capacity(top as usize + d.height());
     for _ in 0..top {
         text.push(Line::raw(""));
     }
     let pad = " ".repeat(left as usize);
-    for (y, (l, bgrow)) in lines.iter().zip(&bg).enumerate().skip(view.scroll_y) {
-        let ccol = cursor_cell.and_then(|(cy, cx)| (cy == y).then_some(cx));
+    let caret_style = match (ed.op_entry.is_some(), ed.free.is_some()) {
+        (true, _) => CaretStyle::Box,
+        (_, true) => CaretStyle::Free,
+        _ => CaretStyle::Normal,
+    };
+    for y in view.scroll_y..d.height() {
         let mut spans = vec![Span::raw(pad.clone())];
-        spans.extend(decorate_line(
-            l,
-            y,
-            &struck,
-            bgrow,
-            ccol,
-            ed.free.is_some(),
-            ed.op_entry.is_some(),
-            view.scroll_x,
-            frame,
-        ));
+        spans.extend(decorate_line(&d, y, caret_style, view.scroll_x));
         text.push(Line::from(spans));
     }
     f.render_widget(Paragraph::new(text), inner);
     (inner.x + left, inner.y + top)
+}
+
+/// The painted screen: the char grid plus every parallel channel that
+/// must stay the same shape as it. Growing a row, inserting a row or
+/// moving the caret goes through here, so the channels cannot drift
+/// (a preview that shifted `lines` but forgot `struck` used to paint
+/// its strikes a row off).
+struct Decor {
+    lines: Vec<Vec<char>>,
+    bg: Vec<Vec<Option<Color>>>,
+    /// Cells wearing a \cancel strike (combining U+0338 at emission,
+    /// so a strike never occupies a column of its own).
+    struck: std::collections::HashSet<(usize, usize)>,
+    caret: Option<(usize, usize)>,
+    /// The edited grid's frame rectangle (x0, x1, top, bottom).
+    frame: Option<(usize, usize, usize, usize)>,
+}
+
+impl Decor {
+    /// Widen row `y` so column `x` exists.
+    fn widen(&mut self, y: usize, x: usize) {
+        if x >= self.lines[y].len() {
+            self.lines[y].resize(x + 1, ' ');
+            self.bg[y].resize(x + 1, None);
+        }
+    }
+
+    /// Open `n` blank rows at `at`, carrying the strike channel with
+    /// them (the preview box opens a gap rather than covering the
+    /// formula).
+    fn open_rows(&mut self, at: usize, n: usize) {
+        while self.lines.len() < at {
+            self.lines.push(Vec::new());
+            self.bg.push(Vec::new());
+        }
+        for _ in 0..n {
+            self.lines.insert(at, Vec::new());
+            self.bg.insert(at, Vec::new());
+        }
+        self.struck = self
+            .struck
+            .iter()
+            .map(|&(y, x)| if y >= at { (y + n, x) } else { (y, x) })
+            .collect();
+    }
+
+    fn height(&self) -> usize {
+        self.lines.len()
+    }
+
+    fn width(&self) -> usize {
+        self.lines.iter().map(|l| l.len()).max().unwrap_or(0)
+    }
+}
+
+/// How the caret cell is painted: reverse video normally, a solid
+/// colored block for the free cursor (reverse video there would read
+/// as "the character changed color"), green while a name box is open.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CaretStyle {
+    Normal,
+    Free,
+    Box,
 }
 
 /// Turn the zero-width display annotations of a rendered block into
@@ -215,18 +261,12 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
 /// always equals the undecorated render.
 #[allow(clippy::type_complexity)]
 fn marker_boxes(
-    lines: &[Vec<char>],
+    block: &mascii::render::Block,
     extents: &[(usize, usize, usize)],
-    marks: &[(usize, usize, char)],
-    caret: Option<(usize, usize)>,
     selected: Option<usize>,
     block_selected: Option<usize>,
-) -> (
-    Vec<Vec<char>>,
-    Vec<Vec<Option<Color>>>,
-    Option<(usize, usize)>,
-    Option<(usize, usize, usize, usize)>,
-) {
+) -> Decor {
+    let (lines, marks, caret) = (&block.lines, &block.marks[..], block.caret);
     // Cell coordinates throughout — cancel strikes (combining U+0338)
     // are a separate channel applied at span emission, so a struck cell
     // never desyncs the column indexing (or splits its ligature).
@@ -484,15 +524,19 @@ fn marker_boxes(
             _ => unreachable!(),
         }
     }
+    let mut decor = Decor {
+        lines: grid,
+        bg,
+        struck: block.cancel.iter().copied().collect(),
+        caret: None,
+        frame,
+    };
     // The caret cell (padded blank at the row end).
-    let cursor_cell = caret.map(|(y, x)| {
-        if x >= grid[y].len() {
-            grid[y].resize(x + 1, ' ');
-            bg[y].resize(x + 1, None);
-        }
-        (y, x)
-    });
-    (grid, bg, cursor_cell, frame)
+    if let Some((y, x)) = caret {
+        decor.widen(y, x);
+        decor.caret = caret;
+    }
+    decor
 }
 
 /// Draw the open minibuffer as an overlay at the caret cell: the typed
@@ -500,20 +544,14 @@ fn marker_boxes(
 /// moving them (zero layout shift — the eye stays on the formula), and
 /// the caret sits after the text. With a selection active the caret is
 /// at the selection's moving end, so the overlay shows next to it.
-fn overlay_minibuffer(
-    ed: &Editor,
-    lines: &mut Vec<Vec<char>>,
-    bg: &mut Vec<Vec<Option<Color>>>,
-    struck: &mut std::collections::HashSet<(usize, usize)>,
-    cursor_cell: &mut Option<(usize, usize)>,
-) {
+fn overlay_minibuffer(ed: &Editor, d: &mut Decor) {
     // The in-place name box (\op \rm \text \tex) overlays exactly
     // like the minibuffer: content cells at the cursor, caret at the
     // box's own cursor. Drawing it as cells (not AST nodes) keeps the
     // run free of the reparse-quoting rules — no stray '…' quotes.
     if let Some((kind, buf)) = &ed.op_entry {
-        let Some((cy, cx)) = *cursor_cell else { return };
-        if cy >= lines.len() {
+        let Some((cy, cx)) = d.caret else { return };
+        if cy >= d.height() {
             return;
         }
         let content: Vec<char> = if buf.is_empty() {
@@ -529,30 +567,24 @@ fn overlay_minibuffer(
         // glyphs (no ground — same look as the ^O grid frame), content
         // on the box ground.
         let end = cx + content.len() + 2;
-        if lines[cy].len() < end + 1 {
-            lines[cy].resize(end + 1, ' ');
-            bg[cy].resize(end + 1, None);
-        }
-        lines[cy][cx] = FENDER_L;
+        d.widen(cy, end);
+        d.lines[cy][cx] = FENDER_L;
         for (i, &ch) in content.iter().enumerate() {
-            lines[cy][cx + 1 + i] = ch;
-            bg[cy][cx + 1 + i] = Some(theme::MINIBUF_BG);
+            d.lines[cy][cx + 1 + i] = ch;
+            d.bg[cy][cx + 1 + i] = Some(theme::MINIBUF_BG);
         }
-        lines[cy][end - 1] = FENDER_R;
-        *cursor_cell = Some((cy, cx + 1 + ed.op_cursor.min(content.len())));
+        d.lines[cy][end - 1] = FENDER_R;
+        d.caret = Some((cy, cx + 1 + ed.op_cursor.min(content.len())));
         return;
     }
     let Some(buf) = &ed.minibuffer else { return };
-    let Some((cy, cx)) = *cursor_cell else { return };
-    if cy >= lines.len() {
+    let Some((cy, cx)) = d.caret else { return };
+    if cy >= d.height() {
         return;
     }
     let text: Vec<char> = std::iter::once('\\').chain(buf.chars()).collect();
     let end = cx + text.len();
-    if lines[cy].len() < end + 1 {
-        lines[cy].resize(end + 1, ' ');
-        bg[cy].resize(end + 1, None);
-    }
+    d.widen(cy, end);
     // Live feedback: the overlay turns red as soon as the typed name
     // is not something \execute knows (it goes back on completion).
     let color = if ed.command_known(buf) {
@@ -561,8 +593,8 @@ fn overlay_minibuffer(
         theme::MINIBUF_BAD_BG
     };
     for (i, &ch) in text.iter().enumerate() {
-        lines[cy][cx + i] = ch;
-        bg[cy][cx + i] = Some(color);
+        d.lines[cy][cx + i] = ch;
+        d.bg[cy][cx + i] = Some(color);
     }
     // The command previews what committing would insert, as a small
     // box right under the typed name — a symbol as its one character,
@@ -573,32 +605,18 @@ fn overlay_minibuffer(
     if let Some(row) = ed.command_preview_row() {
         use mascii::render::{RenderCtx, render_root};
         let block = render_root(&row, None, &RenderCtx::canonical());
-        let h = block.height();
         let at = cy + 1;
-        while lines.len() < at {
-            lines.push(Vec::new());
-            bg.push(Vec::new());
-        }
-        for _ in 0..h {
-            lines.insert(at, Vec::new());
-            bg.insert(at, Vec::new());
-        }
-        *struck = struck
-            .iter()
-            .map(|&(y, x)| if y >= at { (y + h, x) } else { (y, x) })
-            .collect();
+        d.open_rows(at, block.height());
         for (dy, bline) in block.lines.iter().enumerate() {
             let y = at + dy;
-            let need = cx + bline.len();
-            lines[y].resize(need, ' ');
-            bg[y].resize(need, None);
+            d.widen(y, cx + bline.len());
             for (dx, &ch) in bline.iter().enumerate() {
-                lines[y][cx + dx] = ch;
-                bg[y][cx + dx] = Some(theme::PREVIEW_BG);
+                d.lines[y][cx + dx] = ch;
+                d.bg[y][cx + dx] = Some(theme::PREVIEW_BG);
             }
         }
     }
-    *cursor_cell = Some((cy, end));
+    d.caret = Some((cy, end));
 }
 
 /// Turn a rendered cell row into spans: private-use marker chars become
@@ -633,36 +651,26 @@ fn is_delim_piece(c: char) -> bool {
         || is_brace_corner(c)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn decorate_line(
-    line: &[char],
-    y: usize,
-    struck: &std::collections::HashSet<(usize, usize)>,
-    bg: &[Option<Color>],
-    cursor: Option<usize>,
-    free_caret: bool,
-    box_caret: bool,
-    scroll_x: usize,
-    frame: Option<(usize, usize, usize, usize)>,
-) -> Vec<Span<'static>> {
+fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec<Span<'static>> {
+    let (line, bg) = (&d.lines[y], &d.bg[y]);
+    let cursor = d.caret.and_then(|(cy, cx)| (cy == y).then_some(cx));
     // The ordinary caret is terminal-style reverse video; the free
     // cursor is a solid colored block instead (reverse video would swap
     // the tint onto the glyph, which reads as "the character changed
     // color", not "the cursor changed color").
-    let cursor_style = if box_caret {
+    let cursor_style = match caret {
         // Inside a name box: the caret turns green so the modal layer
         // is visible at the cursor itself.
-        Style::default()
+        CaretStyle::Box => Style::default()
             .fg(theme::BOX_CURSOR_FG)
             .bg(theme::BOX_CURSOR_BG)
-            .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK)
-    } else if free_caret {
-        Style::default()
+            .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK),
+        CaretStyle::Free => Style::default()
             .fg(theme::FREE_CURSOR_FG)
             .bg(theme::FREE_CURSOR_BG)
-            .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK)
-    } else {
-        Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD | Modifier::SLOW_BLINK)
+            .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK),
+        CaretStyle::Normal => Style::default()
+            .add_modifier(Modifier::REVERSED | Modifier::BOLD | Modifier::SLOW_BLINK),
     };
     let label_style = Style::default()
         .fg(theme::LABEL_FG)
@@ -696,7 +704,7 @@ fn decorate_line(
             _ if is_display_marker(c) => ' ',
             _ => c,
         };
-        let cell = if struck.contains(&(y, i)) {
+        let cell = if d.struck.contains(&(y, i)) {
             format!("{}\u{338}", shown)
         } else {
             shown.to_string()
@@ -706,7 +714,7 @@ fn decorate_line(
             // the insertion point.
             flush(&mut buf, buf_bg, &mut spans);
             let style = match cell_bg {
-                Some(color) if !free_caret => cursor_style.bg(color),
+                Some(color) if caret != CaretStyle::Free => cursor_style.bg(color),
                 _ => cursor_style,
             };
             spans.push(Span::styled(cell, style));
@@ -736,7 +744,7 @@ fn decorate_line(
                 None => label_style,
             };
             spans.push(Span::styled(cell, style));
-        } else if frame.is_some_and(|(o, close, t, b)| {
+        } else if d.frame.is_some_and(|(o, close, t, b)| {
             // The edited grid's frame recolors while grid mode is on.
             // The rectangle is exact (render-placed corners): lattice
             // glyphs recolor anywhere inside it, delimiter pieces only
@@ -791,7 +799,7 @@ mod tests {
         let v = render(&ed, 24, 12);
         assert!(v.scroll_x > 0, "no horizontal scroll: {}", v.scroll_x);
         assert_eq!(v.scroll_y, 0);
-        // Tall: many display lines, cursor on the last one.
+        // Tall: many display d.lines, cursor on the last one.
         let mut ed = Editor::new();
         for _ in 0..12 {
             ed.input(Key::Char('x'), false, false);
@@ -822,27 +830,20 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let (lines, bg, _, _) = marker_boxes(
-            &block.lines,
-            &ed.marker_extents(),
-            &block.marks,
-            block.caret,
-            None,
-            Some(ed.block_sel),
-        );
+        let d = marker_boxes(&block, &ed.marker_extents(), None, Some(ed.block_sel));
         // Left delimiter column = outer (Delim) shade; some interior
         // cell = the highlighted innermost (Array) color. The baseline
         // cell holds a label, which keeps the label ground instead of
         // the box shade (that is what makes it readable).
         let row = block.baseline;
         assert_eq!(
-            bg[0][0],
+            d.bg[0][0],
             Some(theme::DEPTH_BG[1]),
             "delim column shade\n{:?}",
-            lines
+            d.lines
         );
-        assert_eq!(bg[row][0], Some(theme::LABEL_BG), "label ground");
-        let inner = bg[row][2..lines[row].len() - 1]
+        assert_eq!(d.bg[row][0], Some(theme::LABEL_BG), "label ground");
+        let inner = d.bg[row][2..d.lines[row].len() - 1]
             .iter()
             .filter_map(|c| *c)
             .collect::<Vec<_>>();
@@ -862,15 +863,13 @@ mod tests {
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let ctx = RenderCtx { italic: true };
         let block = render_root(&root, cursor_ref, &ctx);
-        let (lines, _, _, _) = marker_boxes(
-            &block.lines,
+        let d = marker_boxes(
+            &block,
             &ed.marker_extents(),
-            &block.marks,
-            block.caret,
             ed.jump.is_some().then_some(ed.jump_selected),
             ed.block.is_some().then_some(ed.block_sel),
         );
-        lines.into_iter().map(String::from_iter).collect()
+        d.lines.into_iter().map(String::from_iter).collect()
     }
 
     /// The full grid-mode display pipeline: selected cells paint the
@@ -882,15 +881,7 @@ mod tests {
             let (root, cursor) = ed.decorated();
             let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
             let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-            let (_, bg, _, _) = marker_boxes(
-                &block.lines,
-                &ed.marker_extents(),
-                &block.marks,
-                block.caret,
-                None,
-                None,
-            );
-            bg
+            marker_boxes(&block, &ed.marker_extents(), None, None)
         };
         let mut ed = Editor::new();
         for c in "\\bmatrix a".chars() {
@@ -898,65 +889,58 @@ mod tests {
         }
         ed.input(Key::Char('o'), false, true); // ^O
         // Cell cursor: the current (top-left) cell is painted.
-        let bg = bg_of(&ed);
-        let painted = bg
-            .iter()
-            .flatten()
-            .filter(|c| **c == Some(theme::SELECTION_BG))
-            .count();
+        let d = bg_of(&ed);
+        let painted =
+            d.bg.iter()
+                .flatten()
+                .filter(|c| **c == Some(theme::SELECTION_BG))
+                .count();
         assert!(painted > 0, "cell cursor paints its cell");
         // Column mode on a gap: the green ghost lane appears.
         ed.input(Key::Char('|'), false, false);
         ed.input(Key::Left, false, false); // gap 0
-        let bg = bg_of(&ed);
-        let green = bg
-            .iter()
-            .flatten()
-            .filter(|c| **c == Some(theme::GRID_INSERT_BG))
-            .count();
+        let d = bg_of(&ed);
+        let green =
+            d.bg.iter()
+                .flatten()
+                .filter(|c| **c == Some(theme::GRID_INSERT_BG))
+                .count();
         assert!(green > 0, "gap cursor paints the ghost lane");
         // Back on a column: the lane band stretches to the matrix
         // region's top and bottom edges — the reach (not a second
         // color) is what tells "the column itself" apart from a
         // cell selection.
         ed.input(Key::Right, false, false);
-        let bg = bg_of(&ed);
-        let sel_rows: Vec<usize> = bg
-            .iter()
-            .enumerate()
-            .filter(|(_, row)| row.contains(&Some(theme::SELECTION_BG)))
-            .map(|(y, _)| y)
-            .collect();
+        let d = bg_of(&ed);
+        let sel_rows: Vec<usize> =
+            d.bg.iter()
+                .enumerate()
+                .filter(|(_, row)| row.contains(&Some(theme::SELECTION_BG)))
+                .map(|(y, _)| y)
+                .collect();
         assert!(
             sel_rows.len() >= 3,
             "column lane spans every display row: {:?}",
             sel_rows
         );
-        // The frame rect is reported while grid mode is on (the draw
+        // The d.frame rect is reported while grid mode is on (the draw
         // path recolors the lattice glyphs inside it).
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let (_, _, _, frame) = marker_boxes(
-            &block.lines,
-            &ed.marker_extents(),
-            &block.marks,
-            block.caret,
-            None,
-            None,
-        );
-        assert!(frame.is_some(), "grid mode reports its frame rect");
+        let d = marker_boxes(&block, &ed.marker_extents(), None, None);
+        assert!(d.frame.is_some(), "grid mode reports its d.frame rect");
         // The gap's green bar runs unbroken through the lattice rows:
         // every display row between the first and last green cell has
         // green in it (a 2-row matrix has a separator row between).
         ed.input(Key::Left, false, false); // back to gap 0
-        let bg = bg_of(&ed);
-        let green_rows: Vec<usize> = bg
-            .iter()
-            .enumerate()
-            .filter(|(_, row)| row.contains(&Some(theme::GRID_INSERT_BG)))
-            .map(|(y, _)| y)
-            .collect();
+        let d = bg_of(&ed);
+        let green_rows: Vec<usize> =
+            d.bg.iter()
+                .enumerate()
+                .filter(|(_, row)| row.contains(&Some(theme::GRID_INSERT_BG)))
+                .map(|(y, _)| y)
+                .collect();
         assert!(green_rows.len() >= 3, "green spans rows: {:?}", green_rows);
         let (lo, hi) = (green_rows[0], *green_rows.last().unwrap());
         assert_eq!(
@@ -968,26 +952,26 @@ mod tests {
         // The column band is strictly wider than the same column's
         // cell selection: it claims the slot padding, which is what
         // keeps "the column itself" visible as such in a fused matrix.
-        let width_at = |bg: &Vec<Vec<Option<Color>>>, y: usize| {
-            bg[y]
+        let width_at = |d: &Decor, y: usize| {
+            d.bg[y]
                 .iter()
                 .filter(|c| **c == Some(theme::SELECTION_BG))
                 .count()
         };
         ed.input(Key::Right, false, false); // gap 0 -> column 0
-        let bg = bg_of(&ed);
-        let lane_row = bg
-            .iter()
-            .position(|row| row.contains(&Some(theme::SELECTION_BG)))
-            .unwrap();
-        let lane_w = width_at(&bg, lane_row);
+        let d = bg_of(&ed);
+        let lane_row =
+            d.bg.iter()
+                .position(|row| row.contains(&Some(theme::SELECTION_BG)))
+                .unwrap();
+        let lane_w = width_at(&d, lane_row);
         ed.input(Key::Up, false, false); // demote: full-column cells
-        let bg = bg_of(&ed);
-        let cells_row = bg
-            .iter()
-            .position(|row| row.contains(&Some(theme::SELECTION_BG)))
-            .unwrap();
-        let cells_w = width_at(&bg, cells_row);
+        let d = bg_of(&ed);
+        let cells_row =
+            d.bg.iter()
+                .position(|row| row.contains(&Some(theme::SELECTION_BG)))
+                .unwrap();
+        let cells_w = width_at(&d, cells_row);
         assert!(
             lane_w > cells_w,
             "lane band wider than cell band: {} vs {}",
@@ -996,9 +980,9 @@ mod tests {
         );
     }
 
-    /// The frame survives a gap cursor on the matrix's baseline row:
-    /// the gap's ghost marks share that row with the frame pair, and
-    /// pairing must not let a ghost mark satisfy the frame close.
+    /// The d.frame survives a gap cursor on the matrix's baseline row:
+    /// the gap's ghost marks share that row with the d.frame pair, and
+    /// pairing must not let a ghost mark satisfy the d.frame close.
     #[test]
     fn frame_survives_a_middle_row_gap() {
         let mut ed = Editor::new();
@@ -1011,21 +995,14 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let (_, _, _, frame) = marker_boxes(
-            &block.lines,
-            &ed.marker_extents(),
-            &block.marks,
-            block.caret,
-            None,
-            None,
-        );
-        let (o, close, t, b) = frame.expect("frame rect survives the gap row");
+        let d = marker_boxes(&block, &ed.marker_extents(), None, None);
+        let (o, close, t, b) = d.frame.expect("d.frame rect survives the gap row");
         assert!(close - o >= 6, "full-width frame: {:?}", (o, close));
         assert!(b - t >= 2, "full-height frame: {:?}", (t, b));
     }
 
     /// A fused matrix (pmatrix/bmatrix) recolors BOTH delimiter
-    /// columns as its frame — the markers sit just inside them.
+    /// columns as its d.frame — the markers sit just inside them.
     #[test]
     fn fused_frame_recolors_both_delimiters() {
         let mut ed = Editor::new();
@@ -1036,20 +1013,13 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let (lines, bg, _, frame) = marker_boxes(
-            &block.lines,
-            &ed.marker_extents(),
-            &block.marks,
-            block.caret,
-            None,
-            None,
-        );
-        let (o, close, t, b) = frame.expect("frame rect");
+        let d = marker_boxes(&block, &ed.marker_extents(), None, None);
+        let (o, close, t, b) = d.frame.expect("d.frame rect");
         // Walk every framed row and collect which columns the draw
         // pass would tint; the leftmost and rightmost delimiter pieces
         // must both be inside the scan range.
         let mut tinted = std::collections::HashSet::new();
-        for line in lines.iter().take(b + 1).skip(t) {
+        for line in d.lines.iter().take(b + 1).skip(t) {
             for (i, &c) in line.iter().enumerate() {
                 if (is_lattice_glyph(c) && (o..=close).contains(&i))
                     || (is_delim_piece(c) && (i == o || i == close))
@@ -1058,7 +1028,6 @@ mod tests {
                 }
             }
         }
-        let _ = bg;
         assert!(
             tinted.iter().any(|c| "⎛⎜⎝(".contains(*c)),
             "left paren column tinted: {:?}",
@@ -1072,7 +1041,7 @@ mod tests {
     }
 
     /// A bare array that merely sits INSIDE a delimiter (not fused —
-    /// it has siblings) keeps the frame recolor to its own lattice:
+    /// it has siblings) keeps the d.frame recolor to its own lattice:
     /// the enclosing parens stay untinted.
     #[test]
     fn unfused_frame_leaves_the_outer_delimiter_alone() {
@@ -1099,17 +1068,10 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let (lines, _, _, frame) = marker_boxes(
-            &block.lines,
-            &ed.marker_extents(),
-            &block.marks,
-            block.caret,
-            None,
-            None,
-        );
-        let (o, close, t, b) = frame.expect("frame rect");
+        let d = marker_boxes(&block, &ed.marker_extents(), None, None);
+        let (o, close, t, b) = d.frame.expect("d.frame rect");
         let mut tinted = std::collections::HashSet::new();
-        for line in lines.iter().take(b + 1).skip(t) {
+        for line in d.lines.iter().take(b + 1).skip(t) {
             for (i, &c) in line.iter().enumerate() {
                 if (is_lattice_glyph(c) && (o..=close).contains(&i))
                     || (is_delim_piece(c) && (i == o || i == close))
@@ -1131,7 +1093,7 @@ mod tests {
     }
 
     /// The exact corner-based frame: a matrix nested inside a cell
-    /// keeps its own delimiters untinted while the outer frame colors.
+    /// keeps its own delimiters untinted while the outer d.frame colors.
     #[test]
     fn frame_rect_is_exact() {
         let mut ed = Editor::new();
@@ -1149,17 +1111,10 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let (lines, _, _, frame) = marker_boxes(
-            &block.lines,
-            &ed.marker_extents(),
-            &block.marks,
-            block.caret,
-            None,
-            None,
-        );
-        let (o, close, t, b) = frame.expect("outer frame rect");
+        let d = marker_boxes(&block, &ed.marker_extents(), None, None);
+        let (o, close, t, b) = d.frame.expect("outer d.frame rect");
         let mut tinted = std::collections::HashSet::new();
-        for line in lines.iter().take(b + 1).skip(t) {
+        for line in d.lines.iter().take(b + 1).skip(t) {
             for (i, &c) in line.iter().enumerate() {
                 if (is_lattice_glyph(c) && (o..=close).contains(&i))
                     || (is_delim_piece(c) && (i == o || i == close))
@@ -1215,20 +1170,12 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let (mut lines, mut bg, mut cursor_cell, _) = marker_boxes(
-            &block.lines,
-            &ed.marker_extents(),
-            &block.marks,
-            block.caret,
-            None,
-            None,
-        );
-        let mut struck = std::collections::HashSet::new();
-        overlay_minibuffer(&ed, &mut lines, &mut bg, &mut struck, &mut cursor_cell);
-        let (cy, _) = cursor_cell.unwrap();
-        let below: String = lines[cy + 1..].iter().flatten().collect();
+        let mut d = marker_boxes(&block, &ed.marker_extents(), None, None);
+        overlay_minibuffer(&ed, &mut d);
+        let (cy, _) = d.caret.unwrap();
+        let below: String = d.lines[cy + 1..].iter().flatten().collect();
         assert!(below.contains('α'), "symbol previews below: {:?}", below);
-        let painted = bg[cy + 1..]
+        let painted = d.bg[cy + 1..]
             .iter()
             .flatten()
             .filter(|c| **c == Some(theme::PREVIEW_BG))
@@ -1242,17 +1189,9 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let (mut lines, mut bg, mut cursor_cell, _) = marker_boxes(
-            &block.lines,
-            &ed.marker_extents(),
-            &block.marks,
-            block.caret,
-            None,
-            None,
-        );
-        let mut struck = std::collections::HashSet::new();
-        overlay_minibuffer(&ed, &mut lines, &mut bg, &mut struck, &mut cursor_cell);
-        let below: String = lines[1..].iter().flatten().collect();
+        let mut d = marker_boxes(&block, &ed.marker_extents(), None, None);
+        overlay_minibuffer(&ed, &mut d);
+        let below: String = d.lines[1..].iter().flatten().collect();
         assert!(
             below.contains('─'),
             "fraction bar in the preview: {:?}",
@@ -1263,7 +1202,7 @@ mod tests {
             "empty slots in the preview: {:?}",
             below
         );
-        let previewed = bg[1..]
+        let previewed = d.bg[1..]
             .iter()
             .flatten()
             .filter(|c| **c == Some(theme::PREVIEW_BG))
@@ -1293,20 +1232,12 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let (mut lines, mut bg, mut cursor_cell, _) = marker_boxes(
-            &block.lines,
-            &ed.marker_extents(),
-            &block.marks,
-            block.caret,
-            None,
-            None,
-        );
-        let mut struck = std::collections::HashSet::new();
-        overlay_minibuffer(&ed, &mut lines, &mut bg, &mut struck, &mut cursor_cell);
+        let mut d = marker_boxes(&block, &ed.marker_extents(), None, None);
+        overlay_minibuffer(&ed, &mut d);
         // The α preview is present AND every fraction bar still is.
-        let all: String = lines.iter().flatten().collect();
+        let all: String = d.lines.iter().flatten().collect();
         assert!(all.contains('α'), "{}", all);
-        let bars_after = lines.iter().filter(|l| l.contains(&'─')).count();
+        let bars_after = d.lines.iter().filter(|l| l.contains(&'─')).count();
         assert_eq!(bars_after, bars_before, "the bar was not painted over");
     }
 
@@ -1319,19 +1250,15 @@ mod tests {
     #[test]
     fn a_label_under_the_caret_still_prints_its_letter() {
         let label = Mark::Label { rank: 0 }.ch();
-        let struck = std::collections::HashSet::new();
         for cursor in [None, Some(0)] {
-            let spans = decorate_line(
-                &[label, Mark::Gap { cols: true }.ch()],
-                0,
-                &struck,
-                &[None, None],
-                cursor,
-                false,
-                false,
-                0,
-                None,
-            );
+            let d = Decor {
+                lines: vec![vec![label, Mark::Gap { cols: true }.ch()]],
+                bg: vec![vec![None, None]],
+                struck: std::collections::HashSet::new(),
+                caret: cursor.map(|x| (0, x)),
+                frame: None,
+            };
+            let spans = decorate_line(&d, 0, CaretStyle::Normal, 0);
             let painted: String = spans.iter().map(|s| s.content.as_ref()).collect();
             assert_eq!(painted, "a ", "cursor={:?}", cursor);
         }
@@ -1346,17 +1273,9 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let (mut lines, mut bg, mut cursor_cell, _) = marker_boxes(
-            &block.lines,
-            &ed.marker_extents(),
-            &block.marks,
-            block.caret,
-            None,
-            None,
-        );
-        let mut struck = std::collections::HashSet::new();
-        overlay_minibuffer(&ed, &mut lines, &mut bg, &mut struck, &mut cursor_cell);
-        let all: String = lines.iter().flatten().collect();
+        let mut d = marker_boxes(&block, &ed.marker_extents(), None, None);
+        overlay_minibuffer(&ed, &mut d);
+        let all: String = d.lines.iter().flatten().collect();
         assert!(
             all.contains(&format!("{}a{}", FENDER_L, FENDER_R)),
             "bracket fenders around content: {}",
@@ -1367,18 +1286,8 @@ mod tests {
         // fender's cell — the painted line must still show the bracket
         // (the caret draws the mapped glyph, not the raw sentinel).
         {
-            let (cy, cx) = cursor_cell.unwrap();
-            let spans = decorate_line(
-                &lines[cy],
-                cy,
-                &struck,
-                &bg[cy],
-                Some(cx),
-                false,
-                true,
-                0,
-                None,
-            );
+            let (cy, _) = d.caret.unwrap();
+            let spans = decorate_line(&d, cy, CaretStyle::Box, 0);
             let painted: String = spans.iter().map(|s| s.content.as_ref()).collect();
             assert!(
                 painted.contains("[a]"),
@@ -1387,21 +1296,14 @@ mod tests {
             );
         }
         // ← moves the display caret inside the box.
-        let (cy, cx) = cursor_cell.unwrap();
+        let (cy, cx) = d.caret.unwrap();
         ed.input(Key::Left, false, false);
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let (mut lines, mut bg, mut cursor_cell2, _) = marker_boxes(
-            &block.lines,
-            &ed.marker_extents(),
-            &block.marks,
-            block.caret,
-            None,
-            None,
-        );
-        overlay_minibuffer(&ed, &mut lines, &mut bg, &mut struck, &mut cursor_cell2);
-        let (cy2, cx2) = cursor_cell2.unwrap();
+        let mut d2 = marker_boxes(&block, &ed.marker_extents(), None, None);
+        overlay_minibuffer(&ed, &mut d2);
+        let (cy2, cx2) = d2.caret.unwrap();
         assert_eq!(cy2, cy);
         assert_eq!(cx2 + 1, cx, "caret stepped left inside the box");
     }
@@ -1418,27 +1320,19 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let (mut lines, mut bg, mut cursor_cell, _) = marker_boxes(
-            &block.lines,
-            &ed.marker_extents(),
-            &block.marks,
-            block.caret,
-            None,
-            None,
-        );
-        let (cy, cx) = cursor_cell.unwrap();
-        let mut struck = std::collections::HashSet::new();
-        overlay_minibuffer(&ed, &mut lines, &mut bg, &mut struck, &mut cursor_cell);
+        let mut d = marker_boxes(&block, &ed.marker_extents(), None, None);
+        let (cy, cx) = d.caret.unwrap();
+        overlay_minibuffer(&ed, &mut d);
         // The overlay covers the glyphs to the right of the cursor in
         // place: same height, and the cells left of the cursor are
         // untouched.
-        assert_eq!(lines.len(), before.len(), "no vertical shift");
-        let text: String = lines[cy][cx..cx + 3].iter().collect();
+        assert_eq!(d.lines.len(), before.len(), "no vertical shift");
+        let text: String = d.lines[cy][cx..cx + 3].iter().collect();
         assert_eq!(text, "\\fr", "typed command shown at the cursor");
-        let kept: String = lines[cy][..cx].iter().collect();
+        let kept: String = d.lines[cy][..cx].iter().collect();
         assert_eq!(kept, before[cy].chars().take(cx).collect::<String>());
-        assert_eq!(cursor_cell, Some((cy, cx + 3)), "caret after the text");
-        assert!(bg[cy][cx].is_some(), "overlay cells are tinted");
+        assert_eq!(d.caret, Some((cy, cx + 3)), "caret after the text");
+        assert!(d.bg[cy][cx].is_some(), "overlay cells are tinted");
     }
 
     #[test]
@@ -1460,29 +1354,10 @@ mod tests {
             let (root, cursor) = ed.decorated();
             let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
             let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-            let struck: std::collections::HashSet<(usize, usize)> =
-                block.cancel.iter().copied().collect();
-            assert!(!struck.is_empty(), "cancel present");
-            let (lines, bg, cursor_cell, _) = marker_boxes(
-                &block.lines,
-                &ed.marker_extents(),
-                &block.marks,
-                block.caret,
-                None,
-                None,
-            );
-            let (y, x) = cursor_cell.expect("caret visible");
-            let spans = decorate_line(
-                &lines[y],
-                y,
-                &struck,
-                &bg[y],
-                Some(x),
-                false,
-                false,
-                0,
-                None,
-            );
+            assert!(!block.cancel.is_empty(), "cancel present");
+            let d = marker_boxes(&block, &ed.marker_extents(), None, None);
+            let (y, _) = d.caret.expect("caret visible");
+            let spans = decorate_line(&d, y, CaretStyle::Normal, 0);
             let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
             // Every struck glyph is still there, followed by its strike.
             for &(r, c) in &block.cancel {
@@ -1523,10 +1398,17 @@ mod tests {
             (0, 1, Mark::Sel { open: true }.ch()),
             (0, 3, Mark::Sel { open: false }.ch()),
         ];
-        let (out, bg, _, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None, None, None);
-        assert_eq!(out, lines, "text must be untouched");
+        let block = mascii::render::Block {
+            lines: lines.clone(),
+            baseline: 0,
+            cancel: vec![],
+            caret: None,
+            marks: marks.to_vec(),
+        };
+        let d = marker_boxes(&block, &[(0, 0, 0)], None, None);
+        assert_eq!(d.lines, lines, "text must be untouched");
         assert_eq!(
-            bg[0],
+            d.bg[0],
             vec![
                 None,
                 Some(theme::SELECTION_BG),
@@ -1550,11 +1432,18 @@ mod tests {
             (1, 0, Mark::Sel { open: true }.ch()),
             (1, 3, Mark::Sel { open: false }.ch()),
         ];
-        let (_, bg, _, _) = marker_boxes(&lines, &[(1, 1, 0)], &marks, None, None, None);
-        assert!(bg.iter().all(|row| row.iter().all(|c| c.is_some())));
-        let (_, bg, _, _) = marker_boxes(&lines, &[(0, 0, 0)], &marks, None, None, None);
+        let block = |marks: &[(usize, usize, char)]| mascii::render::Block {
+            lines: lines.clone(),
+            baseline: 1,
+            cancel: vec![],
+            caret: None,
+            marks: marks.to_vec(),
+        };
+        let d = marker_boxes(&block(&marks), &[(1, 1, 0)], None, None);
+        assert!(d.bg.iter().all(|row| row.iter().all(|c| c.is_some())));
+        let d = marker_boxes(&block(&marks), &[(0, 0, 0)], None, None);
         assert!(
-            bg[2].iter().all(|c| c.is_none()),
+            d.bg[2].iter().all(|c| c.is_none()),
             "extent must bound the box"
         );
     }
@@ -1563,12 +1452,18 @@ mod tests {
     fn labels_overlay_and_caret_pads() {
         let label = Mark::Label { rank: 0 }.ch();
         let lines: Vec<Vec<char>> = vec!["xy".chars().collect()];
-        let (out, _, cursor, _) =
-            marker_boxes(&lines, &[], &[(0, 0, label)], Some((0, 2)), None, None);
-        let chars: Vec<char> = out[0].clone();
+        let block = mascii::render::Block {
+            lines: lines.clone(),
+            baseline: 0,
+            cancel: vec![],
+            caret: Some((0, 2)),
+            marks: vec![(0, 0, label)],
+        };
+        let d = marker_boxes(&block, &[], None, None);
+        let chars: Vec<char> = d.lines[0].clone();
         assert_eq!(chars[0], label, "label over the glyph");
         assert_eq!(chars[1], 'y');
-        assert_eq!(cursor, Some((0, 2)));
+        assert_eq!(d.caret, Some((0, 2)));
         assert_eq!(chars.len(), 3, "caret cell padded at the row end");
     }
 
