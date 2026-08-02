@@ -7,6 +7,7 @@
 //! - [`alphabets`] — the styled families as rules (`\bbR`, `\Afrk`),
 //!   including the char -> `\mathbb{R}` reverse spelling
 //! - [`funcs`] — upright function names, limit-takers and ∑-class ops
+//! - [`grids`] — the matrix environments (command / env / pair)
 //! - [`accents`] — accent marks and their LaTeX commands
 //! - [`delims`] — the delimiter pairs (glyph columns, LaTeX)
 //! - [`arrows`] — the stretchy labeled arrows
@@ -22,6 +23,7 @@ pub mod arrows;
 pub mod atoms;
 pub mod delims;
 pub mod funcs;
+pub mod grids;
 pub mod radicals;
 pub mod scripts;
 
@@ -31,6 +33,7 @@ pub use arrows::*;
 pub use atoms::*;
 pub use delims::*;
 pub use funcs::*;
+pub use grids::*;
 pub use radicals::*;
 pub use scripts::*;
 

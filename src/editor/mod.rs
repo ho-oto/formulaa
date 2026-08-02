@@ -4,6 +4,7 @@
 
 use crate::ast::{Field, Node, Row, row_at, row_at_mut};
 use crate::glyphs::Mark;
+pub use crate::symbols::{GRID_ENVS, GridWrap};
 
 /// A cursor position: path into nested rows plus a column.
 pub type CursorPos = (Vec<(usize, Field)>, usize);
@@ -36,7 +37,7 @@ pub struct Editor {
     pub op_cursor: usize,
     /// Pending backslash escape inside the \text box (the next key is
     /// typed literally, so \" enters a quote).
-    pub op_escape: bool,
+    pub(crate) op_escape: bool,
     /// Grid edit mode (^O inside a matrix): cell-unit selection, with
     /// column/row lane sub-modes (see `GridSel`).
     pub grid: Option<GridSel>,
@@ -72,7 +73,7 @@ pub struct Editor {
     pub ghost: Vec<Vec<(usize, Field)>>,
     /// Selection anchor column in the current row (Shift+←/→). The selected
     /// node range is between the anchor and the cursor column.
-    pub select_anchor: Option<usize>,
+    pub(crate) select_anchor: Option<usize>,
     /// Path at the moment the anchor was set: a selection is only valid
     /// while the cursor stays in that row (leaving the row would make the
     /// anchor point into a different — possibly shorter — row).
@@ -341,55 +342,6 @@ fn lr_spec(cmd: &str) -> Option<(Delim, Delim, usize)> {
     }
     Some((left, right, mids.len()))
 }
-
-/// How a grid command wraps its lattice: a delimiter pair, the ‖ ‖
-/// norm (\Vmatrix), or nothing (bare \array).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GridWrap {
-    Bare,
-    Pair(Delim, Delim),
-    Norm,
-}
-
-/// The matrix environments, in one table: the `\pmatrix`-family
-/// minibuffer commands, the LaTeX `\begin{env}` names, and the
-/// delimiter pair each wraps. Both LaTeX directions read this, so a
-/// new environment is added once.
-///
-/// `matrix` and `array` are the bare lattice — a delimited grid spells
-/// its pair with `\pmatrix` and friends. `cases`/`rcases` are
-/// two-column environments; a wider grid falls back to the general
-/// `\left\{ \begin{matrix} … \right.` shell.
-pub const GRID_ENVS: &[(&str, GridWrap)] = &[
-    ("matrix", GridWrap::Bare),
-    ("array", GridWrap::Bare),
-    ("smallmatrix", GridWrap::Bare),
-    (
-        "pmatrix",
-        GridWrap::Pair(Delim::Col(ColDelim::Paren), Delim::Col(ColDelim::Paren)),
-    ),
-    (
-        "bmatrix",
-        GridWrap::Pair(Delim::Col(ColDelim::Bracket), Delim::Col(ColDelim::Bracket)),
-    ),
-    (
-        "Bmatrix",
-        GridWrap::Pair(Delim::Col(ColDelim::Brace), Delim::Col(ColDelim::Brace)),
-    ),
-    (
-        "vmatrix",
-        GridWrap::Pair(Delim::Col(ColDelim::Bar), Delim::Col(ColDelim::Bar)),
-    ),
-    ("Vmatrix", GridWrap::Norm),
-    (
-        "cases",
-        GridWrap::Pair(Delim::Col(ColDelim::Brace), Delim::Col(ColDelim::Null)),
-    ),
-    (
-        "rcases",
-        GridWrap::Pair(Delim::Col(ColDelim::Null), Delim::Col(ColDelim::Brace)),
-    ),
-];
 
 /// The environment a delimited grid spells, if any. `cols` decides the
 /// two-column-only environments.

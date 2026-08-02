@@ -17,10 +17,18 @@ use mascii::{ast, latex, parse};
 pub struct RoundtripGuard {
     /// Last AA already reported (avoid one file per keystroke).
     reported: Option<String>,
+    /// The tree the last check ran on. The full re-render + re-parse
+    /// is O(document); a keystroke that only moved the cursor changes
+    /// nothing worth re-checking, and navigation is most keystrokes.
+    checked: Option<ast::Row>,
 }
 
 impl RoundtripGuard {
     pub fn check(&mut self, ed: &mut Editor) {
+        if self.checked.as_ref() == Some(&ed.root) {
+            return;
+        }
+        self.checked = Some(ed.root.clone());
         let row = ast::normalize(&ed.root);
         if row.is_empty() {
             return;
