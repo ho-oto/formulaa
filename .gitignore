@@ -3,3 +3,7 @@ demo/mascii-demo.html
 mascii_debug/
 .vscode/
 .mascii-session
+
+# review-pending drafts (kept locally, not published)
+docs/zenn-intro.md
+README.en.md
