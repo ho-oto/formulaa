@@ -213,6 +213,34 @@ fn malformed_pictures_do_not_panic() {
     }
 }
 
+/// Foreign-LaTeX constructs the reader must not misread: \limits asks
+/// for the band, \over splits its group into a fraction, \not negates
+/// a relation when Unicode has the codepoint (and keeps the bare
+/// relation when it does not), and a spec-less \begin{array} keeps its
+/// first cell.
+#[test]
+fn foreign_latex_reads_right() {
+    use mascii::from_latex::row_from_latex;
+    let tex = |t: &str| row_to_latex(&normalize(&row_from_latex(t)));
+    assert_eq!(tex(r"{1 \over 2} + x"), r"\frac{1}{2}+x");
+    assert_eq!(tex(r"a \atop b"), r"\frac{a}{b}");
+    assert_eq!(tex(r"a \not= b"), r"a\ne b");
+    assert_eq!(tex(r"a \not\in B"), r"a\notin B");
+    assert_eq!(tex(r"a \not\leq b"), r"a\nleq b");
+    // No Unicode negation -> the bare relation survives, not garbage.
+    assert_eq!(tex(r"a \not\equiv b"), r"a\equiv b");
+    assert_eq!(
+        tex(r"\sum\limits_{i=1}^{n} a"),
+        tex(r"\sum_{i=1}^{n} a"),
+        "\\limits keeps the band"
+    );
+    assert_eq!(
+        tex(r"\begin{array} a & b \\ c \end{array}"),
+        tex(r"\begin{array}{cc} a & b \\ c \end{array}"),
+        "a spec-less array keeps its first cell"
+    );
+}
+
 /// `normalize` must be idempotent: it runs again after every merge, so
 /// a rule that lands on a shape another rule would rewrite (a band
 /// collapsing to a one-letter `Func`) makes two exports of one document

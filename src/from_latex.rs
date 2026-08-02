@@ -186,6 +186,16 @@ impl Parser {
         let mut host = Host::None;
         while let Some(tok) = t.first() {
             match tok {
+                // TeX primitives that split the enclosing group into a
+                // fraction: everything so far is the numerator, the
+                // rest of the group the denominator (\atop draws a bar
+                // too — mascii has no barless stack; best effort).
+                Tok::Cmd(w) if w == "over" || w == "atop" => {
+                    let num = std::mem::take(&mut out);
+                    let den = self.sub().row(&t[1..]);
+                    out.push(Node::Frac { num, den });
+                    return out;
+                }
                 Tok::Space => t = &t[1..],
                 Tok::Amp => {
                     host = Host::None;
@@ -386,6 +396,42 @@ impl Parser {
     /// A control sequence. `t` starts right after the command token.
     fn command<'a>(&self, name: &str, t: &'a [Tok], out: &mut Row) -> &'a [Tok] {
         match name {
+            // \not negates the following relation when Unicode has the
+            // negated codepoint; otherwise it is skipped (best effort).
+            "not" => {
+                let negated = |c: char| {
+                    Some(match c {
+                        '=' => '≠',
+                        '∈' => '∉',
+                        '∋' => '∌',
+                        '<' => '≮',
+                        '>' => '≯',
+                        '≤' => '≰',
+                        '≥' => '≱',
+                        '⊆' => '⊈',
+                        '⊇' => '⊉',
+                        '∼' => '≁',
+                        '≅' => '≇',
+                        // Negations without a KaTeX/MathJax spelling
+                        // (⊄ ≢ ≉ …) keep the bare relation instead.
+                        _ => return None,
+                    })
+                };
+                let mut i = 0;
+                while t.get(i) == Some(&Tok::Space) {
+                    i += 1;
+                }
+                let rel = match t.get(i) {
+                    Some(Tok::Ch(c)) => Some(*c),
+                    Some(Tok::Cmd(w)) => crate::symbols::symbol_by_name(w),
+                    _ => None,
+                };
+                if let Some(neg) = rel.and_then(negated) {
+                    out.push(Node::Sym(neg));
+                    return &t[i + 1..];
+                }
+                t
+            }
             "frac" | "dfrac" | "tfrac" | "cfrac" => {
                 let (num, t) = self.arg(t);
                 let (den, t) = self.arg(t);
