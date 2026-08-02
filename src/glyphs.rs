@@ -224,15 +224,17 @@ impl Mark {
         }
     }
 
-    /// The mark that closes this one, for the pairing the display does.
-    pub fn closer(self) -> Option<Mark> {
+    /// The mark that opens the box this one closes — the display's
+    /// pairing rule, in one place.
+    pub fn opener(self) -> Option<Mark> {
         match self {
-            Mark::Sel { open: true } => Some(Mark::Sel { open: false }),
-            Mark::Cells { open: true } => Some(Mark::Cells { open: false }),
-            Mark::Lane { open: true, cols } => Some(Mark::Lane { open: false, cols }),
-            Mark::Frame { open: true } => Some(Mark::Frame { open: false }),
-            // A ^B label opens a box that BlockClose ends.
-            Mark::Label { .. } => Some(Mark::BlockClose),
+            Mark::Sel { open: false } => Some(Mark::Sel { open: true }),
+            Mark::Cells { open: false } => Some(Mark::Cells { open: true }),
+            Mark::Lane { open: false, cols } => Some(Mark::Lane { open: true, cols }),
+            Mark::Frame { open: false } => Some(Mark::Frame { open: true }),
+            // A ^B label opens the box that BlockClose ends; which
+            // label it is only matters to the paint.
+            Mark::BlockClose => Some(Mark::Label { rank: 0 }),
             _ => None,
         }
     }

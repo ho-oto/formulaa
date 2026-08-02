@@ -339,12 +339,6 @@ impl Delim {
         }
     }
 
-    /// The pair a `\name` token spells, and the side it stands on —
-    /// the same shape every other table's `of_name` has.
-    pub fn of_name(name: &str) -> Option<(Delim, Option<bool>)> {
-        Delim::of_spec(*DELIM_NAMES.get(name)?)
-    }
-
     /// The pair a spec char belongs to, and which side the char spells
     /// (None = either; the side-symmetric `|` and `.`).
     pub fn of_spec(c: char) -> Option<(Delim, Option<bool>)> {

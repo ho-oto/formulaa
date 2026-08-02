@@ -173,7 +173,7 @@ pub struct FreeCursor {
     pub snap_at: (usize, usize),
 }
 
-/// Adjust a position for one SLOT_GHOST inserted at col 0 of every
+/// Adjust a position for one ghost mark inserted at col 0 of every
 /// ghost row. All comparisons use the *original* coordinates — nudging
 /// incrementally breaks on nested ghosts (an outer adjustment makes the
 /// inner ghost's prefix no longer match).
@@ -528,21 +528,27 @@ impl Editor {
 
     /// Coordinates in the *display* geometry: ghost rows materialized,
     /// probes only on visible positions (invisible ones get None).
-    /// `visible_only` drops candidates the current frame hides (the
-    /// free cursor measures what is on screen); jump keeps them,
-    /// because labeling them is what materializes their slots.
+    /// With `as_displayed`, the probe render carries the corrections
+    /// the current frame shows — the ghost slots and the grid gap
+    /// lane — and hidden candidates are dropped: this is the geometry
+    /// the free cursor and a mouse click land in.
+    ///
+    /// Without it, the raw tree is measured and every candidate is
+    /// probed. That is what jump wants: `decorated` dispatches jump
+    /// ahead of grid, so the labeled picture has no gap lane, and
+    /// labeling a hidden candidate is what materializes its slot.
     fn display_coords(
         &self,
         cands: &[JumpCand],
-        visible_only: bool,
+        as_displayed: bool,
     ) -> Vec<Option<(usize, usize)>> {
         use crate::render::{RenderCtx, render_root};
-        let n = cands.len().min(0x800);
+        let n = cands.len().min(crate::glyphs::PROBE_MAX);
         let mut root = self.root.clone();
         // The gap-cursor ghost lane has real width: the probe render
         // must include it (and probe paths shift past it), or every
         // coordinate right of / below the ghost is off by a lane.
-        let gap = match self.grid {
+        let gap = match self.grid.filter(|_| as_displayed) {
             Some(GridSel::Lanes {
                 cols: cmode, pos, ..
             }) if pos % 2 == 0 => self.grid_info().map(|(k, i, rows, cols, _)| {
@@ -578,15 +584,26 @@ impl Editor {
         // corrupts whichever set is inserted second.
         let mut ghosts: Vec<&Vec<(usize, Field)>> = self.ghost.iter().collect();
         ghosts.sort_by_key(|p| std::cmp::Reverse(p.len()));
-        for p in ghosts {
-            row_at_mut(&mut root, p).insert(0, Node::Sym(Mark::SlotGhost.ch()));
+        if as_displayed {
+            for p in ghosts {
+                // …and past the gap lane too: a ghost whose path was
+                // not shifted lands in the wrong cell, and the probe
+                // that follows it then indexes past that cell's end.
+                let mut p = p.clone();
+                gap_fix(&mut p);
+                row_at_mut(&mut root, &p).insert(0, Node::Sym(Mark::SlotGhost.ch()));
+            }
         }
         for (idx, cand) in cands.iter().take(n).enumerate().rev() {
-            if visible_only && !self.display_visible(&cand.pos) {
+            if as_displayed && !self.display_visible(&cand.pos) {
                 continue;
             }
             let (p, c) = &cand.pos;
-            let (mut p2, c2) = ghost_adjust(&self.ghost, p, *c);
+            let (mut p2, c2) = if as_displayed {
+                ghost_adjust(&self.ghost, p, *c)
+            } else {
+                (p.clone(), *c)
+            };
             gap_fix(&mut p2);
             let mark = Mark::Probe { index: idx }.ch();
             row_at_mut(&mut root, &p2).insert(c2, Node::Sym(mark));
@@ -1235,9 +1252,12 @@ impl Editor {
         };
         let col = self.col;
         let parent_path = self.path[..self.path.len() - 1].to_vec();
+        // A Norm numbers its only field Seg(0) too, but it is not a
+        // pair and has nothing to split.
         let Node::Delim { mids, segs, .. } = &mut row_at_mut(&mut self.root, &parent_path)[i]
         else {
-            unreachable!()
+            self.info("\\mid works directly inside a delimiter block");
+            return;
         };
         let tail: Row = segs[k].split_off(col);
         segs.insert(k + 1, tail);
@@ -1252,6 +1272,10 @@ impl Editor {
         // over anything — the accent band rides above/below the block).
         if self.selection().is_some() {
             if let Some(content) = self.take_selection() {
+                // A wide accent's base is an inset, where a formula
+                // line break cannot live (Shift+↑ can select a whole
+                // top-level row, breaks included).
+                let content: Row = content.into_iter().filter(|n| *n != Node::Break).collect();
                 let under = mark.under();
                 let (overs, unders) = if under {
                     (vec![], vec![mark])

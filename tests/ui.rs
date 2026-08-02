@@ -918,6 +918,31 @@ fn a_minibuffer_insert_clears_a_stale_selection() {
     assert_eq!(latex(&ed), "\\widehat{ab}");
 }
 
+/// Jump measures the picture it is about to label, which is the one
+/// without the grid's gap-lane preview (decorated dispatches jump
+/// ahead of grid). Probing the spliced frame instead put a probe into
+/// a cell that the splice had moved, and the render panicked.
+#[test]
+fn jump_from_a_grid_gap_measures_the_undecorated_picture() {
+    for script in [
+        r"\array C-o | Right C-g r C-g",
+        r"\matrix C-o - Up C-g w C-g",
+        r"\matrix C-o r Down C-g C-o C-g",
+    ] {
+        let mut ed = Editor::new();
+        type_script(&mut ed, script);
+        let _ = ed.decorated();
+        assert_roundtrip(&ed, &[]);
+    }
+    // The same shape through a click, which does measure the displayed
+    // frame — there the ghosts must shift past the gap lane.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\array C-o | Right C-g r");
+    ed.click(3, 1);
+    let _ = ed.decorated();
+    assert_roundtrip(&ed, &[]);
+}
+
 /// A mode layer that consumes a key owes the same ghost clear the base
 /// layer does: a jump ghost path recorded before grid surgery outlives
 /// the array it points into, and the next render walks a dead index.
@@ -946,6 +971,24 @@ fn a_line_break_stays_out_of_insets() {
     type_script(&mut ed, "^");
     assert_eq!(latex(&ed), "a \\\\ ^{b}");
     assert_roundtrip(&ed, &[]);
+    // Shift+↑ selects a whole top-level row, breaks included — an
+    // accent's base is an inset, so the break must not ride in.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a Enter b S-Up \vec");
+    assert_roundtrip(&ed, &[]);
+    assert!(
+        !latex(&ed).contains("\\vec{a \\\\ b}"),
+        "no break in the base: {}",
+        latex(&ed)
+    );
+    // \mid only splits a real delimiter; a norm numbers its field the
+    // same way but is not a pair.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\norm \mid");
+    assert!(
+        ed.message.contains("delimiter"),
+        "reports instead of panicking"
+    );
     // The same guard the other way round: with the cursor right before
     // the break, Shift+→ refuses to cross it.
     let mut ed = Editor::new();

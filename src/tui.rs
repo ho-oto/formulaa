@@ -341,12 +341,8 @@ fn marker_boxes(
                 // A close pops its *matching* open — a standalone mark
                 // (a rank, a gap ghost) must never satisfy a pair.
                 Mark::Cells { open: false } | Mark::Lane { open: false, .. } => {
-                    let opener = match mark {
-                        Mark::Cells { .. } => Mark::Cells { open: true },
-                        Mark::Lane { cols, .. } => Mark::Lane { open: true, cols },
-                        _ => unreachable!(),
-                    };
-                    if let Some((o, _)) = pop_matching(&mut stack, |k| k == opener) {
+                    let opener = mark.opener();
+                    if let Some((o, _)) = pop_matching(&mut stack, |k| Some(k) == opener) {
                         let (t, b, _) = extent(None);
                         // An empty cell's pair is zero-width: keep one
                         // cell so the selection stays visible.
@@ -359,15 +355,14 @@ fn marker_boxes(
                     }
                 }
                 Mark::Sel { open: false } | Mark::BlockClose => {
-                    let is_sel = mark == Mark::Sel { open: false };
-                    let opener = |k: Mark| {
-                        if is_sel {
-                            k == Mark::Sel { open: true }
-                        } else {
-                            matches!(k, Mark::Label { .. })
-                        }
+                    // A label's rank is not part of the pairing (any
+                    // label opens the box a BlockClose ends).
+                    let opener = mark.opener();
+                    let matches_opener = |k: Mark| match (k, opener) {
+                        (Mark::Label { .. }, Some(Mark::Label { .. })) => true,
+                        (k, o) => Some(k) == o,
                     };
-                    if let Some((o, oc)) = pop_matching(&mut stack, opener) {
+                    if let Some((o, oc)) = pop_matching(&mut stack, matches_opener) {
                         let (color, depth, t, b) = match oc {
                             Mark::Label { rank } => {
                                 let (t, b, d) = extent(Some(rank));
@@ -924,7 +919,7 @@ mod tests {
             "column lane spans every display row: {:?}",
             sel_rows
         );
-        // The d.frame rect is reported while grid mode is on (the draw
+        // The frame rect is reported while grid mode is on (the draw
         // path recolors the lattice glyphs inside it).
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
@@ -981,9 +976,9 @@ mod tests {
         );
     }
 
-    /// The d.frame survives a gap cursor on the matrix's baseline row:
-    /// the gap's ghost marks share that row with the d.frame pair, and
-    /// pairing must not let a ghost mark satisfy the d.frame close.
+    /// The frame survives a gap cursor on the matrix's baseline row:
+    /// the gap's ghost marks share that row with the frame pair, and
+    /// pairing must not let a ghost mark satisfy the frame close.
     #[test]
     fn frame_survives_a_middle_row_gap() {
         let mut ed = Editor::new();
@@ -1003,7 +998,7 @@ mod tests {
     }
 
     /// A fused matrix (pmatrix/bmatrix) recolors BOTH delimiter
-    /// columns as its d.frame — the markers sit just inside them.
+    /// columns as its frame — the markers sit just inside them.
     #[test]
     fn fused_frame_recolors_both_delimiters() {
         let mut ed = Editor::new();
@@ -1042,7 +1037,7 @@ mod tests {
     }
 
     /// A bare array that merely sits INSIDE a delimiter (not fused —
-    /// it has siblings) keeps the d.frame recolor to its own lattice:
+    /// it has siblings) keeps the frame recolor to its own lattice:
     /// the enclosing parens stay untinted.
     #[test]
     fn unfused_frame_leaves_the_outer_delimiter_alone() {
@@ -1094,7 +1089,7 @@ mod tests {
     }
 
     /// The exact corner-based frame: a matrix nested inside a cell
-    /// keeps its own delimiters untinted while the outer d.frame colors.
+    /// keeps its own delimiters untinted while the outer frame colors.
     #[test]
     fn frame_rect_is_exact() {
         let mut ed = Editor::new();

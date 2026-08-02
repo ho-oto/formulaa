@@ -812,7 +812,7 @@ impl Editor {
             return (root, Some((path, col)));
         }
         // Gap cursor: a ghost lane previews the insert (a Spacer
-        // cell painted by the GRID_GAP mark). The ghost has real
+        // cell painted by the gap mark). The ghost has real
         // width, so the parked cell's index shifts with it.
         let GridSel::Lanes {
             cols: cmode, pos, ..
@@ -1116,6 +1116,7 @@ impl Editor {
 /// it with `fill()`. The row-major arithmetic is identical for a real
 /// insertion and for the display's ghost preview, so both go through
 /// here; returns the grown (rows, cols).
+///
 pub(crate) fn splice_lane(
     cells: &mut Vec<Row>,
     rows: usize,
