@@ -18,33 +18,13 @@ pub enum GridWrap {
 /// its pair with `\pmatrix` and friends. `cases`/`rcases` are
 /// two-column environments; a wider grid falls back to the general
 /// `\left\{ \begin{matrix} … \right.` shell.
-pub const GRID_ENVS: &[(&str, GridWrap)] = &[
-    ("matrix", GridWrap::Bare),
-    ("array", GridWrap::Bare),
-    ("smallmatrix", GridWrap::Bare),
-    (
-        "pmatrix",
-        GridWrap::Pair(Delim::Col(ColDelim::Paren), Delim::Col(ColDelim::Paren)),
-    ),
-    (
-        "bmatrix",
-        GridWrap::Pair(Delim::Col(ColDelim::Bracket), Delim::Col(ColDelim::Bracket)),
-    ),
-    (
-        "Bmatrix",
-        GridWrap::Pair(Delim::Col(ColDelim::Brace), Delim::Col(ColDelim::Brace)),
-    ),
-    (
-        "vmatrix",
-        GridWrap::Pair(Delim::Col(ColDelim::Bar), Delim::Col(ColDelim::Bar)),
-    ),
-    ("Vmatrix", GridWrap::Norm),
-    (
-        "cases",
-        GridWrap::Pair(Delim::Col(ColDelim::Brace), Delim::Col(ColDelim::Null)),
-    ),
-    (
-        "rcases",
-        GridWrap::Pair(Delim::Col(ColDelim::Null), Delim::Col(ColDelim::Brace)),
-    ),
-];
+pub static GRID_ENVS: phf::Map<&'static str, GridWrap> = phf::phf_map! {
+    "matrix" | "array" | "smallmatrix" => GridWrap::Bare,
+    "pmatrix" => GridWrap::Pair(Delim::Col(ColDelim::Paren), Delim::Col(ColDelim::Paren)),
+    "bmatrix" => GridWrap::Pair(Delim::Col(ColDelim::Bracket), Delim::Col(ColDelim::Bracket)),
+    "Bmatrix" => GridWrap::Pair(Delim::Col(ColDelim::Brace), Delim::Col(ColDelim::Brace)),
+    "vmatrix" => GridWrap::Pair(Delim::Col(ColDelim::Bar), Delim::Col(ColDelim::Bar)),
+    "Vmatrix" => GridWrap::Norm,
+    "cases" => GridWrap::Pair(Delim::Col(ColDelim::Brace), Delim::Col(ColDelim::Null)),
+    "rcases" => GridWrap::Pair(Delim::Col(ColDelim::Null), Delim::Col(ColDelim::Brace)),
+};

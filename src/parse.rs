@@ -129,7 +129,7 @@ fn side_glyphs(left: bool) -> &'static [char] {
             let mut v: Vec<char> = Delim::ALL
                 .iter()
                 .flat_map(|d| d.glyphs(left).iter().copied())
-                .filter(|&c| c != '⎪')
+                .filter(|&c| !ColDelim::side_shared_pieces().contains(&c))
                 .chain(if left { LATTICE_LEFT } else { LATTICE_RIGHT })
                 .collect();
             v.sort_unstable();
@@ -141,17 +141,25 @@ fn side_glyphs(left: bool) -> &'static [char] {
     &sides[usize::from(!left)]
 }
 
+/// What a delimiter column resolves to: a pair side, or the norm —
+/// which shares the whole scanning machinery but is its own node.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SideKind {
+    Pair(Delim),
+    Norm,
+}
+
 /// Delimiter spec char for a glyph that can appear on the *baseline row*
 /// of a left delimiter column (symbols::Delim answers; the norm ‖ is
 /// the one non-pair). Brace/angle columns always show their vertex
 /// (⎨ / ⟨) on the baseline, so ⎧ ⎪ ⎩ ╱ ╲ never occur here — and a
 /// standalone ├ is a lattice edge (fused junctions resolve via the
 /// column walk in open_spec_at).
-fn open_spec(c: char) -> Option<char> {
+fn open_spec(c: char) -> Option<SideKind> {
     if c == NORM {
-        return Some(NORM);
+        return Some(SideKind::Norm);
     }
-    Delim::of_baseline_piece(c, true).map(|d| d.spec(true))
+    Delim::of_baseline_piece(c, true).map(SideKind::Pair)
 }
 
 /// Fused-grid markers of a delimiter block, if its interior is one.
@@ -226,10 +234,10 @@ fn fused_grid_markers(
 /// Bracket pieces are shared with ceil/floor (⎡+⎢ = ceil, ⎢+⎣ = floor,
 /// both corners = bracket) and ├ junctions belong to any family, so the
 /// contiguous column run's glyph set decides.
-fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
+fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<SideKind> {
     let ch = g.at(row, col);
     if angle_open_turn(g, row, col) {
-        return Some('⟨');
+        return Some(SideKind::Pair(Delim::Angle));
     }
     if !ColDelim::is_shared_piece(ch, true)
         && !(ch == ROW_JUNCTION_L && fused_junction(g, row, col))
@@ -247,22 +255,22 @@ fn open_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
         bot += 1;
     }
     let has = |c: char| (top..=bot).any(|r| g.at(r, col) == c);
-    Some(ColDelim::of_run(has, true).spec(true))
+    Some(SideKind::Pair(Delim::Col(ColDelim::of_run(has, true))))
 }
 
-fn close_spec(c: char) -> Option<char> {
+fn close_spec(c: char) -> Option<SideKind> {
     if c == NORM {
-        return Some(NORM);
+        return Some(SideKind::Norm);
     }
-    Delim::of_baseline_piece(c, false).map(|d| d.spec(false))
+    Delim::of_baseline_piece(c, false).map(SideKind::Pair)
 }
 
 /// Like `close_spec`, resolving a fused-grid junction (┤) by walking its
 /// column to a family-distinct glyph (through ⎪ and further junctions).
-fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
+fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<SideKind> {
     let ch = g.at(row, col);
     if angle_close_turn(g, row, col) {
-        return Some('⟩');
+        return Some(SideKind::Pair(Delim::Angle));
     }
     let h = g.g.len();
     if !ColDelim::is_shared_piece(ch, false)
@@ -280,24 +288,24 @@ fn close_spec_at(g: &Grid, row: usize, col: usize) -> Option<char> {
         bot += 1;
     }
     let has = |c: char| (top..=bot).any(|r| g.at(r, col) == c);
-    Some(ColDelim::of_run(has, false).spec(false))
+    Some(SideKind::Pair(Delim::Col(ColDelim::of_run(has, false))))
 }
 
-/// Every glyph a left delimiter column of `spec` can contain (for the
+/// Every glyph a left delimiter column can contain (for the
 /// vertical-extent scan).
-fn left_family(spec: char) -> Vec<char> {
-    match spec {
-        NORM => vec![NORM],
-        _ => {
-            let mut v: Vec<char> = Delim::of_spec(spec)
-                .map(|(d, _)| d.glyphs(true).to_vec())
-                .unwrap_or_default();
+fn left_family(side: SideKind) -> Vec<char> {
+    match side {
+        SideKind::Norm => vec![NORM],
+        SideKind::Pair(d) => {
+            let mut v: Vec<char> = d.glyphs(true).to_vec();
             // A fused-grid junction can sit anywhere in the column…
             v.push(ROW_JUNCTION_L);
-            // …and the bar spells its two sides alike, so a column of
-            // either extension piece belongs to it.
-            if spec == '|' {
-                v.push('⎥');
+            // …and a pair that spells both sides alike (the bar) owns
+            // either side's pieces.
+            if d.spec(true) == d.spec(false)
+                && let Delim::Col(cd) = d
+            {
+                v.extend(cd.glyphs(false));
             }
             v
         }
@@ -347,18 +355,18 @@ fn norm_extent(g: &Grid, row: usize, col: usize) -> (usize, usize) {
 /// ╱. The upper turn row is the baseline.
 fn angle_open_turn(g: &Grid, row: usize, col: usize) -> bool {
     let width = |r: usize| g.g[r].len();
-    g.at(row, col) == '╱'
+    g.at(row, col) == ARM_RISE
         && row + 1 < g.g.len()
         && col < width(row + 1)
-        && g.at(row + 1, col) == '╲'
+        && g.at(row + 1, col) == ARM_FALL
 }
 
 fn angle_close_turn(g: &Grid, row: usize, col: usize) -> bool {
     let width = |r: usize| g.g[r].len();
-    g.at(row, col) == '╲'
+    g.at(row, col) == ARM_FALL
         && row + 1 < g.g.len()
         && col < width(row + 1)
-        && g.at(row + 1, col) == '╱'
+        && g.at(row + 1, col) == ARM_RISE
 }
 
 /// Resolve which angle an arm glyph belongs to by walking its diagonal
@@ -377,7 +385,7 @@ fn angle_arm_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
         }
     };
     match ch {
-        '╱' => {
+        ARM_RISE => {
             // Left upper arm: follow ╱ down-left; the turn shows as
             // ╱-over-╲ at some cell of the run.
             let (mut r, mut c) = (row, col);
@@ -385,7 +393,7 @@ fn angle_arm_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
                 if angle_open_turn(g, r, c) {
                     return Some(true);
                 }
-                if c > 0 && at(r + 1, c - 1) == '╱' {
+                if c > 0 && at(r + 1, c - 1) == ARM_RISE {
                     r += 1;
                     c -= 1;
                 } else {
@@ -399,7 +407,7 @@ fn angle_arm_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
                 if r > 0 && angle_close_turn(g, r - 1, c) {
                     return Some(false);
                 }
-                if r > 0 && at(r - 1, c + 1) == '╱' {
+                if r > 0 && at(r - 1, c + 1) == ARM_RISE {
                     r -= 1;
                     c += 1;
                 } else {
@@ -408,14 +416,14 @@ fn angle_arm_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
             }
             None
         }
-        '╲' => {
+        ARM_FALL => {
             // Right upper arm: follow ╲ down-right to a ╲-over-╱ turn.
             let (mut r, mut c) = (row, col);
             loop {
                 if angle_close_turn(g, r, c) {
                     return Some(false);
                 }
-                if at(r + 1, c + 1) == '╲' {
+                if at(r + 1, c + 1) == ARM_FALL {
                     r += 1;
                     c += 1;
                 } else {
@@ -429,7 +437,7 @@ fn angle_arm_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
                 if r > 0 && angle_open_turn(g, r - 1, c) {
                     return Some(true);
                 }
-                if r > 0 && c > 0 && at(r - 1, c - 1) == '╲' {
+                if r > 0 && c > 0 && at(r - 1, c - 1) == ARM_FALL {
                     r -= 1;
                     c -= 1;
                 } else {
@@ -476,14 +484,17 @@ fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
     if let s @ Some(_) = angle_arm_side(g, row, col) {
         return s;
     }
-    // The shared brace extension: walk the column to a side-distinct
-    // brace piece.
-    if ch != '⎪' {
+    // A side-shared piece (the brace extension): walk the column to a
+    // side-distinct piece of the families that own it.
+    if !ColDelim::side_shared_pieces().contains(&ch) {
         return None;
     }
-    let family: Vec<char> = [true, false]
-        .into_iter()
-        .flat_map(|side| ColDelim::Brace.run_pieces(side).iter().copied())
+    let family: Vec<char> = ColDelim::ALL
+        .iter()
+        .filter(|d| [true, false].iter().any(|&l| d.run_pieces(l).contains(&ch)))
+        .flat_map(|d| [true, false].map(|l| d.run_pieces(l)))
+        .flatten()
+        .copied()
         .collect();
     let mut r = row;
     while r > 0 && family.contains(&g.at(r - 1, col)) {
@@ -578,8 +589,15 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
             dive(first, last, c + 1, rect.r)
         }
         // Brace columns carry their vertex on the baseline row.
-        _ if ColDelim::Brace.run_pieces(true).contains(&g.at(first, c)) => {
-            let vertex = ColDelim::Brace.info().vertex.unwrap().0;
+        _ if ColDelim::ALL
+            .iter()
+            .any(|d| d.info().vertex.is_some() && d.run_pieces(true).contains(&g.at(first, c))) =>
+        {
+            let d = ColDelim::ALL
+                .iter()
+                .find(|d| d.info().vertex.is_some() && d.run_pieces(true).contains(&g.at(first, c)))
+                .unwrap();
+            let vertex = d.info().vertex.unwrap().0;
             occupied
                 .iter()
                 .find(|&&r| g.at(r, c) == vertex)
@@ -814,7 +832,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
                     let under = region_below(span, bl)
                         .map_or(Ok(vec![]), |r| parse_region(g, r, None, in_cancel))?;
                     out.push(Node::Arrow {
-                        op: crate::symbols::Arrow::To,
+                        op: crate::symbols::Arrow::of_body(FRAC_BAR, true).unwrap(),
                         over,
                         under,
                     });
@@ -1399,20 +1417,17 @@ fn accent_band_run(
     // positionally unambiguous.
     let all = |m: char| piece.iter().all(|&c| c == m);
     let single = |m: char| piece.len() == 1 && piece[0] == m;
-    // The drawn-form table names each glyph's (mark, side); the dots
-    // are the one length-sensitive case (․ = dot, ․․ = ddot).
-    let mark = if over && piece == crate::symbols::Accent::Ddot.cells() {
-        Some(crate::symbols::Accent::Ddot)
-    } else {
-        crate::symbols::Accent::ALL.into_iter().find(|a| {
-            a.under() != over
-                && match a.drawn() {
-                    crate::symbols::DrawnForm::Center(g) => single(g),
-                    crate::symbols::DrawnForm::Fill(g) => all(g),
-                    crate::symbols::DrawnForm::Dots => false,
-                }
-        })
-    };
+    // The drawn-form table names each glyph's (mark, side); a
+    // multi-cell material (the ddot's ․․) matches its cells whole,
+    // which is what tells it from the single dot.
+    let mark = crate::symbols::Accent::ALL.into_iter().find(|a| {
+        a.under() != over
+            && match a.drawn() {
+                crate::symbols::DrawnForm::Center(g) => single(g),
+                crate::symbols::DrawnForm::Fill(g) => all(g),
+                crate::symbols::DrawnForm::Dots => piece == a.cells(),
+            }
+    });
     mark.map(|m| (m, end))
 }
 
@@ -1645,10 +1660,10 @@ fn accent_stacks(
     while r > rect.t
         && let Some(m) = over_mark_at(g.at(r - 1, col))
     {
-        if m == crate::symbols::Accent::Dot
-            && col < rect.r
-            && g.at(r - 1, col + 1) == crate::symbols::Accent::Dot.glyph()
-        {
+        // A length-sensitive pair (the ddot's ․․): the neighbor cell
+        // widens the mark, remembered until the spill test confirms
+        // the whole overhang column is free.
+        if col < rect.r && m.widen(g.at(r - 1, col + 1)).is_some() {
             pair_rows.push(r - 1);
         }
         overs.push(m);
@@ -1669,7 +1684,8 @@ fn accent_stacks(
     if spill {
         let top = bl - overs.len();
         for &pr in &pair_rows {
-            overs[bl - 1 - pr] = crate::symbols::Accent::Ddot;
+            let m = overs[bl - 1 - pr];
+            overs[bl - 1 - pr] = m.widen(g.at(pr, col + 1)).unwrap_or(m);
             debug_assert!(pr >= top);
         }
     }
@@ -1788,7 +1804,7 @@ fn parse_delim(
     // starts after the widest arm cell.
     let (top, bot, interior_l) = if angle_open_turn(g, bl, col) {
         let mut k = 1usize;
-        while bl + 1 > k && bl >= k && col + k <= rect.r && g.at(bl - k, col + k) == '╱' {
+        while bl + 1 > k && bl >= k && col + k <= rect.r && g.at(bl - k, col + k) == ARM_RISE {
             k += 1;
         }
         (bl + 1 - k, (bl + k).min(rect.b), col + k)
@@ -1798,7 +1814,7 @@ fn parse_delim(
     };
     let interior_r = if angle_close_turn(g, bl, close_col) {
         let mut k = 1usize;
-        while bl >= k && close_col > k && g.at(bl - k, close_col - k) == '╲' {
+        while bl >= k && close_col > k && g.at(bl - k, close_col - k) == ARM_FALL {
             k += 1;
         }
         close_col - k
@@ -1864,11 +1880,8 @@ fn parse_delim(
                 cols: cols_n,
                 cells,
             };
-            let (Some(left), Some(right)) = (
-                Delim::of_spec_side(left, true),
-                Delim::of_spec_side(right, false),
-            ) else {
-                return err("cannot resolve delimiter family", bl, col);
+            let (SideKind::Pair(left), SideKind::Pair(right)) = (left, right) else {
+                return err("a norm cannot fuse with a grid", bl, col);
             };
             let node = Node::Delim {
                 left,
@@ -1914,26 +1927,22 @@ fn parse_delim(
     }
     // Both norm sides are the same ‖, so it has no middles to speak of
     // (a `│` inside one would have no side to belong to).
-    let node = if left == NORM {
-        if segs.len() != 1 {
-            return err("a norm takes no │ middle", bl, col);
+    let node = match (left, right) {
+        (SideKind::Norm, SideKind::Norm) => {
+            if segs.len() != 1 {
+                return err("a norm takes no │ middle", bl, col);
+            }
+            Node::Norm {
+                arg: segs.into_iter().next().unwrap(),
+            }
         }
-        Node::Norm {
-            arg: segs.into_iter().next().unwrap(),
-        }
-    } else {
-        let (Some(left), Some(right)) = (
-            Delim::of_spec_side(left, true),
-            Delim::of_spec_side(right, false),
-        ) else {
-            return err("cannot resolve delimiter family", bl, col);
-        };
-        Node::Delim {
+        (SideKind::Pair(left), SideKind::Pair(right)) => Node::Delim {
             left,
             right,
             mids: mid_cols.len(),
             segs,
-        }
+        },
+        _ => return err("a ‖ pairs only with ‖", bl, col),
     };
     Ok((node, close_col))
 }

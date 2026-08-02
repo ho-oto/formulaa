@@ -348,22 +348,22 @@ fn lr_spec(cmd: &str) -> Option<(Delim, Delim, usize)> {
 /// two-column-only environments.
 pub fn grid_env_name(left: Delim, right: Delim, cols: usize) -> Option<&'static str> {
     GRID_ENVS
-        .iter()
+        .entries()
         .find(|(name, w)| {
-            *w == GridWrap::Pair(left, right)
+            **w == GridWrap::Pair(left, right)
                 // (Null, Null) is deliberately absent: \begin{matrix} is
                 // the bare Array's spelling, so a null pair keeps its
                 // \left. shell and reads back as itself.
-                && (cols <= 2 || !matches!(*name, "cases" | "rcases"))
+                && (cols <= 2 || !matches!(**name, "cases" | "rcases"))
         })
-        .map(|&(name, _)| name)
+        .map(|(&name, _)| name)
 }
 
 /// Grid minibuffer commands with an optional RxC digit suffix
 /// (`matrix34` = 3 rows × 4 cols; bare name = 2×2). Returns the delimiter
 /// pair and the dimensions.
 fn grid_command(cmd: &str) -> Option<(GridWrap, usize, usize)> {
-    for &(name, delims) in GRID_ENVS {
+    for (name, &delims) in GRID_ENVS.entries() {
         let Some(rest) = cmd.strip_prefix(name) else {
             continue;
         };

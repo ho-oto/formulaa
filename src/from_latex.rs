@@ -788,7 +788,7 @@ impl Parser {
         // The environment table is the editor's (one row per env, both
         // LaTeX directions and the \pmatrix commands read it).
         use crate::editor::{GRID_ENVS, GridWrap};
-        match GRID_ENVS.iter().find(|(n, _)| *n == name).map(|&(_, w)| w) {
+        match GRID_ENVS.get(name.as_str()).copied() {
             Some(GridWrap::Bare) => out.push(array),
             Some(GridWrap::Pair(l, r)) => out.push(wrap(l, r, array)),
             Some(GridWrap::Norm) => out.push(Node::Norm { arg: vec![array] }),

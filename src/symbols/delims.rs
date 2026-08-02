@@ -256,6 +256,20 @@ impl ColDelim {
             > 1
     }
 
+    /// Pieces both sides share (the brace extension ⎪): they name no
+    /// side of their own, so the parser resolves them by walking the
+    /// column run to a side-distinct piece.
+    pub fn side_shared_pieces() -> &'static [char] {
+        static SHARED: OnceLock<Vec<char>> = OnceLock::new();
+        SHARED.get_or_init(|| {
+            ColDelim::run_glyphs(true)
+                .iter()
+                .filter(|c| ColDelim::run_glyphs(false).contains(c))
+                .copied()
+                .collect()
+        })
+    }
+
     /// Every glyph a tall delimiter column can contain on this side —
     /// the union of `run_pieces` over all pairs.
     pub fn run_glyphs(left: bool) -> &'static [char] {

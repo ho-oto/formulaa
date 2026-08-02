@@ -208,6 +208,15 @@ impl Accent {
         }
     }
 
+    /// The mark whose compact cells are this mark's glyph followed by
+    /// `next` — how the reader upgrades a length-sensitive pair
+    /// (`․․` = a dot next to a dot is the ddot).
+    pub fn widen(self, next: char) -> Option<Accent> {
+        Accent::ALL
+            .into_iter()
+            .find(|a| a.cells() == [self.glyph(), next])
+    }
+
     /// A glyph some mark draws with (band material and compact columns
     /// alike).
     pub fn is_mark_material(c: char) -> bool {

@@ -9,11 +9,11 @@ use crate::ast::{Field, Node, Row};
 
 mod block;
 use crate::glyphs::{
-    COL_MARK_BOT, COL_MARK_TOP, CROSSING, DOUBLE_BODY, FRAC_BAR, HEAD_LEFT, HEAD_RIGHT, MID, Mark,
-    NORM, OP_BAND, PLACEHOLDER, ROW_JUNCTION_L, ROW_JUNCTION_R, STEM, brace_corners,
-    is_display_marker, lattice_char,
+    ARM_FALL, ARM_RISE, COL_MARK_BOT, COL_MARK_TOP, CROSSING, DOUBLE_BODY, FRAC_BAR, HEAD_LEFT,
+    HEAD_RIGHT, MID, Mark, NORM, OP_BAND, OVERLINE_CORNER, PLACEHOLDER, ROW_JUNCTION_L,
+    ROW_JUNCTION_R, STEM, brace_corners, is_display_marker, lattice_char,
 };
-use crate::symbols::{Accent, ColDelim, Delim, DrawnForm, subscript_char, superscript_char};
+use crate::symbols::{Accent, Delim, DrawnForm, subscript_char, superscript_char};
 pub use block::Block;
 use block::{Annots, center_pad, hcat, vstack};
 
@@ -185,7 +185,9 @@ fn glue_alpha(n: &Node, right_edge: bool) -> bool {
     match n {
         Node::Sym(c) => c.is_alphabetic(),
         Node::Accent { overs, base, .. } => {
-            base.is_alphabetic() && !(right_edge && overs.contains(&Accent::Ddot))
+            // A mark wider than its base spills a column past the
+            // right edge, so that edge cannot glue.
+            base.is_alphabetic() && !(right_edge && overs.iter().any(|m| m.cells().len() > 1))
         }
         _ => false,
     }
@@ -581,7 +583,11 @@ fn delim_shape(node: &Node) -> DelimShape<'_> {
             fusable: left.fuses() && right.fuses(),
             is_norm: false,
             angle_sided: *left == Delim::Angle || *right == Delim::Angle,
-            curly: left.col() == Some(ColDelim::Brace) || right.col() == Some(ColDelim::Brace),
+            // A vertex-bearing pair keeps its vertex column (needs
+            // hook + vertex + hook, so a 2-row body grows to 3).
+            curly: [left, right]
+                .iter()
+                .any(|d| d.col().is_some_and(|c| c.info().vertex.is_some())),
         },
         _ => unreachable!("delim_shape is for Norm / Delim"),
     }
@@ -634,13 +640,15 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             base,
         } => {
             let b = render_row(base, None, true, ctx);
-            // The ddot material ․․ needs two cells between the band
-            // edges, so its band widens past a one-cell base.
-            let bw = if overs.contains(&Accent::Ddot) {
-                b.width().max(2)
-            } else {
-                b.width().max(1)
-            };
+            // A mark's material needs its cells between the band
+            // edges, so the band widens past a narrower base.
+            let material = overs
+                .iter()
+                .chain(unders.iter())
+                .map(|m| m.cells().len())
+                .max()
+                .unwrap_or(1);
+            let bw = b.width().max(material).max(1);
             let w = bw + 2;
             // Stretchable marks fill the base width: arrows grow a ─
             // body, line-like marks repeat; dot-like marks stay a
@@ -659,11 +667,13 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                             *cell = g;
                         }
                     }
-                    // The two leader dots side by side.
+                    // Multi-cell material, centered (the ․․ pair).
                     DrawnForm::Dots => {
-                        let s = (w - 2) / 2;
-                        r[s] = '․';
-                        r[s + 1] = '․';
+                        let cells = m.cells();
+                        let s = (w - cells.len()) / 2;
+                        for (i, &g) in cells.iter().enumerate() {
+                            r[s + i] = g;
+                        }
                     }
                 }
                 r
@@ -742,7 +752,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             let radical = index.glyph();
             let mut lines = Vec::with_capacity(h + 1);
             let mut top = vec![FRAC_BAR; w + 1];
-            top[0] = '┌';
+            top[0] = OVERLINE_CORNER;
             lines.push(top);
             for (r, line) in a.lines.iter().enumerate() {
                 let head = if r == h - 1 { radical } else { STEM };
@@ -1030,9 +1040,9 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                     (0..ext_h)
                         .map(|r| {
                             let (dist, glyph) = if r <= ext_bl {
-                                (ext_bl - r, if is_left { '╱' } else { '╲' })
+                                (ext_bl - r, if is_left { ARM_RISE } else { ARM_FALL })
                             } else {
-                                (r - ext_bl - 1, if is_left { '╲' } else { '╱' })
+                                (r - ext_bl - 1, if is_left { ARM_FALL } else { ARM_RISE })
                             };
                             let col = if is_left { dist } else { (k - 1) - dist };
                             let mut row = vec![' '; k];
@@ -1346,9 +1356,9 @@ fn delim_column(spec: char, left: bool, h: usize, bl: usize) -> Vec<char> {
     match spec {
         '\u{27e8}' | '\u{27e9}' => {
             let (up, down) = if spec == '\u{27e8}' {
-                ('\u{2571}', '\u{2572}')
+                (ARM_RISE, ARM_FALL)
             } else {
-                ('\u{2572}', '\u{2571}')
+                (ARM_FALL, ARM_RISE)
             };
             return (0..h)
                 .map(|r| match r.cmp(&bl) {
