@@ -1260,6 +1260,49 @@ mod tests {
         }
     }
 
+    /// The preview's row insertion must carry the strike channel with
+    /// it: a \cancel below the caret keeps its strike glued to the
+    /// (shifted) cell, or the slash paints a row off.
+    #[test]
+    fn preview_rows_shift_the_strikes_with_them() {
+        let mut ed = Editor::new();
+        // a + x/b with the denominator struck; caret back in the
+        // numerator, command open → the preview inserts below row 0
+        // and the strike (row 2) must move down with its cell.
+        for k in "a//x".chars() {
+            ed.input(Key::Char(k), false, false);
+        }
+        ed.input(Key::Down, false, false);
+        ed.input(Key::Char('b'), false, false);
+        ed.input(Key::Left, true, false);
+        ed.input(Key::Char('\\'), false, false);
+        for k in "cancel".chars() {
+            ed.input(Key::Char(k), false, false);
+        }
+        ed.input(Key::Enter, false, false);
+        ed.input(Key::Up, false, false);
+        ed.input(Key::Char('\\'), false, false);
+        for k in "alpha".chars() {
+            ed.input(Key::Char(k), false, false);
+        }
+        let (root, cursor) = ed.decorated();
+        let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
+        let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
+        assert!(!block.cancel.is_empty(), "the strike exists");
+        let mut d = marker_boxes(&block, &ed.marker_extents(), None, None);
+        let before = d.struck.clone();
+        overlay_minibuffer(&ed, &mut d);
+        assert!(ed.command_preview_row().is_some(), "preview open");
+        let h = 1; // \alpha previews one row
+        let at = d.caret.unwrap().0; // caret row after overlay = original row
+        let shifted: std::collections::HashSet<_> = before
+            .iter()
+            .map(|&(y, x)| if y > at { (y + h, x) } else { (y, x) })
+            .collect();
+        assert_ne!(before, shifted, "the strike really sits below the caret");
+        assert_eq!(d.struck, shifted, "strikes ride the inserted rows");
+    }
+
     #[test]
     fn op_box_overlay_is_quote_free() {
         let mut ed = Editor::new();

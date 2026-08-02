@@ -259,7 +259,12 @@ impl Parser {
                     let before = out.len();
                     t = self.item(t, &mut out);
                     host = match out.last() {
-                        _ if grouped || out.len() == before => Host::None,
+                        _ if grouped => Host::None,
+                        // A skipped/no-op token (\limits, \displaystyle,
+                        // an unknown command) sits between the host and
+                        // its scripts without ending its reach —
+                        // \sum\limits_{i} explicitly ASKS for the band.
+                        _ if out.len() == before => host,
                         Some(n @ (Node::BigOpSym { .. } | Node::BigOp { .. }))
                             if is_limit_host(n) =>
                         {
@@ -659,8 +664,14 @@ impl Parser {
                 Tok::Cmd(w) if w.chars().count() == 1 && !w.starts_with(char::is_alphabetic) => {
                     s.push_str(w)
                 }
-                Tok::Cmd(w) if w == "textbackslash" => {
-                    s.push('\\');
+                Tok::Cmd(w)
+                    if w == "textbackslash" || w == "textasciicircum" || w == "textasciitilde" =>
+                {
+                    s.push(match w.as_str() {
+                        "textasciicircum" => '^',
+                        "textasciitilde" => '~',
+                        _ => '\\',
+                    });
                     // …and its empty group, which only exists to end
                     // the command name.
                     if body.get(k) == Some(&Tok::Open) && body.get(k + 1) == Some(&Tok::Close) {
@@ -952,10 +963,13 @@ fn apply_accent(mark: Accent, opaque: bool, base: Row) -> Option<Node> {
 /// The name inside \operatorname{…}: `arg\,max` reads back as the one
 /// band piece `argmax`.
 fn op_name(text: &str) -> String {
+    // Spaces stay: our own writer spells `'a␣b'` as \operatorname{a b}.
     text.replace("\\,", "")
         .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '.')
-        .collect()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | ' '))
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 #[cfg(test)]

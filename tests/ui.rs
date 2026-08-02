@@ -1172,7 +1172,7 @@ fn property_random_key_sequences_roundtrip() {
                 // Ctrl toggles/jump (host effects are inert here).
                 (
                     Key::Char(*rng.pick(&[
-                        'g', 't', 'b', 'e', 'y', 's', 'z', 'r', 'c', 'x', 'v', 'f', 'a',
+                        'g', 't', 'b', 'e', 'y', 's', 'z', 'r', 'c', 'x', 'v', 'f', 'a', 'o',
                     ])),
                     false,
                     true,

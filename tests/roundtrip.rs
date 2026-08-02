@@ -128,6 +128,14 @@ fn roundtrip(name: &str, row: &Row) {
     // Formatting spacers survive in the AA but are invisible to the
     // parser, so the roundtrip target is the spacer-free normal form.
     let expected = normalize(&strip_spacers(&row));
+    // normalize must be a fixpoint of itself on every tree the
+    // generator can produce, not just the hand-picked cases.
+    assert_eq!(
+        normalize(&expected),
+        expected,
+        "[{}] normalize is not idempotent",
+        name
+    );
     let parsed = parse(&aa).unwrap_or_else(|e| {
         panic!(
             "[{}] parse failed: {}\n--- AA ---\n{}\n--- AST ---\n{:?}",
@@ -680,9 +688,17 @@ fn tall_middle_braket() {
     // glyphs appear only in the one-line form.
     let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
     assert_eq!(aa, " ╱ │ 𝐻 │ ╲\n╱ ψ│───│ψ ╲\n╲  │ 2 │  ╱\n ╲ │   │ ╱");
-    // The legacy single-column ╱⟨╲ form still parses.
+    // The legacy single-column ╱⟨╲ form still parses when the content
+    // fits the vertex row…
+    assert!(parse("╱     ╲\n⟨𝑥 + 𝑦⟩\n╲     ╱").is_ok());
+    // …but taller content used to be SILENTLY DROPPED (the fraction's
+    // rows are outside the ⟨ column's extent); that is an error now.
     let legacy = "╱     1 ╲\n⟨𝑥 + ───⟩\n╲     2 ╱";
-    assert!(parse(legacy).is_ok());
+    assert!(
+        parse(legacy).is_err(),
+        "content outside the vertex row must not be dropped: {:?}",
+        parse(legacy)
+    );
 }
 
 /// Multi-line formula: Breaks stack the lines with a lone-┈ continuation
@@ -1577,8 +1593,9 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
         4 => {
             let (lower, upper) = (gen_row(rng, d, 3), gen_row(rng, d, 2));
             match rng.below(5) {
-                // Named bands, including ad-hoc \op* names.
-                0 => opname("lim", lower, upper),
+                // Named bands, including ad-hoc \op* names (and the
+                // shortest legal one — two letters).
+                0 => opname(["lim", "Tr"][rng.below(2)], lower, upper),
                 1 => opname("max", lower, upper),
                 2 => opname("argmax", lower, upper),
                 3 => opname("esssup", lower, upper),
@@ -1669,7 +1686,7 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
         }
         8 => {
             // Bare Array: renders as a self-delimiting lattice.
-            let (rows, cols) = [(2, 2), (1, 2)][rng.below(2)];
+            let (rows, cols) = [(2, 2), (1, 2), (1, 1), (3, 2), (1, 3)][rng.below(5)];
             let cells = (0..rows * cols).map(|_| gen_row(rng, d, 2)).collect();
             Node::Array { rows, cols, cells }
         }
@@ -1687,7 +1704,7 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             label: gen_row(rng, d, 2),
         },
         9 => Node::Arrow {
-            op: Arrow::ALL[rng.below(4)],
+            op: Arrow::ALL[rng.below(Arrow::ALL.len())],
             over: gen_row(rng, d, 3),
             under: gen_row(rng, d, 2),
         },

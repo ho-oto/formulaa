@@ -1015,6 +1015,12 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
                         c2 => c2,
                     })
                     .collect();
+                // An all-space run has no bare form (glued next to a
+                // letter it would draw as a plain gap and read back as
+                // a formatting spacer), so it cannot round-trip.
+                if t.chars().all(|c| c == ' ') {
+                    return err("an upright run cannot be only spaces", bl, col);
+                }
                 out.push(if t.chars().count() == 1 {
                     Node::Roman(t.chars().next().unwrap())
                 } else {
@@ -1803,6 +1809,20 @@ fn parse_delim(
     } else {
         close_col - 1
     };
+    // The pair claims its interior columns for the full region height:
+    // content stacked above/below the delimiter's own extent would be
+    // silently skipped by the segment parse (which only walks
+    // top..=bot), so it is an error — never a quiet drop. A canonical
+    // delimiter always spans its content, so only a hand-drawn pair
+    // shorter than its interior can trip this.
+    for r in rect.rows() {
+        if (top..=bot).contains(&r) {
+            continue;
+        }
+        if let Some(c) = (interior_l..=interior_r).find(|&c| g.at(r, c) != ' ') {
+            return err("content outside the delimiter's vertical extent", r, c);
+        }
+    }
 
     // Fused grid: ┬ markers on the delimiter's top row and/or ├ junction
     // rows in the left column mean the interior is one grid whose edges

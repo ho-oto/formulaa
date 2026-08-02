@@ -10,10 +10,15 @@ use crate::ast::{Node, Row};
 pub fn row_to_latex(row: &Row) -> String {
     let mut s = String::new();
     for (i, n) in row.iter().enumerate() {
-        // A node that could absorb the following script node — a
-        // ∑-class atom (`\sum_{i}` means band limits), a band with that
-        // limit still empty, a brace with no label yet — is braced, so
-        // the script stays the separate side-script the picture shows.
+        // A node whose LaTeX could swallow the following script node
+        // is braced, so the script stays the separate side-script the
+        // picture shows. Two ways to swallow: absorption on re-read
+        // (`\sum_{i}` means band limits, an unlabeled brace takes a
+        // label), and a raw syntax collision — a band always emits a
+        // trailing script, so an unbraced `\sum_{y}^{x}^{z}` is a
+        // double-superscript error before any reader sees it. Both
+        // reduce to: brace a band before ANY script, and a brace node
+        // before a script on its label side.
         let next_script = match row.get(i + 1) {
             Some(Node::Sup { .. }) => Some(true),
             Some(Node::Sub { .. }) => Some(false),
@@ -21,14 +26,8 @@ pub fn row_to_latex(row: &Row) -> String {
         };
         let absorbs = match n {
             Node::Sym(c) if crate::symbols::is_bigop(*c) => next_script.is_some(),
-            Node::BigOpSym { lower, upper, .. } | Node::BigOp { lower, upper, .. } => {
-                match next_script {
-                    Some(true) => upper.is_empty(),
-                    Some(false) => lower.is_empty(),
-                    None => false,
-                }
-            }
-            Node::Brace { over, label, .. } => label.is_empty() && next_script == Some(*over),
+            Node::BigOpSym { .. } | Node::BigOp { .. } => next_script.is_some(),
+            Node::Brace { over, .. } => next_script == Some(*over),
             _ => false,
         };
         if absorbs {
@@ -52,6 +51,10 @@ fn escaped(c: char) -> Option<String> {
     match c {
         '#' | '$' | '%' | '&' | '{' | '}' | '_' => Some(format!("\\{}", c)),
         '\\' => Some("\\textbackslash{}".into()),
+        // ^ is a hard error in LaTeX text mode; ~ is a non-breaking
+        // space there, not a tilde.
+        '^' => Some("\\textasciicircum{}".into()),
+        '~' => Some("\\textasciitilde{}".into()),
         _ => None,
     }
 }

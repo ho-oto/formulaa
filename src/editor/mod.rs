@@ -469,12 +469,29 @@ impl Editor {
         self.block = None;
         self.free = None;
         self.select_anchor = None;
+        // A command preview opens rows the coordinate probe knows
+        // nothing about, so a click during one cannot be mapped: the
+        // first click dismisses the minibuffer, the next one lands.
+        // (Without a preview the overlay is layout-neutral and the
+        // click can proceed.)
+        if self.minibuffer.is_some() {
+            let shifted = self.command_preview_row().is_some();
+            self.minibuffer = None;
+            self.clear_message();
+            if shifted {
+                return;
+            }
+        }
         if let Some((pos, _)) = self.nearest_position(x, y) {
             self.path = pos.0;
             self.col = pos.1;
         }
         // The click may have landed anywhere — grid mode follows the
-        // cursor or ends, never keeps stale indices.
+        // cursor or ends, never keeps stale indices; a cell-rectangle
+        // anchor never survives (the user did not drag this).
+        if let Some(GridSel::Cells { .. }) = self.grid {
+            self.grid = Some(GridSel::Cells { anchor: None });
+        }
         self.reclamp_grid();
     }
 
