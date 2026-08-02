@@ -911,8 +911,20 @@ fn block_select_mode_selects_a_structure() {
     );
     type_script(&mut ed, "Enter");
     assert_eq!(ed.selection(), Some((1, 2)));
+    // The cursor leaves on the right end; Shift+← must still grow the
+    // selection leftward (the ends flip instead of collapsing).
+    type_script(&mut ed, "S-Left");
+    assert_eq!(ed.selection(), Some((0, 2)));
+    type_script(&mut ed, "S-Right");
+    assert_eq!(ed.selection(), Some((1, 2)), "shrinks back");
     type_script(&mut ed, "Backspace");
     assert_eq!(latex(&ed), "1");
+    // Shift+←/→ inside the mode: select the highlighted block and move
+    // straight into the linear selection.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"1 // 2 Down 3 C-b S-Left");
+    assert!(ed.block.is_none(), "mode exits");
+    assert_eq!(ed.selection(), Some((0, 2)));
     // ^B at the top level has no enclosing block: mode does not start.
     let mut ed = Editor::new();
     type_script(&mut ed, r"x+y C-b");

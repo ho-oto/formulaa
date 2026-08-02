@@ -116,11 +116,18 @@ impl Editor {
     /// from the (unmoved) cursor.
     fn block_keys(&mut self, key: Key, shift: bool, ctrl: bool) -> Option<Effect> {
         self.block.as_ref()?;
-        if shift && matches!(key, Key::Left | Key::Right | Key::Up | Key::Down) {
+        if shift && matches!(key, Key::Up | Key::Down) {
             self.block_cancel();
             return None; // fall through to the normal selection keys
         }
         match key {
+            // Shift+←/→ leave the mode into a live selection: the
+            // highlighted block becomes the selection and the step
+            // already extends it.
+            Key::Left | Key::Right if shift && !ctrl => {
+                self.block_commit();
+                self.select_move(key == Key::Right);
+            }
             Key::Up | Key::Right if !ctrl => self.block_move(true),
             Key::Down | Key::Left if !ctrl => self.block_move(false),
             Key::Enter => self.block_commit(),

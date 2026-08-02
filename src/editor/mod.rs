@@ -1363,6 +1363,22 @@ impl Editor {
             self.select_anchor = Some(self.col);
             self.select_path = self.path.clone();
         }
+        // Stepping onto the anchor would collapse an active selection
+        // (e.g. right after ^B put the cursor on its right end): flip
+        // the ends instead, so the step grows it on the other side.
+        if let Some(a) = self.select_anchor
+            && a != self.col
+        {
+            let next = if right {
+                self.col + 1
+            } else {
+                self.col.wrapping_sub(1)
+            };
+            if next == a {
+                self.select_anchor = Some(self.col);
+                self.col = a;
+            }
+        }
         if right {
             self.col = (self.col + 1).min(self.cur_row().len());
         } else {
