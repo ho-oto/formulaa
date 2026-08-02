@@ -17,7 +17,6 @@
 //! The norm `‖` IS its own node (both sides are the same glyph, told
 //! apart by extent — `glyphs::NORM`).
 
-/// The column-drawn pairs.
 use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

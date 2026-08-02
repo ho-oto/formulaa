@@ -17,11 +17,7 @@ VSCode の webview に相当するカスタム UI パネルをまだ提供して
     "command": "printf '%s' \"$ZED_SELECTED_TEXT\" | mascii aa2tex",
     "reveal": "always"
   },
-  {
-    "label": "mascii: AA → Typst",
-    "command": "printf '%s' \"$ZED_SELECTED_TEXT\" | mascii aa2typst",
-    "reveal": "always"
-  },
+  
   {
     "label": "mascii: 整形(正準AA)",
     "command": "printf '%s' \"$ZED_SELECTED_TEXT\" | mascii fmt",

@@ -10,8 +10,7 @@
   "contributes": {
     "commands": [
       { "command": "mascii.editFormula", "title": "mascii: Edit formula at cursor" },
-      { "command": "mascii.toLatex", "title": "mascii: Convert AA selection to LaTeX" },
-      { "command": "mascii.toTypst", "title": "mascii: Convert AA selection to Typst" }
+      { "command": "mascii.toLatex", "title": "mascii: Convert AA selection to LaTeX" }
     ],
     "keybindings": [
       {

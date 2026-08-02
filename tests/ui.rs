@@ -943,6 +943,17 @@ fn jump_from_a_grid_gap_measures_the_undecorated_picture() {
     assert_roundtrip(&ed, &[]);
 }
 
+/// \rm of a digit has no upright/italic distinction to preserve: it
+/// canonicalizes to the plain atom, so gluing it to a letter cannot
+/// break the roundtrip (Roman('1') next to an alpha once did).
+#[test]
+fn rm_of_a_digit_is_just_the_digit() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\rm1 Tab x");
+    assert_roundtrip(&ed, &[]);
+    assert_eq!(latex(&ed), "1x");
+}
+
 /// A mode layer that consumes a key owes the same ghost clear the base
 /// layer does: a jump ghost path recorded before grid surgery outlives
 /// the array it points into, and the next render walks a dead index.

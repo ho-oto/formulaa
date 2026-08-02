@@ -94,7 +94,6 @@ fn limited(base: &str, lower: &Row, upper: &Row) -> String {
 fn node_to_latex(node: &Node) -> String {
     match node {
         Node::Spacer => String::new(),
-        // Line break of a multi-line formula (gather/aligned-style).
         Node::Break => " \\\\ ".into(),
         Node::Sym(c) => sym_to_latex(*c),
         // Every upright run is \operatorname: one spelling for

@@ -96,7 +96,6 @@ impl Editor {
         self.jump.is_some().then(|| {
             match key {
                 Key::Char(c) if !ctrl => self.jump_to(c),
-                // Arrow keys move the marker selection; Enter confirms.
                 Key::Left => self.jump_select(-1, 0),
                 Key::Right => self.jump_select(1, 0),
                 Key::Up => self.jump_select(0, -1),

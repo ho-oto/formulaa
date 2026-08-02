@@ -19,7 +19,6 @@ pub enum Node {
     /// as a vertical stack: the continuation line starts with the `┈ `
     /// marker at its baseline (a lone ┈ has no other reading — a band
     /// always sandwiches its pieces without spaces). LaTeX: `\\`,
-    /// Typst: `\ `.
     Break,
     /// Named function/operator rendered upright (sin, cos, log, ...).
     /// Any upright multi-letter name — a dictionary word (`sin`) or an
@@ -288,10 +287,9 @@ pub fn normalize(row: &Row) -> Row {
     let mut pre: Row = Vec::with_capacity(row.len());
     for node in row {
         match normalize_node(node) {
-            // An empty-limit band is its bare form: ┈∑┈ -> ∑ and
-            // ┈lim┈ -> lim, one to one in both directions (↑/↓ lifts
-            // them back, and the editor keeps the band in its own tree
-            // while the cursor is inside).
+            // The bare form is one-to-one with the band (the editor
+            // keeps the band in its own tree while the cursor is
+            // inside).
             Node::BigOpSym { op, lower, upper } if lower.is_empty() && upper.is_empty() => {
                 pre.push(Node::Sym(op))
             }
@@ -309,6 +307,10 @@ pub fn normalize(row: &Row) -> Row {
                 base,
             } if overs.is_empty() && unders.is_empty() => pre.extend(base),
             Node::Func(t) => pre.push(bare_upright(t)),
+            // Roman marks a lone upright LETTER; a digit or dot has no
+            // italic form to be upright against, so its bare picture
+            // reads back as a plain atom — canonicalize it to one.
+            Node::Roman(c) if !c.is_alphabetic() => pre.push(Node::Sym(c)),
             n => pre.push(n),
         }
     }

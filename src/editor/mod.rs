@@ -90,8 +90,9 @@ pub struct Editor {
 
 /// Label keys for jump mode, most reachable first.
 pub const JUMP_LABELS: &str = "asdfghjklqwertyuiopzxcvbnmASDFGHJKLQWERTYUIOPZXCVBNM0123456789";
-/// The display markers themselves live in `glyphs::Mark` — the one
-/// place their wire chars are spelled, so both front-ends decode alike.
+// The display markers themselves live in `glyphs::Mark` — the one
+// place their wire chars are spelled, so both front-ends decode alike.
+
 /// docs/jump-spec.md §5 — tuning knobs.
 const JUMP_W_Y: usize = 3;
 const JUMP_R_MIN: usize = 2;
@@ -105,9 +106,6 @@ const JUMP_C_GHOST: usize = 4;
 const FREE_EXPAND_IN: usize = 3;
 const FREE_EXPAND_OUT: usize = 8;
 
-/// Free-cursor mode (^F): a display-cell cursor moved with the arrow
-/// keys; Enter snaps to the nearest editable position. Both the free
-/// cell and the snap preview are shown.
 /// What the in-place name box (`\op` family) commits to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoxKind {
@@ -165,6 +163,9 @@ impl Clip {
 }
 
 #[derive(Clone, Debug)]
+/// Free-cursor mode (^F): a display-cell cursor moved with the arrow
+/// keys; Enter snaps to the nearest editable position. Both the free
+/// cell and the snap preview are shown.
 pub struct FreeCursor {
     /// Current display cell (row, col).
     pub at: (usize, usize),
@@ -265,13 +266,6 @@ impl Default for Editor {
     }
 }
 
-/// `\lr…` / `\delim…` (Typst-style) delimiter spec, read in *visual
-/// order*: first token = left, interior tokens = middles ('|' only),
-/// last token = right. A token is one spec char — `( ) [ ] { } | .`
-/// with `<` `>` aliasing ⟨ ⟩ — or a `\name` (\langle, \vert, \none …),
-/// so `\lr(]`, `\lr{|}` and `\lr\langle||\rangle` all read like the
-/// picture. None when the string is not a delimiter spec (a `\lr…`
-/// symbol name like \lrcorner then resolves normally).
 /// A script-spelled command: the ^ / _ marker may lead, trail, or both
 /// (\^z, \z^ and \^z^ are the same superscript). Returns (sup?, arg).
 fn script_cmd(cmd: &str) -> Option<(bool, crate::ast::Row)> {
@@ -308,6 +302,13 @@ fn script_cmd(cmd: &str) -> Option<(bool, crate::ast::Row)> {
     Some((marker == '^', arg))
 }
 
+/// `\lr…` / `\delim…` delimiter spec, read in *visual order*: first
+/// token = left, interior tokens = middles ('|' only), last token =
+/// right. A token is one spec char — `( ) [ ] { } | .` with `<` `>`
+/// aliasing ⟨ ⟩ — or a `\name` (\langle, \vert, \none …), so `\lr(]`,
+/// `\lr{|}` and `\lr\langle||\rangle` all read like the picture. None
+/// when the string is not a delimiter spec (a `\lr…` symbol name like
+/// \lrcorner then resolves normally).
 fn lr_spec(cmd: &str) -> Option<(Delim, Delim, usize)> {
     let spec = cmd
         .strip_prefix("delim")
@@ -468,6 +469,12 @@ impl Editor {
         self.block = None;
         self.free = None;
         self.select_anchor = None;
+        // Clicking away from an open name box commits it, like the
+        // edge-exit does — the box must not follow the cursor to the
+        // clicked position.
+        if self.op_entry.is_some() {
+            self.op_commit();
+        }
         // A command preview opens rows the coordinate probe knows
         // nothing about, so a click during one cannot be mapped: the
         // first click dismisses the minibuffer, the next one lands.
@@ -1350,8 +1357,6 @@ impl Editor {
                     overs.push(mark)
                 }
             }
-            // Stack onto a wide accent, the same way a compact one
-            // stacks (the extra band rides outside the existing ones).
             Node::WideAccent { overs, unders, .. } => if under { unders } else { overs }.push(mark),
             _ => self.info("accents apply to a single character"),
         }

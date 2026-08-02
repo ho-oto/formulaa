@@ -45,7 +45,7 @@ impl Editor {
         // automatically while the free cursor is near them. Proximity is
         // measured in the *current display frame* against the element's
         // always-visible anchor (the position before its node in the
-        // parent row), with hysteresis (R_IN/R_OUT) so the expansion
+        // parent row), with hysteresis (FREE_EXPAND_IN/OUT) so the expansion
         // shift cannot make the test oscillate.
         let cands = self.jump_candidates();
         let disp = self.coords_displayed(&cands);
@@ -631,7 +631,6 @@ impl Editor {
                 unreachable!()
             };
             let _ = (gs, rows, c);
-            // The same rectangle the ops edit and decorated() marks —
             // one extent per cell, in the same row-major order.
             let sel: Vec<usize> = self
                 .grid_rect()
@@ -1105,14 +1104,10 @@ impl Editor {
     }
 }
 
-/// A flat cell index re-based past a ghost lane inserted at gap `g`
-/// of a rows×cols array (the gap-cursor preview has real width, so
-/// every coordinate that touches the array must shift with it).
 /// Splice one lane into a cell rectangle at gap `g` (0..=n), filling
 /// it with `fill()`. The row-major arithmetic is identical for a real
 /// insertion and for the display's ghost preview, so both go through
 /// here; returns the grown (rows, cols).
-///
 pub(crate) fn splice_lane(
     cells: &mut Vec<Row>,
     rows: usize,
@@ -1151,6 +1146,9 @@ fn bump(path: &mut [(usize, Field)], col: &mut usize, at: &[(usize, Field)], k: 
     }
 }
 
+/// A flat cell index re-based past a ghost lane inserted at gap `g`
+/// of a rows×cols array (the gap-cursor preview has real width, so
+/// every coordinate that touches the array must shift with it).
 pub(crate) fn gap_shift_cell(
     cell: usize,
     cmode: bool,

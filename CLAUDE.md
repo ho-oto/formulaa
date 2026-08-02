@@ -44,7 +44,7 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 | ファイル | 役割 |
 |---|---|
 | `src/ast.rs` | 数式 AST(`Node`/`Row`/`Field`)、カーソルパス、`normalize` |
-| `src/render.rs` | AST → 2D ブロック(基線つき)。正準AAの生成側 |
+| `src/render/` | AST → 2D ブロック(基線つき)。正準AAの生成側。`block.rs` は Node 非依存のブロック代数(4チャンネル伝搬のユニットテスト付き)、`mod.rs` がノード規則 |
 | `src/parse.rs` | AA → AST。領域+基線の再帰下降。正準AAの受理側+寛容入力 |
 | `src/editor/mod.rs` | 構造エディタ(LyX 型カーソル、挿入・移動・削除・選択) |
 | `src/editor/modes.rs` | ^F フリーカーソル・^G ジャンプ・^B ブロック選択・^O グリッド編集(セル矩形選択+行/列レーンモード `GridSel`)・表示装飾 |
@@ -59,6 +59,7 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 | ├ `radicals.rs` | `Radical` enum: 入力 `RADICAL_NAMES`(phf)+`info()`(グリフ・LaTeX 指数) |
 | ├ `delims.rs` | `Delim { Col(ColDelim), Angle }`: 柱型7種は `ColDelim`(`info()` に仕様文字・1行/縦グリフ・LaTeX、`tall` は非Option)、対角腕の Angle は型で別扱い(bra-ket `⟨x\|` のため別ノードにはしない)。入力 `DELIM_SPECS`(phf)/`DELIM_NAMES`+列分類(`of_run`/`run_glyphs`/`fuses` — `ColDelim` 側)。parse/render/latex/tui がここを引く |
 | ├ `arrows.rs` | `Arrow` enum: 入力 `ARROW_NAMES`(phf, 綴り→variant)+`info()`(variant→全属性の1 match) |
+| ├ `grids.rs` | 行列環境の対応表 `GRID_ENVS`(コマンド名/env 名 → `GridWrap`)。editor と LaTeX 両方向が読む |
 | ├ `scripts.rs` | インライン上付き/下付き: phf 3枚(base→sup・base→sub・script→base)、テストが全単射を固定 |
 | ├ `alphabets.rs` | スタイル族(12族28綴り×前置/後置)を phf(別綴りは or キー)+規則+例外表で。LaTeX 逆引き(`𝔸`→`\mathbb{A}`)もここ |
 

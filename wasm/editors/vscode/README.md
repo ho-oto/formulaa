@@ -22,7 +22,7 @@ code --extensionDevelopmentPath="$PWD"
 - エディタ内は TUI と同じキー: `\frac`␣ `^` `_` `(` `)` Space ←→↑↓
   Shift+←→ 選択、`\cancel` など。
 - `Ctrl+Enter` で確定(AA をファイルに書き戻し)。`Esc` 2回でキャンセル。
-- コマンドパレット: 「mascii: Convert AA selection to LaTeX / Typst」
+- コマンドパレット: 「mascii: Convert AA selection to LaTeX」
   (選択した AA を変換してクリップボードへ。要 media/pkg-node:
   `wasm-pack build --target nodejs --out-dir ../editors/vscode/media/pkg-node`)
 

@@ -44,7 +44,6 @@ impl Editor {
         }
     }
 
-    /// Delete at the caret.
     pub fn op_delete(&mut self) {
         let cur = self.op_cursor;
         if let Some((_, buf)) = &mut self.op_entry

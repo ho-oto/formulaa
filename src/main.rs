@@ -21,8 +21,6 @@ usage: mascii                 interactive TUI editor
        mascii tex2aa   [FILE] LaTeX math (file or stdin) -> AA, best effort
        mascii fmt      [FILE] AA formula -> canonical AA (normalize)";
 
-/// View state the editor itself does not own: the scroll offset of the
-/// canvas (a formula larger than the terminal does not fit).
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -110,8 +108,7 @@ fn copy_to_clipboard(text: &str) -> Result<(), String> {
 
 /// Returns true when the app should quit.
 fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers) -> bool {
-    // F-keys kept as terminal-specific aliases (^T/^B/^O are often
-    // captured by the terminal or OS).
+    // F2 aliases ^T for terminals that capture the ctrl chord.
     let key = match code {
         KeyCode::F(2) => {
             ed.italic = !ed.italic;

@@ -39,7 +39,8 @@ enum Tok {
     Amp,
     /// `\\`
     RowSep,
-    /// A run of spaces — skipped everywhere except inside `\text`.
+    /// A run of spaces — skipped everywhere except inside `\text` and
+    /// `\operatorname` (multi-word operator names keep them).
     Space,
 }
 

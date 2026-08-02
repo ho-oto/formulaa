@@ -9,10 +9,8 @@ use mascii::editor::Editor;
 use mascii::render::{RenderCtx, render_root};
 use mascii::{ast, latex, parse};
 
-/// Live roundtrip checker: after every edit, re-parse the canonical AA of
-/// the current formula and compare. Any mismatch is a renderer/parser bug;
-/// it is dumped to mascii_debug/roundtrip-N.txt so an AI (or human) can
-/// load the report later and fix the toolchain.
+/// The checker; reports land in mascii_debug/roundtrip-N.txt so an AI
+/// (or human) can load one later and fix the toolchain.
 #[derive(Default)]
 pub struct RoundtripGuard {
     /// Last AA already reported (avoid one file per keystroke).

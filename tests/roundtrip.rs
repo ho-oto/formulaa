@@ -233,6 +233,10 @@ fn normalize_is_idempotent() {
         },
         Node::Func("T".into()),
         Node::Func("".into()),
+        // Roman is a lone upright LETTER; digits and dots canonicalize
+        // to plain atoms (their bare picture reads back that way).
+        Node::Roman('1'),
+        Node::Roman('.'),
         Node::WideAccent {
             overs: vec![],
             unders: vec![],

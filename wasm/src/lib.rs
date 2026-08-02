@@ -11,7 +11,7 @@ use mascii::editor::{Editor, JUMP_LABELS};
 use mascii::glyphs::Mark;
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
-use mascii::render::{render_root, RenderCtx, CURSOR_CHAR};
+use mascii::render::{CURSOR_CHAR, RenderCtx, render_root};
 use wasm_bindgen::prelude::*;
 
 fn parse_or_err(text: &str) -> Result<mascii::ast::Row, JsError> {
@@ -106,11 +106,7 @@ impl MasciiEditor {
         for &(r, c, m) in &block.marks {
             let ch = match Mark::decode(m) {
                 Some(Mark::Sel { open } | Mark::Cells { open } | Mark::Lane { open, .. }) => {
-                    if open {
-                        '⟦'
-                    } else {
-                        '⟧'
-                    }
+                    if open { '⟦' } else { '⟧' }
                 }
                 Some(Mark::BlockClose) => '⟧',
                 // The lane-gap ghost: a visible insert cursor even on

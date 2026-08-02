@@ -62,8 +62,6 @@ fn display_char(c: char, ctx: &RenderCtx) -> char {
     }
 }
 
-/// If every node in `row` is a plain char with an inline script equivalent,
-/// return the converted chars.
 /// Would this row render as an inline (codepoint) script, absent any
 /// cursor or markers? Used by the editor to tell which positions are
 /// currently invisible on screen.
@@ -108,8 +106,6 @@ impl RenderCtx {
 /// into descendants, and the column once the path is exhausted.
 type CursorRef<'a> = (&'a [(usize, Field)], usize);
 
-/// `placeholder`: render an empty row as ⬚ (used for mandatory slots like
-/// fraction numerators; big-operator limits pass false so empty limits vanish).
 /// Upright run (`Func`). It draws bare when the picture reads back as
 /// the same run: >= 2 ASCII letters, dots only where the run lexer
 /// keeps them (i.i.d.). Anything else is 'single-quoted'.
@@ -431,9 +427,6 @@ pub fn render_row(
     hcat(&spaced)
 }
 
-/// Top-level entry: a root row may contain `Node::Break`s splitting the
-/// formula into display lines. Lines are stacked left-aligned with one
-/// blank row between them; every continuation line carries the `┈ `
 /// The canonical AA of `row`, with the ⬚ empty-slot cells blanked —
 /// the export form (clipboard, document write-back). The slot marks
 /// are editor chrome, not content: a formula with holes exports the
@@ -463,9 +456,12 @@ pub fn export_aa(row: &Row) -> String {
     }
 }
 
-/// marker at its baseline (col 0) — a lone ┈ has no other reading, and
-/// it hands the parser the line's baseline for free. Rows without
-/// Breaks render exactly as render_row.
+/// Top-level entry: a root row may contain `Node::Break`s splitting the
+/// formula into display lines. Lines are stacked left-aligned with one
+/// blank row between them; every continuation line carries a lone `┈`
+/// marker at its baseline (col 0) — it has no other reading, and it
+/// hands the parser the line's baseline for free. Rows without Breaks
+/// render exactly as render_row.
 pub fn render_root(row: &Row, cursor: Option<CursorRef>, ctx: &RenderCtx) -> Block {
     if !row.iter().any(|n| matches!(n, Node::Break)) {
         return render_row(row, cursor, false, ctx);
@@ -1104,10 +1100,6 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
     }
 }
 
-/// Self-delimiting grid: ┼ markers at every crossing of the separator
-/// rows/columns *including the outer edges*, so the extent and the cell
-/// boundaries are explicit without any delimiter (LaTeX \begin{matrix}).
-/// Baseline = vertical center of the whole lattice.
 /// Delimiter fused with a sole grid segment, in the minimal shape:
 /// - rows>=2 and cols>=2: separator rows carry only ┼ at the crossings
 /// - one row: ┬ / ┴ marker rows above and below the cells
@@ -1242,6 +1234,10 @@ fn render_fused_grid(
     }
 }
 
+/// Self-delimiting grid: ┼ markers at every crossing of the separator
+/// rows/columns *including the outer edges*, so the extent and the cell
+/// boundaries are explicit without any delimiter (LaTeX \begin{matrix}).
+/// Baseline = vertical center of the whole lattice.
 fn render_lattice(
     rows: usize,
     cols: usize,

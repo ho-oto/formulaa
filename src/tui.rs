@@ -615,11 +615,6 @@ fn overlay_minibuffer(ed: &Editor, d: &mut Decor) {
     d.caret = Some((cy, end));
 }
 
-/// Turn a rendered cell row into spans: private-use marker chars become
-/// colored jump/block labels, the cursor glyph blinks, and box
-/// backgrounds from `marker_boxes` are applied to plain glyphs. A
-/// struck cell gets its combining U+0338 appended *inside* its span,
-/// so the ligature is never split across style boundaries.
 /// A close mark pops its *matching* open; standalone marks in between
 /// (ranks, gap ghosts) stay on the stack.
 fn pop_matching(
@@ -647,6 +642,11 @@ fn is_delim_piece(c: char) -> bool {
         || is_brace_corner(c)
 }
 
+/// Turn a rendered cell row into spans: private-use marker chars become
+/// colored jump/block labels, the cursor glyph blinks, and box
+/// backgrounds from `marker_boxes` are applied to plain glyphs. A
+/// struck cell gets its combining U+0338 appended *inside* its span,
+/// so the ligature is never split across style boundaries.
 fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec<Span<'static>> {
     let (line, bg) = (&d.lines[y], &d.bg[y]);
     let cursor = d.caret.and_then(|(cy, cx)| (cy == y).then_some(cx));
@@ -687,11 +687,10 @@ fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec
     };
     for (i, &c) in line.iter().enumerate().skip(scroll_x) {
         let cell_bg = bg.get(i).copied().flatten();
-        // Display chars are resolved to their glyph HERE, before any
-        // branch draws the cell: the caret branch used to print the raw
-        // sentinel of whatever it landed on, and a private-use
-        // codepoint reaching the terminal shows as whatever the font
-        // maps that page to (JuliaMono puts logos there).
+        // Display chars resolve to their glyph before ANY branch draws
+        // the cell: a private-use codepoint reaching the terminal shows
+        // as whatever the font maps that page to (fonts keep logos
+        // there), so no branch — the caret included — may emit `c` raw.
         let shown = match (c, Mark::decode(c)) {
             (FENDER_L, _) => '[',
             (FENDER_R, _) => ']',
@@ -706,8 +705,6 @@ fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec
             shown.to_string()
         };
         if cursor == Some(i) {
-            // Terminal-style caret: reverse video on the glyph right of
-            // the insertion point.
             flush(&mut buf, buf_bg, &mut spans);
             let style = match cell_bg {
                 Some(color) if caret != CaretStyle::Free => cursor_style.bg(color),
@@ -1237,9 +1234,6 @@ mod tests {
         assert_eq!(bars_after, bars_before, "the bar was not painted over");
     }
 
-    /// The name box never shows the reparse-quoting quotes: typing a
-    /// single letter into \rm displays that letter, bare, with the
-    /// caret at the box cursor.
     /// A label cell under the caret prints its letter: private-use
     /// codepoints must never reach the terminal (fonts map that page
     /// to logos, so a leak shows as a random glyph).
@@ -1303,6 +1297,9 @@ mod tests {
         assert_eq!(d.struck, shifted, "strikes ride the inserted rows");
     }
 
+    /// The name box never shows the reparse-quoting quotes: typing a
+    /// single letter into \rm displays that letter, bare, with the
+    /// caret at the box cursor.
     #[test]
     fn op_box_overlay_is_quote_free() {
         let mut ed = Editor::new();

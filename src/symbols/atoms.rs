@@ -595,7 +595,7 @@ mod tests {
             // Angles: U+27E8/27E9 one-line; arms U+2571/2572 diagonals
             | '⟨' | '⟩' | '╱' | '╲'
             // (the vertical bar \abs reuses the bracket extensions ⎢ ⎥;
-            // ⎸ ⎹ U+23B8/23B9 are no longer part of the format)
+            // ⎸ ⎹ U+23B8/23B9 are not part of the format)
             | '‖'                   // U+2016 DOUBLE VERTICAL LINE: norm (stacked when tall)
             | '┆'                   // U+2506 LIGHT TRIPLE DASH VERTICAL: null delimiter left
             | '┊'                   // U+250A LIGHT QUADRUPLE DASH VERTICAL: null delimiter right
@@ -610,9 +610,9 @@ mod tests {
             | '▌'                   // U+258C LEFT HALF BLOCK: cursor (view layer only)
             | '"'                   // U+0022: \text quotes
             | '\''                  // U+0027: \mathrm quotes (the prime atom is ′ U+2032)
-            // Drawn accent glyphs (the only accent chars that appear in
-            // AA; the AST mark chars ^ ˇ ˜ ˙ ¨ ˚ ⇀ ‗ ˷ are internal
-            // identifiers and NOT reserved)
+            // Drawn accent glyphs — the only accent chars a picture
+            // can contain (accents are the Accent enum in the AST, so
+            // nothing else needs reserving)
             | '¯'                   // U+00AF MACRON: drawn under bar
             | '˜'                   // U+02DC SMALL TILDE: drawn under tilde
             | '˷'                   // U+02F7 LOW TILDE: drawn over tilde
@@ -726,7 +726,7 @@ mod tests {
     /// The style token never swallows an ordinary name that starts with it.
     #[test]
     fn script_letters_resolve_without_eating_names() {
-        // The sup/sub modifier letters are gone (a superscript is
+        // The sup/sub modifier letters stay out (a superscript is
         // structure: `\^h`), so the names they used to shadow keep
         // their own meaning and the look-alike atoms are rejected.
         for (name, want) in [

@@ -116,15 +116,11 @@ fn trim(g: &Grid, mut rect: Rect) -> Option<Rect> {
     Some(rect)
 }
 
-/// Side-distinct delimiter glyphs (each char appears on exactly one side;
-/// the shared extension ⎪ and the angle arms ╱ ╲ are deliberately absent).
-/// Lattice edges (┌├└ / ┐┤┘) are included so a lattice interior is
+/// Side-distinct delimiter glyphs, derived from the `Delim` table so a
+/// new pair needs no edit here. The shared extension ⎪ and the angle
+/// arms ╱ ╲ are deliberately absent (they name no side of their own);
+/// the lattice edges (┌├└ / ┐┤┘) are included so a lattice interior is
 /// bracket-protected against cell/script splitting like any other pair.
-/// The glyphs a delimiter side can show, plus the lattice edges (a
-/// lattice interior is bracket-protected against cell/script splitting
-/// like any other pair). Derived from `symbols::DELIMS`, so a new pair
-/// needs no edit here — only the angle arms and the shared brace
-/// extension stay out, since they name no side of their own.
 fn side_glyphs(left: bool) -> &'static [char] {
     use std::sync::OnceLock;
     static SIDES: OnceLock<[Vec<char>; 2]> = OnceLock::new();
@@ -346,12 +342,6 @@ fn norm_extent(g: &Grid, row: usize, col: usize) -> (usize, usize) {
     (top, bot)
 }
 
-/// Which side of a delimiter pair the glyph at (row, col) belongs to:
-/// Some(true) = left/open, Some(false) = right/close, None = neither.
-/// The shared glyphs (brace extension ⎪, angle arms ╱ ╲) resolve their
-/// side by walking the contiguous column run to a side-distinct glyph —
-/// without this, depth counting desyncs on rows that cut through a
-/// mismatched pair (e.g. a { … ┆ cases block).
 /// Tall angles are pure diagonals; the turn is a same-column vertical
 /// pair. Left angle: ╱ directly above ╲; right angle: ╲ directly above
 /// ╱. The upper turn row is the baseline.
@@ -452,6 +442,12 @@ fn angle_arm_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
     }
 }
 
+/// Which side of a delimiter pair the glyph at (row, col) belongs to:
+/// Some(true) = left/open, Some(false) = right/close, None = neither.
+/// The shared glyphs (brace extension ⎪, angle arms ╱ ╲) resolve their
+/// side by walking the contiguous column run to a side-distinct glyph —
+/// without this, depth counting desyncs on rows that cut through a
+/// mismatched pair (e.g. a { … ┆ cases block).
 fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
     let ch = g.at(row, col);
     // The sqrt overline corner (┌ directly above the radical stem) is
@@ -460,9 +456,6 @@ fn delim_side(g: &Grid, row: usize, col: usize) -> Option<bool> {
     if ch == OVERLINE_CORNER && row + 1 < g.g.len() && is_stem_glyph(g.at(row + 1, col)) {
         return None;
     }
-    // Norm columns use the same ‖ on both sides: parity along the row
-    // decides (full-height columns keep the parity consistent per row).
-    // Direct norm-in-norm is therefore unsupported.
     if ch == NORM {
         // Norm columns use the same ‖ on both sides: parity along the
         // row decides, but only among columns with the same vertical
@@ -716,11 +709,6 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
     let mut out: Row = Vec::new();
     let mut col = rect.l;
     while col <= rect.r {
-        // Struck-through block. The extent follows the canonical "maximal
-        // cancel" form: runs of flagged baseline cells, extended across
-        // blank-baseline stretches only when everything there is struck
-        // too (a partially struck script belongs to a sibling, and its own
-        // Cancel is found when the script argument is parsed).
         if !in_cancel && g.cancelled(bl, col) {
             let end = cancel_extent(g, rect, bl, col);
             let inner = Rect {
@@ -864,13 +852,22 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>, in_cancel: bool) 
                     );
                 };
                 let base: String = (l0..=r0).map(|c| unstyle_char(g.at(bl, c))).collect();
-                // A named band is an upright run, so its glyphs are
-                // atoms like any other run — otherwise a structural
-                // glyph would ride into the name (and into the LaTeX).
+                // A named band is an upright run, and with empty
+                // limits it normalizes to that run's bare form — which
+                // the quoted '…' spelling must be able to carry, or
+                // fmt would emit a picture its own parser rejects. So
+                // the name is held to the quoted charset, not just to
+                // atom-hood.
                 if base.chars().count() > 1
-                    && let Some(bad) = base.chars().find(|&c| !crate::symbols::is_atom(c))
+                    && let Some(bad) = base
+                        .chars()
+                        .find(|&c| !(c.is_ascii_alphanumeric() || c == '.'))
                 {
-                    return err(format!("{:?} is not a valid atom", bad), bl, col);
+                    return err(
+                        format!("{:?} cannot appear in an operator name", bad),
+                        bl,
+                        col,
+                    );
                 }
                 let span = Rect {
                     t: rect.t,
@@ -1460,8 +1457,7 @@ fn parse_wide_accent(
     // so `overs` comes out innermost-first like a compact Accent's.
     let (overs, top) = if over_first {
         // `brow` is the *outermost* over band (the search runs top
-        // down), so collect downward to the baseline and reverse:
-        // `overs` is innermost-first, like a compact Accent's.
+        // down), so collect downward to the baseline and reverse.
         let mut marks = Vec::new();
         let mut r = brow;
         while r < bl

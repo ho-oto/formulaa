@@ -14,11 +14,6 @@ pub enum GridWrap {
     Norm,
 }
 
-/// The matrix environments, in one table: the `\pmatrix`-family
-/// minibuffer commands, the LaTeX `\begin{env}` names, and the
-/// delimiter pair each wraps. Both LaTeX directions read this, so a
-/// new environment is added once.
-///
 /// `matrix` and `array` are the bare lattice — a delimited grid spells
 /// its pair with `\pmatrix` and friends. `cases`/`rcases` are
 /// two-column environments; a wider grid falls back to the general
