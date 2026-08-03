@@ -165,14 +165,10 @@ fn quoted(t: &str, q: char) -> Block {
 
 /// Does this node's picture put an accent band next to its neighbours?
 /// A band has no closing glyph, so the scan would run into whatever
-/// touches it — struck (`Cancel`) accents count too, which is why this
-/// looks through the wrappers that keep their argument's outline.
+/// touches it. (A `Cancel` payload is a `Token` and can never carry a
+/// band, so the wrapper needs no look-through.)
 fn has_wide_accent(n: &Node) -> bool {
-    match n {
-        Node::WideAccent { .. } => true,
-        Node::Cancel(arg) => has_wide_accent(arg),
-        _ => false,
-    }
+    matches!(n, Node::WideAccent { .. })
 }
 
 /// Would this node's rendered baseline edge glue a lone upright letter
@@ -1066,11 +1062,11 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             }
         }
 
-        Node::Cancel(arg) => {
+        Node::Cancel(tok) => {
             // A strike covers one atom-shaped token; no field, so the
             // caret can never sit inside — render the token bare and
             // strike every non-blank cell with the combining overlay.
-            let a = render_node(arg, None, ctx);
+            let a = render_node(&tok.clone().into_node(), None, ctx);
             let mut cancel: Vec<(usize, usize)> = Vec::new();
             for (r, line) in a.lines.iter().enumerate() {
                 for (c, &ch) in line.iter().enumerate() {

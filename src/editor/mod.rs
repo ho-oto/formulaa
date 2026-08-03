@@ -907,10 +907,10 @@ impl Editor {
         if self.col > 0 {
             // A struck token peels in two steps: the first press removes
             // the strike, the second deletes the token itself.
-            if let Node::Cancel(inner) = &self.cur_row()[self.col - 1] {
-                let inner = (**inner).clone();
+            if let Node::Cancel(tok) = &self.cur_row()[self.col - 1] {
+                let bare = tok.clone().into_node();
                 let col = self.col - 1;
-                self.cur_row_mut()[col] = inner;
+                self.cur_row_mut()[col] = bare;
                 return;
             }
             let target = &self.cur_row()[self.col - 1];
@@ -1550,6 +1550,7 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::Token;
     use crate::latex::row_to_latex;
 
     /// Type "x^2 + \frac 1 2" the way a user would.
@@ -1931,8 +1932,8 @@ mod tests {
             ed.root,
             vec![
                 Node::Sym('a'),
-                Node::Cancel(Box::new(Node::Sym('b'))),
-                Node::Cancel(Box::new(Node::Sym('c'))),
+                Node::Cancel(Token::Sym('b')),
+                Node::Cancel(Token::Sym('c')),
             ]
         );
         // The selection survives (a strike changes no widths), so the

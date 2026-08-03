@@ -10,7 +10,7 @@
 //! like `x+1` works), and known function names in upright ASCII ("sin")
 //! parse as `Node::Func`.
 
-use crate::ast::{Node, Row};
+use crate::ast::{Node, Row, Token};
 use crate::glyphs::{
     ARM_FALL, ARM_RISE, BRACE_BL, BRACE_TL, COL_MARK_BOT, COL_MARK_TOP, CROSSING, DOUBLE_BODY,
     FRAC_BAR, HEAD_LEFT, HEAD_RIGHT, LATTICE, LATTICE_LEFT, LATTICE_RIGHT, LATTICE_TOP, MID, NORM,
@@ -82,16 +82,16 @@ impl Grid {
 /// A partial strike is an error: a strike covers whole tokens only, so
 /// canonical AA never draws one, and accepting it would guess at the
 /// user's intent.
-fn strike_token(g: &Grid, bl: usize, c0: usize, c1: usize, node: Node) -> Result<Node> {
+fn strike_token(g: &Grid, bl: usize, c0: usize, c1: usize, tok: Token) -> Result<Node> {
     let struck = (c0..=c1).filter(|&c| g.cancelled(bl, c)).count();
     if struck == 0 {
-        return Ok(node);
+        return Ok(tok.into_node());
     }
     if struck < c1 - c0 + 1 {
         return err("a strike must cover the whole token", bl, c0);
     }
     g.consume_strikes(bl, c0, c1);
-    Ok(Node::Cancel(Box::new(node)))
+    Ok(Node::Cancel(tok))
 }
 
 /// Inclusive rectangle of grid cells.
@@ -960,7 +960,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                         }
                     }
                 }
-                out.push(strike_token(g, bl, col, close, Node::Text(t))?);
+                out.push(strike_token(g, bl, col, close, Token::Text(t))?);
                 col = close + 1;
             }
             '\'' => {
@@ -993,12 +993,12 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                 if t.chars().all(|c| c == ' ') {
                     return err("an upright run cannot be only spaces", bl, col);
                 }
-                let node = if t.chars().count() == 1 {
-                    Node::Roman(t.chars().next().unwrap())
+                let tok = if t.chars().count() == 1 {
+                    Token::Roman(t.chars().next().unwrap())
                 } else {
-                    Node::Func(t)
+                    Token::Func(t)
                 };
-                out.push(strike_token(g, bl, col, close, node)?);
+                out.push(strike_token(g, bl, col, close, tok)?);
                 col = close + 1;
             }
             // Closing delimiters are never atoms: a `)` atom inside
@@ -1112,20 +1112,20 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                 }
                 check_flat_columns(g, rect, bl, col, run_end, 0, 0)?;
                 let word: String = (col..=run_end).map(|c| g.at(bl, c)).collect();
-                let node = if word.chars().count() == 1 {
+                let tok = if word.chars().count() == 1 {
                     let prev_letter = col > rect.l && g.at(bl, col - 1).is_alphabetic();
                     let next_letter = run_end < rect.r && g.at(bl, run_end + 1).is_alphabetic();
                     if prev_letter || next_letter {
-                        Node::Roman(word.chars().next().unwrap())
+                        Token::Roman(word.chars().next().unwrap())
                     } else {
-                        Node::Sym(ch)
+                        Token::Sym(ch)
                     }
                 } else {
                     // Any upright multi-letter run is a Func; the
                     // dictionary only decides limits and lexing.
-                    Node::Func(word)
+                    Token::Func(word)
                 };
-                out.push(strike_token(g, bl, col, run_end, node)?);
+                out.push(strike_token(g, bl, col, run_end, tok)?);
                 col = run_end + 1;
             }
             _ => {
@@ -1151,7 +1151,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                         base,
                     });
                 } else {
-                    out.push(strike_token(g, bl, col, col, Node::Sym(base))?);
+                    out.push(strike_token(g, bl, col, col, Token::Sym(base))?);
                 }
                 col += 1 + extra;
             }

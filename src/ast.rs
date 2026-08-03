@@ -140,12 +140,51 @@ pub enum Node {
         cells: Vec<Row>,
     },
     /// A struck-through token (\cancel): every cell of the rendered
-    /// argument carries a combining long solidus overlay (U+0338).
-    /// Only the atom-shaped nodes can be struck — `cancellable` — so a
-    /// strike always covers one whole token; cancelling a structure
-    /// means cancelling its tokens (normalize pushes a stray wrapper
-    /// down).
-    Cancel(Box<Node>),
+    /// token carries a combining long solidus overlay (U+0338). The
+    /// payload is `Token`, not `Node` — only the atom-shaped nodes can
+    /// be struck, so a strike always covers one whole token; cancelling
+    /// a structure means cancelling its tokens (`cancel_all`; normalize
+    /// pushes a stray wrapper down the same way before it can exist).
+    Cancel(Token),
+}
+
+/// The atom-shaped tokens a strike can cover: the payload of
+/// `Node::Cancel`, mirroring the like-named `Node` variants so the
+/// atom-only restriction lives in the type. Peeling the strike turns
+/// it back into its `Node` with `into_node`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Token {
+    Sym(char),
+    Func(String),
+    Roman(char),
+    Text(String),
+}
+
+impl Token {
+    /// The bare node this token reads as once the strike is peeled.
+    pub fn into_node(self) -> Node {
+        match self {
+            Token::Sym(c) => Node::Sym(c),
+            Token::Func(t) => Node::Func(t),
+            Token::Roman(c) => Node::Roman(c),
+            Token::Text(t) => Node::Text(t),
+        }
+    }
+}
+
+/// Node -> Token, giving the node back unchanged when it is not
+/// atom-shaped (so callers can restore it in place).
+impl TryFrom<Node> for Token {
+    type Error = Node;
+    fn try_from(n: Node) -> Result<Token, Node> {
+        match n {
+            Node::Sym(c) => Ok(Token::Sym(c)),
+            Node::Func(t) => Ok(Token::Func(t)),
+            Node::Roman(c) => Ok(Token::Roman(c)),
+            Node::Text(t) => Ok(Token::Text(t)),
+            n => Err(n),
+        }
+    }
 }
 
 /// Identifies one editable slot inside a structure node.
@@ -341,8 +380,10 @@ pub fn normalize(row: &Row) -> Row {
             Node::Sup { arg } | Node::Sub { arg } if arg.is_empty() => {
                 continue;
             }
-            // An empty text run has no picture of its own worth keeping.
+            // An empty text run has no picture of its own worth
+            // keeping, struck or not.
             Node::Text(t) | Node::Func(t) if t.is_empty() => continue,
+            Node::Cancel(Token::Text(t) | Token::Func(t)) if t.is_empty() => continue,
             _ => {}
         }
         // Scripts merge *across* spacers: the blank column a spacer
@@ -385,12 +426,15 @@ pub fn normalize(row: &Row) -> Row {
 /// cancelling a structure cancels the tokens inside it.
 pub fn cancel_all(row: &mut Row) {
     for n in row.iter_mut() {
-        if cancellable(n) {
-            let inner = std::mem::replace(n, Node::Spacer);
-            *n = Node::Cancel(Box::new(inner));
-        } else if !matches!(n, Node::Cancel(_)) {
-            for f in n.fields() {
-                cancel_all(n.field_mut(f));
+        match Token::try_from(std::mem::replace(n, Node::Spacer)) {
+            Ok(tok) => *n = Node::Cancel(tok),
+            Err(orig) => {
+                *n = orig;
+                if !matches!(n, Node::Cancel(_)) {
+                    for f in n.fields() {
+                        cancel_all(n.field_mut(f));
+                    }
+                }
             }
         }
     }
@@ -399,8 +443,8 @@ pub fn cancel_all(row: &mut Row) {
 /// The inverse: every Cancel unwrapped, recursively.
 pub fn uncancel_all(row: &mut Row) {
     for n in row.iter_mut() {
-        if let Node::Cancel(inner) = n {
-            *n = (**inner).clone();
+        if let Node::Cancel(tok) = n {
+            *n = tok.clone().into_node();
         } else {
             for f in n.fields() {
                 uncancel_all(n.field_mut(f));
@@ -431,7 +475,8 @@ pub fn cancel_census(row: &Row) -> (usize, usize) {
     (bare, struck)
 }
 
-/// The nodes a strike can cover whole: the atom-shaped ones.
+/// The nodes a strike can cover whole: exactly those with a `Token`
+/// counterpart.
 pub fn cancellable(n: &Node) -> bool {
     matches!(
         n,
@@ -636,22 +681,12 @@ fn normalize_node(node: &Node) -> Node {
                 segs,
             }
         }
-        Node::Cancel(arg) => {
-            let inner = normalize_node(arg);
-            match inner {
-                // A double strike is one strike.
-                Node::Cancel(x) => Node::Cancel(x),
-                n if cancellable(&n) => Node::Cancel(Box::new(n)),
-                // A stray wrapper around a structure pushes down to the
-                // tokens inside it (that is what the picture shows).
-                mut n => {
-                    for f in n.fields() {
-                        cancel_all(n.field_mut(f));
-                    }
-                    n
-                }
-            }
-        }
+        // The atom rules apply through the strike (an upright
+        // non-letter has no roman/italic distinction, struck or not).
+        Node::Cancel(tok) => Node::Cancel(match tok {
+            Token::Roman(c) if !c.is_alphabetic() => Token::Sym(*c),
+            tok => tok.clone(),
+        }),
         Node::Array { rows, cols, cells } => Node::Array {
             rows: *rows,
             cols: *cols,
