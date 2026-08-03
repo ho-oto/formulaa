@@ -139,53 +139,13 @@ pub enum Node {
         cols: usize,
         cells: Vec<Row>,
     },
-    /// A struck-through token (\cancel): every cell of the rendered
-    /// token carries a combining long solidus overlay (U+0338). The
-    /// payload is `CancellableNode`, not `Node` — only the atom-shaped nodes can
-    /// be struck, so a strike always covers one whole token; cancelling
-    /// a structure means cancelling the tokens inside it (`cancel_all`,
-    /// used by the editor toggle and the LaTeX reader — the type leaves
-    /// a stray structural wrapper nothing to be).
-    Cancel(CancellableNode),
-}
-
-/// The atom-shaped tokens a strike can cover: the payload of
-/// `Node::Cancel`, mirroring the like-named `Node` variants so the
-/// atom-only restriction lives in the type. Peeling the strike turns
-/// it back into its `Node` with `into_node`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CancellableNode {
-    Sym(char),
-    Func(String),
-    Roman(char),
-    Text(String),
-}
-
-impl CancellableNode {
-    /// The bare node this token reads as once the strike is peeled.
-    pub fn into_node(self) -> Node {
-        match self {
-            CancellableNode::Sym(c) => Node::Sym(c),
-            CancellableNode::Func(t) => Node::Func(t),
-            CancellableNode::Roman(c) => Node::Roman(c),
-            CancellableNode::Text(t) => Node::Text(t),
-        }
-    }
-}
-
-/// Node -> CancellableNode, giving the node back unchanged when it is not
-/// atom-shaped (so callers can restore it in place).
-impl TryFrom<Node> for CancellableNode {
-    type Error = Node;
-    fn try_from(n: Node) -> Result<CancellableNode, Node> {
-        match n {
-            Node::Sym(c) => Ok(CancellableNode::Sym(c)),
-            Node::Func(t) => Ok(CancellableNode::Func(t)),
-            Node::Roman(c) => Ok(CancellableNode::Roman(c)),
-            Node::Text(t) => Ok(CancellableNode::Text(t)),
-            n => Err(n),
-        }
-    }
+    /// A struck-through symbol atom (\cancel): the glyph's cell
+    /// carries a combining long solidus overlay (U+0338). Only a `Sym`
+    /// can be struck — \cancel is not standard LaTeX and reproduction
+    /// is best-effort anyway, so the strike stays a one-cell affair:
+    /// no runs, no text, no structures (cancelling a structure strikes
+    /// the symbol atoms inside it via `cancel_all`).
+    Cancel(char),
 }
 
 /// Identifies one editable slot inside a structure node.
@@ -389,9 +349,6 @@ pub fn normalize(row: &Row) -> Row {
             // An empty text run has no picture of its own worth
             // keeping, struck or not.
             Node::Text(t) | Node::Func(t) if t.is_empty() => continue,
-            Node::Cancel(CancellableNode::Text(t) | CancellableNode::Func(t)) if t.is_empty() => {
-                continue;
-            }
             _ => {}
         }
         // Scripts merge *across* spacers: the blank column a spacer
@@ -429,32 +386,22 @@ pub fn normalize(row: &Row) -> Row {
     out
 }
 
-/// Every cancellable (atom-shaped) node in the tree, wrapped: this is
-/// what "cancel this region" means — a strike covers whole tokens, so
-/// cancelling a structure cancels the tokens inside it.
+/// Every symbol atom in the tree, struck: this is what "cancel this
+/// region" means — cancelling a structure strikes the atoms inside it.
 pub fn cancel_all(row: &mut Row) {
     for n in row.iter_mut() {
-        let node = std::mem::replace(n, Node::Spacer);
-        // An empty-limit big operator is its bare atom (the same
-        // collapse normalize applies), so striking it strikes the
-        // atom instead of finding no tokens in its empty limits.
-        let node = match node {
+        match n {
+            Node::Sym(c) => *n = Node::Cancel(*c),
+            // An empty-limit ∑-class operator is its bare atom (the
+            // same collapse normalize applies), so striking it strikes
+            // the atom instead of finding nothing in the empty limits.
             Node::BigOpSym { op, lower, upper } if lower.is_empty() && upper.is_empty() => {
-                Node::Sym(op)
+                *n = Node::Cancel(*op)
             }
-            Node::BigOp { name, lower, upper } if lower.is_empty() && upper.is_empty() => {
-                bare_upright(name)
-            }
-            node => node,
-        };
-        match CancellableNode::try_from(node) {
-            Ok(tok) => *n = Node::Cancel(tok),
-            Err(orig) => {
-                *n = orig;
-                if !matches!(n, Node::Cancel(_)) {
-                    for f in n.fields() {
-                        cancel_all(n.field_mut(f));
-                    }
+            Node::Cancel(_) => {}
+            n => {
+                for f in n.fields() {
+                    cancel_all(n.field_mut(f));
                 }
             }
         }
@@ -464,8 +411,8 @@ pub fn cancel_all(row: &mut Row) {
 /// The inverse: every Cancel unwrapped, recursively.
 pub fn uncancel_all(row: &mut Row) {
     for n in row.iter_mut() {
-        if let Node::Cancel(tok) = n {
-            *n = tok.clone().into_node();
+        if let Node::Cancel(c) = n {
+            *n = Node::Sym(*c);
         } else {
             for f in n.fields() {
                 uncancel_all(n.field_mut(f));
@@ -485,8 +432,7 @@ pub fn cancel_census(row: &Row) -> (usize, usize) {
     let bare_bigop = |n: &Node| {
         matches!(
             n,
-            Node::BigOpSym { lower, upper, .. } | Node::BigOp { lower, upper, .. }
-                if lower.is_empty() && upper.is_empty()
+            Node::BigOpSym { lower, upper, .. } if lower.is_empty() && upper.is_empty()
         )
     };
     for n in row {
@@ -505,13 +451,9 @@ pub fn cancel_census(row: &Row) -> (usize, usize) {
     (bare, struck)
 }
 
-/// The nodes a strike can cover whole: exactly those with a `CancellableNode`
-/// counterpart.
+/// The nodes a strike can cover: symbol atoms only.
 pub fn cancellable(n: &Node) -> bool {
-    matches!(
-        n,
-        Node::Sym(_) | Node::Func(_) | Node::Roman(_) | Node::Text(_)
-    )
+    matches!(n, Node::Sym(_))
 }
 
 /// Remove every formatting `Spacer` in the subtree — exactly what the
@@ -590,7 +532,7 @@ pub fn strip_spacers(row: &Row) -> Row {
                 cols: *cols,
                 cells: cells.iter().map(strip_spacers).collect(),
             }),
-            Node::Cancel(arg) => out.push(Node::Cancel(arg.clone())),
+            Node::Cancel(arg) => out.push(Node::Cancel(*arg)),
         }
     }
     out
@@ -711,22 +653,7 @@ fn normalize_node(node: &Node) -> Node {
                 segs,
             }
         }
-        // The bare-atom rules apply through the strike: a one-letter
-        // Func is a Roman, and an upright non-letter has no
-        // roman/italic distinction, struck or not (each rule lands on
-        // its final shape in one pass — idempotence).
-        Node::Cancel(tok) => Node::Cancel(match tok {
-            CancellableNode::Func(t) if t.chars().count() == 1 => {
-                let c = t.chars().next().unwrap();
-                if c.is_alphabetic() {
-                    CancellableNode::Roman(c)
-                } else {
-                    CancellableNode::Sym(c)
-                }
-            }
-            CancellableNode::Roman(c) if !c.is_alphabetic() => CancellableNode::Sym(*c),
-            tok => tok.clone(),
-        }),
+        Node::Cancel(c) => Node::Cancel(*c),
         Node::Array { rows, cols, cells } => Node::Array {
             rows: *rows,
             cols: *cols,

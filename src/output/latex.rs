@@ -233,7 +233,7 @@ fn node_to_latex(node: &Node) -> String {
             )
         }
         // Requires \usepackage{cancel}.
-        Node::Cancel(tok) => format!("\\cancel{{{}}}", node_to_latex(&tok.clone().into_node())),
+        Node::Cancel(c) => format!("\\cancel{{{}}}", node_to_latex(&Node::Sym(*c))),
     }
 }
 

@@ -505,11 +505,13 @@ fn cancel_collapses_an_empty_limit_big_operator() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"\sum Down Tab \!");
     assert_eq!(latex(&ed), "\\cancel{\\sum }");
-    // Same for a lim-class band (a bare Func always spells
-    // \operatorname — identical typesetting to \lim).
+    // A lim-class band collapses to a Func, which cannot carry a
+    // strike (symbol atoms only) — the toggle reports the error
+    // instead of striking or silently changing anything.
     let mut ed = Editor::new();
     type_script(&mut ed, r"\lim Tab \!");
-    assert_eq!(latex(&ed), "\\cancel{\\operatorname{lim}}");
+    assert_eq!(latex(&ed), "\\operatorname{lim}");
+    assert!(ed.message_error);
 }
 
 #[test]

@@ -908,10 +908,9 @@ impl Editor {
         if self.col > 0 {
             // A struck token peels in two steps: the first press removes
             // the strike, the second deletes the token itself.
-            if let Node::Cancel(tok) = &self.cur_row()[self.col - 1] {
-                let bare = tok.clone().into_node();
+            if let Node::Cancel(c) = self.cur_row()[self.col - 1] {
                 let col = self.col - 1;
-                self.cur_row_mut()[col] = bare;
+                self.cur_row_mut()[col] = Node::Sym(c);
                 return;
             }
             let target = &self.cur_row()[self.col - 1];
@@ -1551,7 +1550,6 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::CancellableNode;
     use crate::latex::row_to_latex;
 
     /// Type "x^2 + \frac 1 2" the way a user would.
@@ -1931,11 +1929,7 @@ mod tests {
         ed.execute("cancel");
         assert_eq!(
             ed.root,
-            vec![
-                Node::Sym('a'),
-                Node::Cancel(CancellableNode::Sym('b')),
-                Node::Cancel(CancellableNode::Sym('c')),
-            ]
+            vec![Node::Sym('a'), Node::Cancel('b'), Node::Cancel('c'),]
         );
         // The anchor is consumed by the edit (the cursor stays at the
         // range's left end); re-selecting the struck range and

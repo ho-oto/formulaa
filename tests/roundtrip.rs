@@ -10,7 +10,7 @@
 //! "Three famous mathematical formulas" (Cardano, Cauchy–Schwarz,
 //! Vandermonde determinant).
 
-use mascii::ast::{CancellableNode, Node, Row, normalize, strip_spacers};
+use mascii::ast::{Node, Row, normalize, strip_spacers};
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
 use mascii::render::{RenderCtx, render_root};
@@ -237,7 +237,10 @@ fn foreign_latex_reads_right() {
     // become a limits host for a following script.
     assert_eq!(tex(r"\cancel{\sum }"), r"\cancel{\sum }");
     assert_eq!(tex(r"\cancel{\sum }^{2}"), r"\cancel{\sum }^{2}");
-    assert_eq!(tex(r"\cancel{\operatorname{d}}"), r"\cancel{\mathrm{d}}");
+    // Only symbol atoms can carry a strike; a struck upright run has
+    // no representation, so best effort keeps the run and drops the
+    // strike (\cancel is not standard LaTeX — partial support).
+    assert_eq!(tex(r"\cancel{\operatorname{d}}"), r"\mathrm{d}");
     assert_eq!(
         tex(r"\sum\limits_{i=1}^{n} a"),
         tex(r"\sum_{i=1}^{n} a"),
@@ -1096,23 +1099,8 @@ fn cancel_strikes() {
     // cancel inside a superscript
     let row = cat(&[s("e"), n(sup(cat(&[s("x"), cancel(s("2α"))])))]);
     roundtrip("cancel-in-sup", &row);
-    // A struck Text keeps its real space; the space cell has no glyph
-    // to strike, and the parser must absorb it with the token.
-    let row = vec![Node::Cancel(CancellableNode::Text("a b".into()))];
-    roundtrip("cancel-text-space", &row);
-    // A struck one-letter Func collapses to Roman through the strike
-    // (reachable via \cancel{\operatorname{d}} in the LaTeX reader).
-    let row = vec![Node::Cancel(CancellableNode::Func("d".into()))];
-    roundtrip("cancel-func-one-letter", &row);
-    // A struck dotted run before a dot atom keeps its separating
-    // space, or the dot would be absorbed into the run on reparse.
-    let row = vec![
-        Node::Cancel(CancellableNode::Func("w.r.t".into())),
-        Node::Cancel(CancellableNode::Sym('.')),
-    ];
-    roundtrip("cancel-dot-run", &row);
     // A struck big-operator atom (the bare ∑ is a Sym).
-    let row = vec![Node::Cancel(CancellableNode::Sym('∑'))];
+    let row = vec![Node::Cancel('∑')];
     roundtrip("cancel-bigop-atom", &row);
     // A bare one-char Func lands on its final shape in one pass
     // (normalize idempotence: Func("1") must go straight to Sym).
@@ -1695,14 +1683,8 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             0 => Node::Norm {
                 arg: gen_row(rng, d, 3),
             },
-            // A strike wraps one atom-shaped token.
-            _ => Node::Cancel(match rng.below(4) {
-                0 => CancellableNode::Sym(['x', 'y', 'α', 'B'][rng.below(4)]),
-                1 => CancellableNode::Func(["sin", "w.r.t"][rng.below(2)].into()),
-                2 => CancellableNode::Roman(['d', 'A'][rng.below(2)]),
-                // The spaced text pins the blank-cell strike rule.
-                _ => CancellableNode::Text(["ok", "a b"][rng.below(2)].into()),
-            }),
+            // A strike wraps one symbol atom.
+            _ => Node::Cancel(['x', 'y', 'α', 'B', '+', '∑'][rng.below(6)]),
         },
         13 => {
             // Stretchy accent; the band rides over any base block.

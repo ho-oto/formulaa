@@ -10,7 +10,7 @@
 //! like `x+1` works), and known function names in upright ASCII ("sin")
 //! parse as `Node::Func`.
 
-use crate::ast::{CancellableNode, Node, Row};
+use crate::ast::{Node, Row};
 use crate::glyphs::{
     ARM_FALL, ARM_RISE, BRACE_BL, BRACE_TL, COL_MARK_BOT, COL_MARK_TOP, CROSSING, DOUBLE_BODY,
     FRAC_BAR, HEAD_LEFT, HEAD_RIGHT, LATTICE, LATTICE_LEFT, LATTICE_RIGHT, LATTICE_TOP, MID, NORM,
@@ -78,26 +78,16 @@ impl Grid {
     }
 }
 
-/// Wrap a token in Cancel when its whole span (bl, c0..=c1) is struck.
-/// A partial strike is an error: a strike covers whole tokens only, so
-/// canonical AA never draws one, and accepting it would guess at the
-/// user's intent.
-fn strike_token(g: &Grid, bl: usize, c0: usize, c1: usize, tok: CancellableNode) -> Result<Node> {
-    // Blank cells don't count: a Text keeps its real spaces, and the
-    // renderer has no glyph there to hang the strike on (a struck
-    // space cell in the input is simply absorbed with the token).
-    let struck = (c0..=c1)
-        .filter(|&c| g.at(bl, c) != ' ' && g.cancelled(bl, c))
-        .count();
-    let cells = (c0..=c1).filter(|&c| g.at(bl, c) != ' ').count();
-    if struck == 0 {
-        return Ok(tok.into_node());
+/// Wrap a symbol atom in Cancel when its cell is struck. Only a Sym
+/// can carry a strike; flags on any other cell are left unclaimed and
+/// error at the end of the parse.
+fn strike_sym(g: &Grid, bl: usize, col: usize, c: char) -> Node {
+    if g.cancelled(bl, col) {
+        g.consume_strikes(bl, col, col);
+        Node::Cancel(c)
+    } else {
+        Node::Sym(c)
     }
-    if struck < cells {
-        return err("a strike must cover the whole token", bl, c0);
-    }
-    g.consume_strikes(bl, c0, c1);
-    Ok(Node::Cancel(tok))
 }
 
 /// Inclusive rectangle of grid cells.
@@ -966,7 +956,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                         }
                     }
                 }
-                out.push(strike_token(g, bl, col, close, CancellableNode::Text(t))?);
+                out.push(Node::Text(t));
                 col = close + 1;
             }
             '\'' => {
@@ -999,12 +989,11 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                 if t.chars().all(|c| c == ' ') {
                     return err("an upright run cannot be only spaces", bl, col);
                 }
-                let tok = if t.chars().count() == 1 {
-                    CancellableNode::Roman(t.chars().next().unwrap())
+                out.push(if t.chars().count() == 1 {
+                    Node::Roman(t.chars().next().unwrap())
                 } else {
-                    CancellableNode::Func(t)
-                };
-                out.push(strike_token(g, bl, col, close, tok)?);
+                    Node::Func(t)
+                });
                 col = close + 1;
             }
             // Closing delimiters are never atoms: a `)` atom inside
@@ -1118,20 +1107,19 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                 }
                 check_flat_columns(g, rect, bl, col, run_end, 0, 0)?;
                 let word: String = (col..=run_end).map(|c| g.at(bl, c)).collect();
-                let tok = if word.chars().count() == 1 {
+                out.push(if word.chars().count() == 1 {
                     let prev_letter = col > rect.l && g.at(bl, col - 1).is_alphabetic();
                     let next_letter = run_end < rect.r && g.at(bl, run_end + 1).is_alphabetic();
                     if prev_letter || next_letter {
-                        CancellableNode::Roman(word.chars().next().unwrap())
+                        Node::Roman(word.chars().next().unwrap())
                     } else {
-                        CancellableNode::Sym(ch)
+                        strike_sym(g, bl, col, ch)
                     }
                 } else {
                     // Any upright multi-letter run is a Func; the
                     // dictionary only decides limits and lexing.
-                    CancellableNode::Func(word)
-                };
-                out.push(strike_token(g, bl, col, run_end, tok)?);
+                    Node::Func(word)
+                });
                 col = run_end + 1;
             }
             _ => {
@@ -1157,7 +1145,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                         base,
                     });
                 } else {
-                    out.push(strike_token(g, bl, col, col, CancellableNode::Sym(base))?);
+                    out.push(strike_sym(g, bl, col, base));
                 }
                 col += 1 + extra;
             }
