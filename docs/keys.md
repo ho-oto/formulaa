@@ -50,7 +50,7 @@ TUI エディタ(`cargo run` / `mascii`)の全キー・全コマンドのリフ�
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | コピー / カット / ペースト |
 | `←` / `→`(選択中) | 選択を解除して左端 / 右端へ |
 | `Backspace` / `Delete`(選択中) | 選択範囲を削除 |
-| 構造キー(選択中) | `^` `_` `(` `[` `{` `\frac` `\sqrt`(`\cbrt` `\qdrt` も) `\cancel` は選択を包む |
+| 構造キー(選択中) | `^` `_` `(` `[` `{` `\frac` `\sqrt`(`\cbrt` `\qdrt` も)は選択を包む。`\cancel` は選択内のトークンの打ち消しをトグル |
 
 ## undo / redo
 
@@ -149,7 +149,7 @@ Backspace は中身クリアではなく構造の削除)。
 | `\frac` | 分数(選択中はそれが分子に) |
 | `\sqrt` `\cbrt` `\qdrt` | √ ∛ ∜ |
 | `\tex` / `\latex` | LaTeX 入力ボックス: 打ち込むかペーストして Enter で確定(best-effort 読み込み。KaTeX/MathJax 方言、不明コマンドは無視) |
-| `\cancel` / `\!` | 打ち消し(選択を包める) |
+| `\cancel` / `\!` | 打ち消しのトグル。選択なしなら直前の要素(構造なら中のトークン全部)。混在選択は全部打ち消し、全部打ち消し済みなら解除。打ち消し済みトークンの直後の Backspace は、1回目で線を剥がし2回目で本体を消す |
 | `\matrix` / `\array` / `\smallmatrix` | 裸の格子(2×2。`\matrix34` で 3行×4列) |
 | `\pmatrix` `\bmatrix` `\Bmatrix` `\vmatrix` `\Vmatrix` `\cases` `\rcases` | 括弧付きの行列(同様に `\cases32` などサイズ指定可)。`\Vmatrix` は ‖ ‖ |
 | `\overbrace` `\underbrace` | ╭──╮ / ╰──╯(ラベル付き) |

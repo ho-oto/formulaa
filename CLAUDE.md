@@ -98,7 +98,9 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
   オフセットで写す。忘れると tests/ui.rs の caret 生存チェックが落ちる)。
 - `Sqrt` の `index`・矢印の `op`・アクセントの `overs`/`unders`・括弧の
   `left`/`right` は enum(`Radical`/`Arrow`/`Accent`/`Delim`)。`Node::Accent` の base は
-  1 文字(Row ではない)。
+  1 文字(Row ではない)。`Node::Cancel(Box<Node>)` は原子形トークン
+  (Sym/Func/Roman/Text)専用 — 構造の打ち消しは `cancel_all` で中の
+  トークンへ押し下げる(normalize も迷子のラッパーをそうする)。
 - 括弧は `Node::Delim{left,right,mids,segs}` に統一(旧 Paren/Matrix は廃止)。
   `left`/`right` は `Delim` enum(スロットが側を決める — `]` は左に置けない)、
   `mids` は │ の本数。

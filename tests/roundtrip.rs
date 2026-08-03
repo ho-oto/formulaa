@@ -111,8 +111,11 @@ fn mat(rows: usize, cols: usize, cells: Vec<Row>) -> Node {
     delim('[', ']', vec![], vec![vec![array(rows, cols, cells)]])
 }
 
-fn cancel(arg: Row) -> Node {
-    Node::Cancel { arg }
+/// Strike every token of the row (the atom-only Cancel model: a strike
+/// on a structure means striking the tokens inside it).
+fn cancel(mut arg: Row) -> Row {
+    mascii::ast::cancel_all(&mut arg);
+    arg
 }
 
 fn cat(parts: &[Row]) -> Row {
@@ -479,7 +482,7 @@ fn wide_accents() {
     // separation space as a bare one (the band has no closing glyph).
     let row = cat(&[
         n(sup(n(wa(None, Some(Accent::Underline), s("px"))))),
-        n(cancel(n(wa(Some(Accent::Tilde), None, s("bc"))))),
+        cancel(n(wa(Some(Accent::Tilde), None, s("bc")))),
     ]);
     roundtrip("band-next-to-struck-band", &row);
     // A markless wide accent is just its base (spliced).
@@ -1072,20 +1075,20 @@ fn nested_matrices() {
 fn cancel_strikes() {
     // x·y/y = x with the y's cancelled
     let row = cat(&[
-        n(frac(cat(&[s("x"), n(cancel(s("y")))]), n(cancel(s("y"))))),
+        n(frac(cat(&[s("x"), cancel(s("y"))]), cancel(s("y")))),
         s("="),
         s("x"),
     ]);
     roundtrip("cancel-simple", &row);
     // cancel over a whole fraction, next to an uncancelled sibling
     let row = cat(&[
-        n(cancel(cat(&[n(frac(s("a+b"), s("c"))), s("d")]))),
+        cancel(cat(&[n(frac(s("a+b"), s("c"))), s("d")])),
         s("+"),
         s("e"),
     ]);
     roundtrip("cancel-frac", &row);
     // cancel inside a superscript
-    let row = cat(&[s("e"), n(sup(cat(&[s("x"), n(cancel(s("2α")))])))]);
+    let row = cat(&[s("e"), n(sup(cat(&[s("x"), cancel(s("2α"))])))]);
     roundtrip("cancel-in-sup", &row);
 }
 
@@ -1664,9 +1667,12 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             0 => Node::Norm {
                 arg: gen_row(rng, d, 3),
             },
-            _ => Node::Cancel {
-                arg: gen_row(rng, d, 3),
-            },
+            // A strike wraps one atom-shaped token.
+            _ => Node::Cancel(Box::new(match rng.below(3) {
+                0 => Node::Sym(['x', 'y', 'α', 'B'][rng.below(4)]),
+                1 => Node::Func("sin".into()),
+                _ => Node::Text("ok".into()),
+            })),
         },
         13 => {
             // Stretchy accent; the band rides over any base block.

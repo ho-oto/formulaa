@@ -91,7 +91,12 @@ impl MasciiEditor {
         if lines.is_empty() {
             lines.push(Vec::new());
         }
-        let put = |lines: &mut Vec<Vec<char>>, r: usize, c: usize, ch: char| {
+        // Overlays replace the glyph under them, so a strike on that
+        // cell must not cross the overlay out.
+        let mut overlaid: std::collections::HashSet<(usize, usize)> =
+            std::collections::HashSet::new();
+        let mut put = |lines: &mut Vec<Vec<char>>, r: usize, c: usize, ch: char| {
+            overlaid.insert((r, c));
             // Overlays may land past the last rendered row (the command
             // preview sits one row below the caret): grow, never index
             // out of bounds.
@@ -215,7 +220,8 @@ impl MasciiEditor {
                 let mut out = String::with_capacity(l.len() * 2);
                 for (c, ch) in l.into_iter().enumerate() {
                     out.push(ch);
-                    if ch != CURSOR_CHAR && struck.contains(&(r, c)) {
+                    if ch != CURSOR_CHAR && struck.contains(&(r, c)) && !overlaid.contains(&(r, c))
+                    {
                         out.push('\u{338}');
                     }
                     if selected.contains(&(r, c)) {

@@ -170,7 +170,7 @@ fn quoted(t: &str, q: char) -> Block {
 fn has_wide_accent(n: &Node) -> bool {
     match n {
         Node::WideAccent { .. } => true,
-        Node::Cancel { arg } => arg.iter().any(has_wide_accent),
+        Node::Cancel(arg) => has_wide_accent(arg),
         _ => false,
     }
 }
@@ -229,8 +229,6 @@ pub fn render_row(
     #[derive(Clone, Copy, Default)]
     struct Info {
         script: bool,
-        script_2d: bool,
-        cancel: bool,
         /// A bare dotted roman run (i.i.d.): its dots would absorb an
         /// adjacent letter run or period into one token, so the fuse
         /// rules keep a space after it.
@@ -257,16 +255,6 @@ pub fn render_row(
             dot_run: matches!(node, Node::Func(t) if t.contains('.')),
             marker: is_marker_node(node),
             script: matches!(node, Node::Sup { .. } | Node::Sub { .. }),
-            script_2d: match node {
-                Node::Sup { arg } => {
-                    child_cursor.is_some() || inline_script(arg, superscript_char).is_none()
-                }
-                Node::Sub { arg } => {
-                    child_cursor.is_some() || inline_script(arg, subscript_char).is_none()
-                }
-                _ => false,
-            },
-            cancel: matches!(node, Node::Cancel { .. }),
         };
         let mut block = match node {
             // Single upright letters drop their quotes when a neighbour
@@ -340,10 +328,6 @@ pub fn render_row(
     //  - between a bar edge and a > head that would cap it (─ then >,
     //    ═ then >) and between a < head and a body that would absorb it
     //    (< then ─ or ═)
-    //  - after a cancel with a blank baseline edge (the strike-extent scan
-    //    must not fuse the ragged edge with the neighbour)
-    // A 2D script right after a cancel instead needs a non-blank baseline
-    // anchor (⬚), or the strike scan would fuse raised content.
     // Rows (relative to the baseline) where a block's edge column holds
     // '─': the sqrt overline scans its ─ run greedily off the baseline
     // (a sup's fraction bar can align with it), so two ─ cells touching
@@ -399,7 +383,6 @@ pub fn render_row(
                     }
                     _ => false,
                 };
-                let ragged_cancel = p.cancel && last_edge == Some(' ');
                 // A dotted run would lexically absorb a following letter
                 // or period (i.i.d. + ab → i.i.d.ab).
                 let dotted = p.dot_run
@@ -410,14 +393,11 @@ pub fn render_row(
                     && bar_edge_rows(&block, false)
                         .iter()
                         .any(|r| last_bars.contains(r));
-                fuse || ragged_cancel || dotted || p.wide_accent || info.wide_accent || bar_touch
+                fuse || dotted || p.wide_accent || info.wide_accent || bar_touch
             }
             _ => false,
         };
-        let anchor = matches!(prev, Some(p) if p.cancel) && info.script_2d;
-        if anchor {
-            spaced.push(Block::from_chars(vec![PLACEHOLDER]));
-        } else if need {
+        if need {
             spaced.push(Block::from_chars(vec![' ']));
         }
         let edge = block.baseline_edge(false);
@@ -1086,9 +1066,11 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             }
         }
 
-        Node::Cancel { arg } => {
-            let a = render_row(arg, cur(Field::CancelArg), true, ctx);
-            // Strike every non-blank cell with the combining overlay.
+        Node::Cancel(arg) => {
+            // A strike covers one atom-shaped token; no field, so the
+            // caret can never sit inside — render the token bare and
+            // strike every non-blank cell with the combining overlay.
+            let a = render_node(arg, None, ctx);
             let mut cancel: Vec<(usize, usize)> = Vec::new();
             for (r, line) in a.lines.iter().enumerate() {
                 for (c, &ch) in line.iter().enumerate() {

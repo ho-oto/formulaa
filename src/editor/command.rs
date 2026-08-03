@@ -221,7 +221,8 @@ impl Editor {
             | Edit::AddCol
             | Edit::DelRow
             | Edit::DelCol
-            | Edit::OpenBox(_) => None,
+            | Edit::OpenBox(_)
+            | Edit::Cancel => None,
         }
     }
 
@@ -259,7 +260,10 @@ impl Editor {
         // row under it, so a surviving anchor would designate a
         // different range afterwards (the plain-key path clears it the
         // same way). Only the two wrapping edits keep it.
-        let wraps = matches!(edit, Edit::Insert { wrap: true, .. } | Edit::Accent(_));
+        let wraps = matches!(
+            edit,
+            Edit::Insert { wrap: true, .. } | Edit::Accent(_) | Edit::Cancel
+        );
         if !wraps {
             self.select_anchor = None;
         }
@@ -329,6 +333,7 @@ impl Editor {
             Edit::DelRow => self.del_lane(false),
             Edit::DelCol => self.del_lane(true),
             Edit::OpenBox(kind) => self.op_start(kind),
+            Edit::Cancel => self.toggle_cancel(),
         }
     }
 }
@@ -372,6 +377,10 @@ pub enum Edit {
     DelCol,
     /// Open the in-place name box (`\op` `\op*` `\rm` `\text`).
     OpenBox(BoxKind),
+    /// Toggle the strike on the selection's tokens, or on the element
+    /// left of the cursor: a mixed region strikes everything, an
+    /// all-struck one unstrikes.
+    Cancel,
 }
 
 /// Resolve a command spelling to the edit it performs. Pure: this is
@@ -396,7 +405,7 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
             num: vec![],
             den: vec![],
         }),
-        "cancel" | "!" => wrap(Node::Cancel { arg: vec![] }),
+        "cancel" | "!" => Some(Edit::Cancel),
         "norm" | "Vert" => ins(Node::Norm { arg: vec![] }),
         "overbrace" | "underbrace" => wrap(Node::Brace {
             over: cmd == "overbrace",

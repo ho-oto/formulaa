@@ -874,10 +874,45 @@ impl Editor {
             .map_or(row.len(), |i| self.col + i);
     }
 
+    /// `\cancel` / `!`: toggle the strike on the selection's tokens, or
+    /// on the element left of the cursor. A mixed region strikes
+    /// everything; an all-struck one unstrikes.
+    pub fn toggle_cancel(&mut self) {
+        let range = match self.selection() {
+            Some((lo, hi)) => lo..hi,
+            None if self.col > 0 => self.col - 1..self.col,
+            None => {
+                self.error("nothing to cancel");
+                return;
+            }
+        };
+        let row = self.cur_row_mut();
+        let mut slice: Row = row[range.clone()].to_vec();
+        let (bare, struck) = crate::ast::cancel_census(&slice);
+        if bare == 0 && struck == 0 {
+            self.error("nothing to cancel here");
+            return;
+        }
+        if bare > 0 {
+            crate::ast::cancel_all(&mut slice);
+        } else {
+            crate::ast::uncancel_all(&mut slice);
+        }
+        self.cur_row_mut().splice(range, slice);
+    }
+
     // ----- deletion -----
 
     pub fn backspace(&mut self) {
         if self.col > 0 {
+            // A struck token peels in two steps: the first press removes
+            // the strike, the second deletes the token itself.
+            if let Node::Cancel(inner) = &self.cur_row()[self.col - 1] {
+                let inner = (**inner).clone();
+                let col = self.col - 1;
+                self.cur_row_mut()[col] = inner;
+                return;
+            }
             let target = &self.cur_row()[self.col - 1];
             if !target.fields().is_empty() && !target.is_empty_structure() {
                 // Non-empty structure: step inside (LyX behaviour) so the
@@ -1896,15 +1931,19 @@ mod tests {
             ed.root,
             vec![
                 Node::Sym('a'),
-                Node::Cancel {
-                    arg: vec![Node::Sym('b'), Node::Sym('c')]
-                }
+                Node::Cancel(Box::new(Node::Sym('b'))),
+                Node::Cancel(Box::new(Node::Sym('c'))),
             ]
         );
-        assert_eq!(ed.col, 2);
-
-        // Select the cancel node and delete it.
-        ed.select_move(false);
+        // The selection survives (a strike changes no widths), so the
+        // same command toggles the strikes back off.
+        ed.execute("cancel");
+        assert_eq!(
+            ed.root,
+            vec![Node::Sym('a'), Node::Sym('b'), Node::Sym('c')]
+        );
+        // Re-strike and delete the selection.
+        ed.execute("cancel");
         assert!(ed.delete_selection());
         assert_eq!(ed.root, vec![Node::Sym('a')]);
 

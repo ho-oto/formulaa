@@ -435,20 +435,57 @@ fn typing_inside_a_norm_works() {
 }
 
 #[test]
-fn cancel_wraps_the_selection() {
-    // Shift-selection then \cancel.
+fn cancel_strikes_the_selections_tokens() {
+    // Shift-selection then \cancel: every token in the range is struck.
     let mut ed = Editor::new();
     type_script(&mut ed, r"x+y S-Left S-Left \cancel");
-    assert_eq!(latex(&ed), "x\\cancel{+y}");
-    // Block selection (^B from inside, Enter picks the parent) then
-    // \cancel.
+    assert_eq!(latex(&ed), "x\\cancel{+}\\cancel{y}");
+    // The selection survives, so the command toggles: an all-struck
+    // range unstrikes.
+    type_script(&mut ed, r"\cancel");
+    assert_eq!(latex(&ed), "x+y");
+    // A mixed range (b struck, + and c bare) strikes everything.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"b \! +c S-Left S-Left S-Left \cancel");
+    assert_eq!(latex(&ed), "\\cancel{b}\\cancel{+}\\cancel{c}");
+    // Block selection (^B from inside, Enter picks the parent): the
+    // strike walks into the delimiter block.
     let mut ed = Editor::new();
     type_script(&mut ed, r"a+(b+c C-b Enter \cancel");
-    assert_eq!(latex(&ed), "a+\\cancel{\\left(b+c\\right)}");
-    // Parent selection (Shift+Up) then \cancel.
+    assert_eq!(
+        latex(&ed),
+        "a+\\left(\\cancel{b}\\cancel{+}\\cancel{c}\\right)"
+    );
+    // Parent selection (Shift+Up) covers the fraction's fields.
     let mut ed = Editor::new();
     type_script(&mut ed, r"\frac u Down v Tab S-Up \cancel");
-    assert_eq!(latex(&ed), "\\cancel{\\frac{u}{v}}");
+    assert_eq!(latex(&ed), "\\frac{\\cancel{u}}{\\cancel{v}}");
+}
+
+#[test]
+fn cancel_with_no_selection_strikes_the_preceding_element() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"xy \!");
+    assert_eq!(latex(&ed), "x\\cancel{y}");
+    // Toggle back off.
+    type_script(&mut ed, r"\!");
+    assert_eq!(latex(&ed), "xy");
+    // A preceding structure gets its tokens struck.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\frac a Down b Tab \cancel");
+    assert_eq!(latex(&ed), "\\frac{\\cancel{a}}{\\cancel{b}}");
+}
+
+#[test]
+fn backspace_peels_the_strike_before_the_token() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"xy \!");
+    assert_eq!(latex(&ed), "x\\cancel{y}");
+    // First press removes the strike, the second the token itself.
+    type_script(&mut ed, r"Backspace");
+    assert_eq!(latex(&ed), "xy");
+    type_script(&mut ed, r"Backspace");
+    assert_eq!(latex(&ed), "x");
 }
 
 #[test]
@@ -1099,9 +1136,10 @@ fn block_select_mode_selects_a_structure() {
     // Enter on the outer ancestor selects the delimiter block.
     let mut ed = Editor::new();
     type_script(&mut ed, r"\pmatrix x C-b Up Enter \cancel");
+    // The strike walks into the structure and covers its tokens.
     assert_eq!(
         latex(&ed),
-        "\\cancel{\\begin{pmatrix} x &  \\\\  &  \\end{pmatrix}}"
+        "\\begin{pmatrix} \\cancel{x} &  \\\\  &  \\end{pmatrix}"
     );
 }
 

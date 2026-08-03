@@ -241,14 +241,14 @@ LaTeX:
 
 ```
  𝑎̸+̸𝑏̸
-─̸─̸─̸─̸─̸𝑑̸+𝑒
+─────𝑑̸+𝑒
   𝑐̸
 ```
 
 LaTeX:
 
 ```latex
-\cancel{\frac{a+b}{c}d}+e
+\frac{\cancel{a}\cancel{+}\cancel{b}}{\cancel{c}}\cancel{d}+e
 ```
 
 ### cancel-in-sup
@@ -261,7 +261,7 @@ LaTeX:
 LaTeX:
 
 ```latex
-e^{x\cancel{2\alpha }}
+e^{x\cancel{2}\cancel{\alpha }}
 ```
 
 ### continued-fraction

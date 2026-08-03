@@ -502,8 +502,11 @@ impl Parser {
                 t
             }
             "cancel" => {
-                let (arg, t) = self.arg(t);
-                out.push(Node::Cancel { arg });
+                // \cancel over a structure means its tokens are struck;
+                // push the strike down to them and splice.
+                let (mut arg, t) = self.arg(t);
+                crate::ast::cancel_all(&mut arg);
+                out.extend(arg);
                 t
             }
             // Formatting space -> the formatting Spacer (vanishes on

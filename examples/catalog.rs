@@ -96,8 +96,10 @@ fn mat(rows: usize, cols: usize, cells: Vec<Row>) -> Node {
     }
 }
 
-fn cancel(arg: Row) -> Node {
-    Node::Cancel { arg }
+/// Strike every token of the row (the atom-only Cancel model).
+fn cancel(mut arg: Row) -> Row {
+    mascii::ast::cancel_all(&mut arg);
+    arg
 }
 
 fn cat(parts: &[Row]) -> Row {
@@ -370,20 +372,20 @@ fn nested_matrices() {
 fn cancel_strikes() {
     // x·y/y = x with the y's cancelled
     let row = cat(&[
-        n(frac(cat(&[s("x"), n(cancel(s("y")))]), n(cancel(s("y"))))),
+        n(frac(cat(&[s("x"), cancel(s("y"))]), cancel(s("y")))),
         s("="),
         s("x"),
     ]);
     roundtrip("cancel-simple", &row);
     // cancel over a whole fraction, next to an uncancelled sibling
     let row = cat(&[
-        n(cancel(cat(&[n(frac(s("a+b"), s("c"))), s("d")]))),
+        cancel(cat(&[n(frac(s("a+b"), s("c"))), s("d")])),
         s("+"),
         s("e"),
     ]);
     roundtrip("cancel-frac", &row);
     // cancel inside a superscript
-    let row = cat(&[s("e"), n(sup(cat(&[s("x"), n(cancel(s("2α")))])))]);
+    let row = cat(&[s("e"), n(sup(cat(&[s("x"), cancel(s("2α"))])))]);
     roundtrip("cancel-in-sup", &row);
 }
 

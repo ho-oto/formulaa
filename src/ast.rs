@@ -139,11 +139,13 @@ pub enum Node {
         cols: usize,
         cells: Vec<Row>,
     },
-    /// Struck-through content (\cancel): every cell of the rendered
+    /// A struck-through token (\cancel): every cell of the rendered
     /// argument carries a combining long solidus overlay (U+0338).
-    Cancel {
-        arg: Row,
-    },
+    /// Only the atom-shaped nodes can be struck — `cancellable` — so a
+    /// strike always covers one whole token; cancelling a structure
+    /// means cancelling its tokens (normalize pushes a stray wrapper
+    /// down).
+    Cancel(Box<Node>),
 }
 
 /// Identifies one editable slot inside a structure node.
@@ -162,7 +164,6 @@ pub enum Field {
     BraceLabel,
     /// Segment index of a Delim.
     Seg(usize),
-    CancelArg,
     /// Row-major cell index of an Array.
     Cell(usize),
 }
@@ -178,7 +179,8 @@ impl Node {
             | Node::Text(_)
             | Node::Roman(_)
             | Node::Accent { .. }
-            | Node::WideAccent { .. } => {
+            | Node::WideAccent { .. }
+            | Node::Cancel(_) => {
                 vec![]
             }
             Node::Frac { .. } => vec![Field::FracNum, Field::FracDen],
@@ -192,7 +194,6 @@ impl Node {
             Node::Brace { .. } => vec![Field::BraceArg, Field::BraceLabel],
             Node::Delim { segs, .. } => (0..segs.len()).map(Field::Seg).collect(),
             Node::Norm { .. } => vec![Field::Seg(0)],
-            Node::Cancel { .. } => vec![Field::CancelArg],
             Node::Array { cells, .. } => (0..cells.len()).map(Field::Cell).collect(),
         }
     }
@@ -212,7 +213,6 @@ impl Node {
             (Node::Brace { label, .. }, Field::BraceLabel) => label,
             (Node::Delim { segs, .. }, Field::Seg(i)) => &segs[i],
             (Node::Norm { arg }, Field::Seg(0)) => arg,
-            (Node::Cancel { arg }, Field::CancelArg) => arg,
             (Node::Array { cells, .. }, Field::Cell(i)) => &cells[i],
             _ => panic!("field {:?} does not belong to node {:?}", f, self),
         }
@@ -233,7 +233,6 @@ impl Node {
             (Node::Brace { label, .. }, Field::BraceLabel) => label,
             (Node::Delim { segs, .. }, Field::Seg(i)) => &mut segs[i],
             (Node::Norm { arg }, Field::Seg(0)) => arg,
-            (Node::Cancel { arg }, Field::CancelArg) => arg,
             (Node::Array { cells, .. }, Field::Cell(i)) => &mut cells[i],
             (node, f) => panic!("field {:?} does not belong to node {:?}", f, node),
         }
@@ -335,26 +334,23 @@ pub fn normalize(row: &Row) -> Row {
                 continue;
             }
         }
-        // Empty scripts/cancels do not exist in normal form: their lone ⬚
+        // Empty scripts do not exist in normal form: their lone ⬚
         // placeholder fuses with neighbouring script blocks in the picture,
         // so the renderer must never produce one.
         match &node {
-            Node::Sup { arg } | Node::Sub { arg } | Node::Cancel { arg } if arg.is_empty() => {
+            Node::Sup { arg } | Node::Sub { arg } if arg.is_empty() => {
                 continue;
             }
             // An empty text run has no picture of its own worth keeping.
             Node::Text(t) | Node::Func(t) if t.is_empty() => continue,
             _ => {}
         }
-        // Scripts and cancels merge *across* spacers: the blank column a
-        // spacer renders is internal to the script run in the picture, so
-        // the parser reads one merged node — canonical form matches (the
+        // Scripts merge *across* spacers: the blank column a spacer
+        // renders is internal to the script run in the picture, so the
+        // parser reads one merged node — canonical form matches (the
         // spacers die in the merge, and are restored when no merge fires).
         let mut tail: Row = Vec::new();
-        if matches!(
-            node,
-            Node::Sup { .. } | Node::Sub { .. } | Node::Cancel { .. }
-        ) {
+        if matches!(node, Node::Sup { .. } | Node::Sub { .. }) {
             while matches!(out.last(), Some(Node::Spacer)) {
                 tail.push(out.pop().unwrap());
             }
@@ -370,124 +366,77 @@ pub fn normalize(row: &Row) -> Row {
                 a.extend(b.clone());
                 *a = normalize(a);
             }
-            // Adjacent struck-through blocks are one picture.
-            (Some(Node::Cancel { arg: a }), Node::Cancel { arg: b }) => {
-                a.extend(b.clone());
-                *a = normalize(a);
-            }
-            // "Maximal cancel": a fully struck script right after a cancel
-            // is the same picture as the script living inside it.
-            (Some(Node::Cancel { arg: a }), Node::Sup { arg: b })
-                if matches!(b[..], [Node::Cancel { .. }]) =>
-            {
-                let Node::Cancel { arg: inner } = &b[0] else {
-                    unreachable!()
-                };
-                a.push(Node::Sup { arg: inner.clone() });
-                *a = normalize(a);
-            }
-            (Some(Node::Cancel { arg: a }), Node::Sub { arg: b })
-                if matches!(b[..], [Node::Cancel { .. }]) =>
-            {
-                let Node::Cancel { arg: inner } = &b[0] else {
-                    unreachable!()
-                };
-                a.push(Node::Sub { arg: inner.clone() });
-                *a = normalize(a);
-            }
             _ => {
                 out.extend(tail);
                 out.push(node);
             }
         }
     }
-    // Trailing spacers pad nothing visible (and a trailing one inside a
-    // \cancel argument would meet the ragged-cancel spacer and fake a cell
-    // gap); spacers are only meaningful *between* siblings.
+    // Trailing spacers pad nothing visible; spacers are only meaningful
+    // *between* siblings.
     while matches!(out.last(), Some(Node::Spacer | Node::Break)) {
         out.pop();
     }
     out
 }
 
-/// Remove every Cancel wrapper in the subtree, splicing its contents.
-fn strip_cancels(row: &Row) -> Row {
-    let mut out: Row = Vec::new();
-    for n in row {
-        match n {
-            Node::Cancel { arg } => out.extend(strip_cancels(arg)),
-            Node::Sym(_)
-            | Node::Spacer
-            | Node::Break
-            | Node::Func(_)
-            | Node::Text(_)
-            | Node::Roman(_)
-            | Node::Accent { .. } => out.push(n.clone()),
-            Node::WideAccent {
-                overs,
-                unders,
-                base,
-            } => out.push(Node::WideAccent {
-                overs: overs.clone(),
-                unders: unders.clone(),
-                base: strip_cancels(base),
-            }),
-            Node::Frac { num, den } => out.push(Node::Frac {
-                num: strip_cancels(num),
-                den: strip_cancels(den),
-            }),
-            Node::Sqrt { arg, index } => out.push(Node::Sqrt {
-                arg: strip_cancels(arg),
-                index: *index,
-            }),
-            Node::Sup { arg } => out.push(Node::Sup {
-                arg: strip_cancels(arg),
-            }),
-            Node::Sub { arg } => out.push(Node::Sub {
-                arg: strip_cancels(arg),
-            }),
-            Node::BigOp { name, lower, upper } => out.push(Node::BigOp {
-                name: name.clone(),
-                lower: strip_cancels(lower),
-                upper: strip_cancels(upper),
-            }),
-            Node::BigOpSym { op, lower, upper } => out.push(Node::BigOpSym {
-                op: *op,
-                lower: strip_cancels(lower),
-                upper: strip_cancels(upper),
-            }),
-            Node::Arrow { op, over, under } => out.push(Node::Arrow {
-                op: *op,
-                over: strip_cancels(over),
-                under: strip_cancels(under),
-            }),
-            Node::Brace { over, arg, label } => out.push(Node::Brace {
-                over: *over,
-                arg: strip_cancels(arg),
-                label: strip_cancels(label),
-            }),
-            Node::Norm { arg } => out.push(Node::Norm {
-                arg: strip_cancels(arg),
-            }),
-            Node::Delim {
-                left,
-                right,
-                mids,
-                segs,
-            } => out.push(Node::Delim {
-                left: *left,
-                right: *right,
-                mids: *mids,
-                segs: segs.iter().map(strip_cancels).collect(),
-            }),
-            Node::Array { rows, cols, cells } => out.push(Node::Array {
-                rows: *rows,
-                cols: *cols,
-                cells: cells.iter().map(strip_cancels).collect(),
-            }),
+/// Every cancellable (atom-shaped) node in the tree, wrapped: this is
+/// what "cancel this region" means — a strike covers whole tokens, so
+/// cancelling a structure cancels the tokens inside it.
+pub fn cancel_all(row: &mut Row) {
+    for n in row.iter_mut() {
+        if cancellable(n) {
+            let inner = std::mem::replace(n, Node::Spacer);
+            *n = Node::Cancel(Box::new(inner));
+        } else if !matches!(n, Node::Cancel(_)) {
+            for f in n.fields() {
+                cancel_all(n.field_mut(f));
+            }
         }
     }
-    out
+}
+
+/// The inverse: every Cancel unwrapped, recursively.
+pub fn uncancel_all(row: &mut Row) {
+    for n in row.iter_mut() {
+        if let Node::Cancel(inner) = n {
+            *n = (**inner).clone();
+        } else {
+            for f in n.fields() {
+                uncancel_all(n.field_mut(f));
+            }
+        }
+    }
+}
+
+/// How many strikable tokens the tree holds: (still bare, already
+/// struck). The cancel command toggles on these — a mixed region
+/// cancels everything, an all-struck one unstrikes.
+pub fn cancel_census(row: &Row) -> (usize, usize) {
+    let mut bare = 0;
+    let mut struck = 0;
+    for n in row {
+        if cancellable(n) {
+            bare += 1;
+        } else if matches!(n, Node::Cancel(_)) {
+            struck += 1;
+        } else {
+            for f in n.fields() {
+                let (b, s) = cancel_census(n.field(f));
+                bare += b;
+                struck += s;
+            }
+        }
+    }
+    (bare, struck)
+}
+
+/// The nodes a strike can cover whole: the atom-shaped ones.
+pub fn cancellable(n: &Node) -> bool {
+    matches!(
+        n,
+        Node::Sym(_) | Node::Func(_) | Node::Roman(_) | Node::Text(_)
+    )
 }
 
 /// Remove every formatting `Spacer` in the subtree — exactly what the
@@ -566,9 +515,7 @@ pub fn strip_spacers(row: &Row) -> Row {
                 cols: *cols,
                 cells: cells.iter().map(strip_spacers).collect(),
             }),
-            Node::Cancel { arg } => out.push(Node::Cancel {
-                arg: strip_spacers(arg),
-            }),
+            Node::Cancel(arg) => out.push(Node::Cancel(arg.clone())),
         }
     }
     out
@@ -689,12 +636,20 @@ fn normalize_node(node: &Node) -> Node {
                 segs,
             }
         }
-        Node::Cancel { arg } => {
-            // A cancel strikes every cell of its subtree, so any Cancel
-            // nested anywhere inside it (even deep in a fraction) is the
-            // same picture; dissolve them all.
-            Node::Cancel {
-                arg: normalize(&strip_cancels(&normalize(arg))),
+        Node::Cancel(arg) => {
+            let inner = normalize_node(arg);
+            match inner {
+                // A double strike is one strike.
+                Node::Cancel(x) => Node::Cancel(x),
+                n if cancellable(&n) => Node::Cancel(Box::new(n)),
+                // A stray wrapper around a structure pushes down to the
+                // tokens inside it (that is what the picture shows).
+                mut n => {
+                    for f in n.fields() {
+                        cancel_all(n.field_mut(f));
+                    }
+                    n
+                }
             }
         }
         Node::Array { rows, cols, cells } => Node::Array {

@@ -699,7 +699,10 @@ fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec
             _ if is_display_marker(c) => ' ',
             _ => c,
         };
-        let cell = if d.struck.contains(&(y, i)) {
+        // An overlay (jump label, fender, blanked marker) replaced the
+        // glyph, so a strike on the cell below must not cross it out.
+        let overlaid = shown != c;
+        let cell = if !overlaid && d.struck.contains(&(y, i)) {
             format!("{}\u{338}", shown)
         } else {
             shown.to_string()
