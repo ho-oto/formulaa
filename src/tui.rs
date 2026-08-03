@@ -206,8 +206,8 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
 struct Decor {
     lines: Vec<Vec<char>>,
     bg: Vec<Vec<Option<Color>>>,
-    /// Cells wearing a \cancel strike (combining U+0338 at emission,
-    /// so a strike never occupies a column of its own).
+    /// Cells wearing a \cancel strike (drawn as the crossed-out
+    /// attribute + tint at emission, never as a combining char).
     struck: std::collections::HashSet<(usize, usize)>,
     caret: Option<(usize, usize)>,
     /// The edited grid's frame rectangle (x0, x1, top, bottom).
@@ -275,9 +275,9 @@ fn marker_boxes(
     block_selected: Option<usize>,
 ) -> Decor {
     let (lines, marks, caret) = (&block.lines, &block.marks[..], block.caret);
-    // Cell coordinates throughout — cancel strikes (combining U+0338)
-    // are a separate channel applied at span emission, so a struck cell
-    // never desyncs the column indexing (or splits its ligature).
+    // Cell coordinates throughout — cancel strikes are a separate
+    // channel applied as a style at span emission, so a struck cell
+    // never desyncs the column indexing.
     let mut grid: Vec<Vec<char>> = lines.to_vec();
     if grid.is_empty() {
         grid.push(Vec::new());
@@ -654,8 +654,10 @@ fn is_delim_piece(c: char) -> bool {
 /// Turn a rendered cell row into spans: private-use marker chars become
 /// colored jump/block labels, the cursor glyph blinks, and box
 /// backgrounds from `marker_boxes` are applied to plain glyphs. A
-/// struck cell gets its combining U+0338 appended *inside* its span,
-/// so the ligature is never split across style boundaries.
+/// struck cell is drawn with the terminal's crossed-out attribute and
+/// a tint — never a combining U+0338 in the cell: fonts render the
+/// astral-glyph + combining pair wider than one column, and the
+/// overflow smears into ghost glyphs under partial repaints.
 fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec<Span<'static>> {
     let (line, bg) = (&d.lines[y], &d.bg[y]);
     let cursor = d.caret.and_then(|(cy, cx)| (cy == y).then_some(cx));
@@ -710,18 +712,28 @@ fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec
         };
         // An overlay (jump label, fender, blanked marker) replaced the
         // glyph, so a strike on the cell below must not cross it out.
-        let overlaid = shown != c;
-        let cell = if !overlaid && d.struck.contains(&(y, i)) {
-            format!("{}\u{338}", shown)
-        } else {
-            shown.to_string()
-        };
+        let struck_here = shown == c && d.struck.contains(&(y, i));
+        let cell = shown.to_string();
         if cursor == Some(i) {
             flush(&mut buf, buf_bg, &mut spans);
-            let style = match cell_bg {
+            let mut style = match cell_bg {
                 Some(color) if caret != CaretStyle::Free => cursor_style.bg(color),
                 _ => cursor_style,
             };
+            if struck_here {
+                style = style.add_modifier(Modifier::CROSSED_OUT);
+            }
+            spans.push(Span::styled(cell, style));
+        } else if struck_here {
+            // Struck glyphs break the plain run: their own span carries
+            // the crossed-out attribute and tint.
+            flush(&mut buf, buf_bg, &mut spans);
+            let mut style = Style::default()
+                .fg(theme::CANCEL_FG)
+                .add_modifier(Modifier::CROSSED_OUT);
+            if let Some(color) = cell_bg {
+                style = style.bg(color);
+            }
             spans.push(Span::styled(cell, style));
         } else if c == FENDER_L || c == FENDER_R {
             // The open box's fenders: green glyphs, no ground.
@@ -1385,10 +1397,11 @@ mod tests {
 
     #[test]
     fn struck_cells_survive_cursor_decoration() {
-        // A cancel next to the cursor: cell indexing must not shift and
-        // the base+U+0338 ligature must stay inside one span (the bug:
-        // to_strings() embedded the strike, so char index != column and
-        // the caret split the ligature — the glyph vanished).
+        // A cancel next to the cursor: cell indexing must not shift,
+        // every cell stays exactly one char (no combining overlays in
+        // the TUI — fonts draw astral + combining pairs wider than a
+        // column and the overflow smears under partial repaints), and
+        // the struck cell's span carries the crossed-out attribute.
         let mut ed = Editor::new();
         type_script_keys(&mut ed, "ab");
         ed.input(Key::Left, true, false); // select b
@@ -1407,26 +1420,38 @@ mod tests {
             let (y, _) = d.caret.expect("caret visible");
             let spans = decorate_line(&d, y, CaretStyle::Normal, 0);
             let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
-            // Every struck glyph is still there, followed by its strike.
+            assert!(
+                !joined.contains('\u{338}') && !joined.contains('\u{336}'),
+                "no combining strike reaches the terminal: {:?}",
+                joined
+            );
+            // Column indexing intact: char count == cell count.
+            assert_eq!(joined.chars().count(), d.lines[y].len());
+            // The struck cell's span is crossed out; its glyph is there.
             for &(r, c) in &block.cancel {
                 if r == y {
-                    let cell: Vec<char> = joined.chars().collect();
-                    // find the base char count up to cell c: strikes are
-                    // combining, so count non-combining chars.
                     let mut col = 0usize;
-                    let mut ok = false;
-                    let mut it = cell.iter().peekable();
-                    while let Some(&ch) = it.next() {
-                        if ch == '\u{338}' {
-                            continue;
-                        }
-                        if col == c {
-                            ok = it.peek() == Some(&&'\u{338}');
+                    let mut found = false;
+                    for sp in &spans {
+                        let n = sp.content.chars().count();
+                        if (col..col + n).contains(&c) {
+                            assert!(
+                                sp.style.add_modifier.contains(Modifier::CROSSED_OUT),
+                                "struck cell crossed out at col {}: {:?}",
+                                c,
+                                spans
+                            );
+                            assert_eq!(
+                                sp.content.chars().nth(c - col),
+                                Some(d.lines[y][c]),
+                                "glyph survives"
+                            );
+                            found = true;
                             break;
                         }
-                        col += 1;
+                        col += n;
                     }
-                    assert!(ok, "strike stays glued at col {}: {:?}", c, joined);
+                    assert!(found, "struck col {} covered by spans", c);
                 }
             }
             ed.input(Key::Left, false, false);
