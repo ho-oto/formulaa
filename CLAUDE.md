@@ -53,7 +53,7 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 | `src/output/latex.rs` | AST → LaTeX(crate ルートの `mascii::latex` で再輸出)。スクリプトを吸収しうるノードは `{…}` で保護(往復のため) |
 | `src/from_latex.rs` | **LaTeX → AST**(第2経路)。自前出力は完全往復(roundtrip ハーネスが検証)、外部 LaTeX(KaTeX/MathJax 方言)は best-effort で不明要素をスキップ。`\tex` ボックス・`tex2aa`・wasm `latex_to_aa` が使う |
 | `src/symbols/` | **全テーブルの家**(1関心1ファイル、`symbols::X` でフラットに再輸出) |
-| ├ `atoms.rs` | **全記号語彙のテーブル2枚**(どちらも phf・手書き): 出力側 `ATOMS`(char → LaTeX 綴り+`kind` Sym/BigOp)と入力側 `NAMES`(綴り → char、別綴り・ASCII 絵文字綴りは `\|` で併記。コマンド別綴りは `resolve` の match パターン)・予約グリフ・`is_atom`。**入力できる原子は必ず LaTeX 綴りを持つ**(gap=0 をテストが固定) |
+| ├ `atoms.rs` | **全記号語彙のテーブル3枚**(すべて phf・手書き): 出力側 `ATOMS`(char → LaTeX 綴り+`kind` Sym/BigOp)、入力側 `NAMES`(綴り → char、別綴り・ASCII 絵文字綴りは `\|` で併記。コマンド別綴りは `resolve` の match パターン)、否定 `NEGATIONS`(基底 char → 斜線付き char。`!` 前置/後置綴りの解決元、網羅性はテーブル走査のテストが固定)・予約グリフ・`is_atom`。**入力できる原子は必ず LaTeX 綴りを持つ**(gap=0 をテストが固定) |
 | ├ `funcs.rs` | 立体関数 `FUNCS`(limits/spaced)。∑系は `ATOMS` の kind に統合 |
 | ├ `accents.rs` | `Accent` enum: 入力 `ACCENT_NAMES`(phf, 綴り→variant)+`info()`(variant→全属性の1 match) |
 | ├ `radicals.rs` | `Radical` enum: 入力 `RADICAL_NAMES`(phf)+`info()`(グリフ・LaTeX 指数) |

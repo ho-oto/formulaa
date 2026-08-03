@@ -587,49 +587,53 @@ pub fn named_char(name: &str) -> Option<char> {
     NAMES.get(name).copied()
 }
 
-/// The slashed (negated) form of a relation, where Unicode has one and
-/// the base is typeable. This is what the `!` spellings resolve
+/// Base relation → its precomposed slashed form, where Unicode has one
+/// and the base is typeable. This is what the `!` spellings resolve
 /// through (`\!=` / `\=!` → ≠): one table, so every new pair
-/// automatically gains its `!name` / `name!` aliases.
+/// automatically gains its `!name` / `name!` aliases — and the tests
+/// walk the keys to hold the coverage invariants.
+/// (`~` is the keyboard alias of `∼`, so ≁ has two bases.)
+pub static NEGATIONS: phf::Map<char, char> = phf::phf_map! {
+    '=' => '≠',
+    '~' => '≁',
+    '∈' => '∉',
+    '∋' => '∌',
+    '<' => '≮',
+    '>' => '≯',
+    '≤' => '≰',
+    '≥' => '≱',
+    '∼' => '≁',
+    '≃' => '≄',
+    '≅' => '≇',
+    '≈' => '≉',
+    '≡' => '≢',
+    '≲' => '≴',
+    '≳' => '≵',
+    '≺' => '⊀',
+    '≻' => '⊁',
+    '≼' => '⋠',
+    '≽' => '⋡',
+    '⊂' => '⊄',
+    '⊃' => '⊅',
+    '⊆' => '⊈',
+    '⊇' => '⊉',
+    '⊑' => '⋢',
+    '⊒' => '⋣',
+    '⊲' => '⋪',
+    '⊳' => '⋫',
+    '⊴' => '⋬',
+    '⊵' => '⋭',
+    '⊢' => '⊬',
+    '⊨' => '⊭',
+    '⊩' => '⊮',
+    '∣' => '∤',
+    '∥' => '∦',
+    '∃' => '∄',
+};
+
+/// The slashed form of `c`, if the table has one.
 pub fn negated(c: char) -> Option<char> {
-    Some(match c {
-        '=' => '≠',
-        '~' => '≁',
-        '∈' => '∉',
-        '∋' => '∌',
-        '<' => '≮',
-        '>' => '≯',
-        '≤' => '≰',
-        '≥' => '≱',
-        '∼' => '≁',
-        '≃' => '≄',
-        '≅' => '≇',
-        '≈' => '≉',
-        '≡' => '≢',
-        '≲' => '≴',
-        '≳' => '≵',
-        '≺' => '⊀',
-        '≻' => '⊁',
-        '≼' => '⋠',
-        '≽' => '⋡',
-        '⊂' => '⊄',
-        '⊃' => '⊅',
-        '⊆' => '⊈',
-        '⊇' => '⊉',
-        '⊑' => '⋢',
-        '⊒' => '⋣',
-        '⊲' => '⋪',
-        '⊳' => '⋫',
-        '⊴' => '⋬',
-        '⊵' => '⋭',
-        '⊢' => '⊬',
-        '⊨' => '⊭',
-        '⊩' => '⊮',
-        '∣' => '∤',
-        '∥' => '∦',
-        '∃' => '∄',
-        _ => return None,
-    })
+    NEGATIONS.get(&c).copied()
 }
 
 /// Every character the format accepts as an atom. Derived from the
@@ -809,20 +813,22 @@ mod tests {
         }
     }
 
-    /// Every slashed relation the `!` spellings produce is a first-class
-    /// atom: present in ATOMS (so it spells its LaTeX) and typeable
-    /// through some curated name of its own.
+    /// Walk the negation table itself: every base is typeable (a
+    /// curated name or a bare keyboard char, or the pair could never
+    /// be spelled), and every slashed form is a first-class atom —
+    /// present in ATOMS and typeable through some curated name of its
+    /// own.
     #[test]
     fn negations_are_atoms_and_typeable() {
         let mut seen = std::collections::HashSet::new();
-        for (&name, &base) in NAMES.entries() {
-            let Some(neg) = negated(base) else { continue };
+        for (&base, &neg) in NEGATIONS.entries() {
             assert!(
-                ATOMS.contains_key(&neg),
-                "!{} → {} is not a curated atom",
-                name,
+                base.is_ascii() || NAMES.values().any(|&c| c == base),
+                "the base {} of {} is not typeable",
+                base,
                 neg
             );
+            assert!(ATOMS.contains_key(&neg), "{} is not a curated atom", neg);
             assert!(
                 NAMES.values().any(|&c| c == neg),
                 "{} has no direct input name",
