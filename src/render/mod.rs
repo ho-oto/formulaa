@@ -737,11 +737,9 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 row.extend_from_slice(line);
                 lines.push(row);
             }
-            let cancel = a.cancel.iter().map(|&(r, c)| (r + 1, c + 1)).collect();
             Block {
                 lines,
                 baseline: a.baseline + 1,
-                cancel,
                 caret: a.caret.map(|(r, c)| (r + 1, c + 1)),
                 marks: a
                     .marks
@@ -762,7 +760,6 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             Block {
                 lines: a.lines,
                 baseline: h,
-                cancel: a.cancel,
                 caret: a.caret,
                 marks: a.marks,
             }
@@ -777,11 +774,9 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             let a = render_row(arg, cur(Field::SubArg), true, ctx);
             let mut lines = vec![vec![' '; a.width()]];
             lines.extend(a.lines);
-            let cancel = a.cancel.iter().map(|&(r, c)| (r + 1, c)).collect();
             Block {
                 lines,
                 baseline: 0,
-                cancel,
                 caret: a.caret.map(|(r, c)| (r + 1, c)),
                 marks: a.marks.iter().map(|&(r, c, ch)| (r + 1, c, ch)).collect(),
             }
@@ -1044,43 +1039,15 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
                 row.extend_from_slice(&rcols[r]);
                 lines.push(row);
             }
-            let cancel = body
-                .cancel
-                .iter()
-                .map(|&(r, c)| (r + top_pad, c + lw))
-                .collect();
             Block {
                 lines,
                 baseline: ext_bl,
-                cancel,
                 caret: body.caret.map(|(r, c)| (r + top_pad, c + lw)),
                 marks: body
                     .marks
                     .iter()
                     .map(|&(r, c, ch)| (r + top_pad, c + lw, ch))
                     .collect(),
-            }
-        }
-
-        Node::Cancel(tok) => {
-            // A strike covers one atom-shaped token; no field, so the
-            // caret can never sit inside — render the token bare and
-            // strike every non-blank cell with the combining overlay.
-            let a = render_node(&Node::Sym(*tok), None, ctx);
-            let mut cancel: Vec<(usize, usize)> = Vec::new();
-            for (r, line) in a.lines.iter().enumerate() {
-                for (c, &ch) in line.iter().enumerate() {
-                    if ch != ' ' {
-                        cancel.push((r, c));
-                    }
-                }
-            }
-            Block {
-                lines: a.lines,
-                baseline: a.baseline,
-                cancel,
-                caret: a.caret,
-                marks: a.marks,
             }
         }
 
@@ -1143,7 +1110,6 @@ fn render_fused_grid(
 
     let one_row = rows == 1;
     let mut lines: Vec<Vec<char>> = Vec::new();
-    let mut cancel: Vec<(usize, usize)> = Vec::new();
     let mut caret: Option<(usize, usize)> = None;
     let mut marks: Vec<(usize, usize, char)> = Vec::new();
     let mut sep_rows: Vec<usize> = Vec::new();
@@ -1171,7 +1137,6 @@ fn render_fused_grid(
         }
         let row_block = hcat(&parts);
         let row_off = lines.len();
-        cancel.extend(row_block.cancel.iter().map(|&(r, c)| (r + row_off, c)));
         if let Some((r, c)) = row_block.caret {
             caret = Some((r + row_off, c));
         }
@@ -1212,11 +1177,9 @@ fn render_fused_grid(
         row.push(rc);
         out.push(row);
     }
-    let cancel = cancel.into_iter().map(|(r, c)| (r, c + 1)).collect();
     Block {
         lines: out,
         baseline: bl,
-        cancel,
         caret: caret.map(|(r, c)| (r, c + 1)),
         marks: marks.into_iter().map(|(r, c, ch)| (r, c + 1, ch)).collect(),
     }
@@ -1278,7 +1241,6 @@ fn render_lattice(
     };
 
     let mut lines: Vec<Vec<char>> = vec![marker_row(0)];
-    let mut cancel: Vec<(usize, usize)> = Vec::new();
     let mut caret: Option<(usize, usize)> = None;
     let mut marks: Vec<(usize, usize, char)> = Vec::new();
     for i in 0..rows {
@@ -1296,7 +1258,6 @@ fn render_lattice(
         }
         let row_block = hcat(&parts);
         let row_off = lines.len();
-        cancel.extend(row_block.cancel.iter().map(|&(r, c)| (r + row_off, c)));
         if let Some((r, c)) = row_block.caret {
             caret = Some((r + row_off, c));
         }
@@ -1317,7 +1278,6 @@ fn render_lattice(
     Block {
         lines,
         baseline: (h - 1) / 2,
-        cancel,
         caret,
         marks,
     }

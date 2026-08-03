@@ -43,7 +43,21 @@ pub use scripts::*;
 /// the tables are static and the atoms test proves they never hand
 /// out a structural glyph.
 pub fn symbol_by_name(name: &str) -> Option<char> {
-    named_char(name).or_else(|| alphabets::alphabet_char(name))
+    if let Some(c) = named_char(name).or_else(|| alphabets::alphabet_char(name)) {
+        return Some(c);
+    }
+    // `!name` / `name!` spell the slashed relation of `name` when one
+    // exists (\!= and \=! are ≠, \!in is ∉). The base is a curated
+    // name or a single keyboard char (= < > ~).
+    let base = name.strip_prefix('!').or_else(|| name.strip_suffix('!'))?;
+    let base_char = named_char(base).or_else(|| {
+        let mut cs = base.chars();
+        match (cs.next(), cs.next()) {
+            (Some(c), None) => Some(c),
+            _ => None,
+        }
+    });
+    atoms::negated(base_char?)
 }
 
 /// Is this char a ∑-class operator (band-promotable)?

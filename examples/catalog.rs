@@ -96,12 +96,6 @@ fn mat(rows: usize, cols: usize, cells: Vec<Row>) -> Node {
     }
 }
 
-/// Strike every token of the row (the atom-only Cancel model).
-fn cancel(mut arg: Row) -> Row {
-    mascii::ast::cancel_all(&mut arg);
-    arg
-}
-
 fn cat(parts: &[Row]) -> Row {
     parts.concat()
 }
@@ -368,27 +362,6 @@ fn nested_matrices() {
     roundtrip("nested-matrices", &row);
 }
 
-/// Cancellation: (x̸ y̸ / y̸ z̸) style strikes, including a struck fraction.
-fn cancel_strikes() {
-    // x·y/y = x with the y's cancelled
-    let row = cat(&[
-        n(frac(cat(&[s("x"), cancel(s("y"))]), cancel(s("y")))),
-        s("="),
-        s("x"),
-    ]);
-    roundtrip("cancel-simple", &row);
-    // cancel over a whole fraction, next to an uncancelled sibling
-    let row = cat(&[
-        cancel(cat(&[n(frac(s("a+b"), s("c"))), s("d")])),
-        s("+"),
-        s("e"),
-    ]);
-    roundtrip("cancel-frac", &row);
-    // cancel inside a superscript
-    let row = cat(&[s("e"), n(sup(cat(&[s("x"), cancel(s("2α"))])))]);
-    roundtrip("cancel-in-sup", &row);
-}
-
 /// Continued fraction (deep vertical nesting).
 fn continued_fraction() {
     let mut row = s("x");
@@ -566,7 +539,6 @@ fn main() {
     rotation_matrix();
     matrix_exponential();
     nested_matrices();
-    cancel_strikes();
     continued_fraction();
     nested_limits();
     println!("## デリミタ\n");

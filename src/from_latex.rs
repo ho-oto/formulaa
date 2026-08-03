@@ -399,26 +399,9 @@ impl Parser {
             // \not negates the following relation when Unicode has the
             // negated codepoint; otherwise it is skipped (best effort).
             "not" => {
-                let negated = |c: char| {
-                    Some(match c {
-                        '=' => '≠',
-                        '∈' => '∉',
-                        '∋' => '∌',
-                        '<' => '≮',
-                        '>' => '≯',
-                        '≤' => '≰',
-                        '≥' => '≱',
-                        '⊆' => '⊈',
-                        '⊇' => '⊉',
-                        '∼' => '≁',
-                        '≅' => '≇',
-                        '∥' => '∦',
-                        '∃' => '∄',
-                        // Negations without a KaTeX/MathJax spelling
-                        // (⊄ ≢ ≉ …) keep the bare relation instead.
-                        _ => return None,
-                    })
-                };
+                // One shared table (symbols::negated); a relation with
+                // no slashed form keeps its bare self instead.
+                let negated = crate::symbols::negated;
                 let mut i = 0;
                 while t.get(i) == Some(&Tok::Space) {
                     i += 1;
@@ -502,16 +485,10 @@ impl Parser {
                 t
             }
             "cancel" => {
-                // \cancel over a structure means its tokens are struck;
-                // push the strike down to them and splice (cancel_all
-                // also collapses an empty-limit big operator to its
-                // atom, so our own `\cancel{\sum }` strikes the ∑ and
-                // the spliced node cannot become a limits host for a
-                // following script). A struck band (external
-                // `\cancel{\sum_{i}}`) has no representation: best
-                // effort keeps the limits and strikes what it can.
-                let (mut arg, t) = self.arg(t);
-                crate::ast::cancel_all(&mut arg);
+                // No struck form exists (strike overlays were removed
+                // for display stability): best effort keeps the
+                // content and drops the line.
+                let (arg, t) = self.arg(t);
                 out.extend(arg);
                 t
             }

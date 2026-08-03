@@ -139,13 +139,6 @@ pub enum Node {
         cols: usize,
         cells: Vec<Row>,
     },
-    /// A struck-through symbol atom (\cancel): the glyph's cell
-    /// carries a combining long solidus overlay (U+0338). Only a `Sym`
-    /// can be struck — \cancel is not standard LaTeX and reproduction
-    /// is best-effort anyway, so the strike stays a one-cell affair:
-    /// no runs, no text, no structures (cancelling a structure strikes
-    /// the symbol atoms inside it via `cancel_all`).
-    Cancel(char),
 }
 
 /// Identifies one editable slot inside a structure node.
@@ -179,8 +172,7 @@ impl Node {
             | Node::Text(_)
             | Node::Roman(_)
             | Node::Accent { .. }
-            | Node::WideAccent { .. }
-            | Node::Cancel(_) => {
+            | Node::WideAccent { .. } => {
                 vec![]
             }
             Node::Frac { .. } => vec![Field::FracNum, Field::FracDen],
@@ -386,76 +378,6 @@ pub fn normalize(row: &Row) -> Row {
     out
 }
 
-/// Every symbol atom in the tree, struck: this is what "cancel this
-/// region" means — cancelling a structure strikes the atoms inside it.
-pub fn cancel_all(row: &mut Row) {
-    for n in row.iter_mut() {
-        match n {
-            Node::Sym(c) => *n = Node::Cancel(*c),
-            // An empty-limit ∑-class operator is its bare atom (the
-            // same collapse normalize applies), so striking it strikes
-            // the atom instead of finding nothing in the empty limits.
-            Node::BigOpSym { op, lower, upper } if lower.is_empty() && upper.is_empty() => {
-                *n = Node::Cancel(*op)
-            }
-            Node::Cancel(_) => {}
-            n => {
-                for f in n.fields() {
-                    cancel_all(n.field_mut(f));
-                }
-            }
-        }
-    }
-}
-
-/// The inverse: every Cancel unwrapped, recursively.
-pub fn uncancel_all(row: &mut Row) {
-    for n in row.iter_mut() {
-        if let Node::Cancel(c) = n {
-            *n = Node::Sym(*c);
-        } else {
-            for f in n.fields() {
-                uncancel_all(n.field_mut(f));
-            }
-        }
-    }
-}
-
-/// How many strikable tokens the tree holds: (still bare, already
-/// struck). The cancel command toggles on these — a mixed region
-/// cancels everything, an all-struck one unstrikes.
-pub fn cancel_census(row: &Row) -> (usize, usize) {
-    let mut bare = 0;
-    let mut struck = 0;
-    // Empty-limit big operators count as bare tokens: cancel_all
-    // collapses them to their atom (census and effect must agree).
-    let bare_bigop = |n: &Node| {
-        matches!(
-            n,
-            Node::BigOpSym { lower, upper, .. } if lower.is_empty() && upper.is_empty()
-        )
-    };
-    for n in row {
-        if cancellable(n) || bare_bigop(n) {
-            bare += 1;
-        } else if matches!(n, Node::Cancel(_)) {
-            struck += 1;
-        } else {
-            for f in n.fields() {
-                let (b, s) = cancel_census(n.field(f));
-                bare += b;
-                struck += s;
-            }
-        }
-    }
-    (bare, struck)
-}
-
-/// The nodes a strike can cover: symbol atoms only.
-pub fn cancellable(n: &Node) -> bool {
-    matches!(n, Node::Sym(_))
-}
-
 /// Remove every formatting `Spacer` in the subtree — exactly what the
 /// parser cannot see (blank columns are structural). The roundtrip
 /// contract is `parse(render(normalize(x))) == normalize(strip_spacers(normalize(x)))`.
@@ -532,7 +454,6 @@ pub fn strip_spacers(row: &Row) -> Row {
                 cols: *cols,
                 cells: cells.iter().map(strip_spacers).collect(),
             }),
-            Node::Cancel(arg) => out.push(Node::Cancel(*arg)),
         }
     }
     out
@@ -653,7 +574,6 @@ fn normalize_node(node: &Node) -> Node {
                 segs,
             }
         }
-        Node::Cancel(c) => Node::Cancel(*c),
         Node::Array { rows, cols, cells } => Node::Array {
             rows: *rows,
             cols: *cols,

@@ -94,14 +94,13 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 - カーソルは `Block.caret`(幅ゼロのメタデータ、全合成で伝搬)。描画は
   カーソル有無でジオメトリが変わらない(TUI は反転表示、wasm のテキスト
   画面だけ ▌ を上書き描画)。パース対象はカーソルなし描画のみ。
-  render_node の新アームでは caret の伝搬を忘れない(cancel と同じ
-  オフセットで写す。忘れると tests/ui.rs の caret 生存チェックが落ちる)。
+  render_node の新アームでは caret の伝搬を忘れない(忘れると
+  tests/ui.rs の caret 生存チェックが落ちる)。
 - `Sqrt` の `index`・矢印の `op`・アクセントの `overs`/`unders`・括弧の
   `left`/`right` は enum(`Radical`/`Arrow`/`Accent`/`Delim`)。`Node::Accent` の base は
-  1 文字(Row ではない)。`Node::Cancel(char)` は
-  **struck な Sym**(記号原子だけが打ち消せる — 部分サポートの割り切り)。
-  構造の打ち消しは `cancel_all` で中の記号原子へ押し下げる(エディタと
-  LaTeX リーダーが呼ぶ)。
+  1 文字(Row ではない)。打ち消し線(\cancel)は非対応 — 否定は
+  合成済み斜線付き原子(≠ ∉ …。`!` 前置/後置の綴りは `symbols::negated`
+  経由で解決)。
 - 括弧は `Node::Delim{left,right,mids,segs}` に統一(旧 Paren/Matrix は廃止)。
   `left`/`right` は `Delim` enum(スロットが側を決める — `]` は左に置けない)、
   `mids` は │ の本数。

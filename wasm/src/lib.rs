@@ -84,19 +84,11 @@ impl MasciiEditor {
         // Caret and decorations are zero-width metadata; the text screen
         // draws them over the glyphs (▌ caret, ⟦ ⟧ selection ends,
         // a/s/d… jump and block labels).
-        // Cell grid (no embedded combining strikes): overlay coords are
-        // cell coords, so strikes must not occupy indices. They are
-        // re-applied when the screen string is assembled below.
         let mut lines: Vec<Vec<char>> = block.lines.clone();
         if lines.is_empty() {
             lines.push(Vec::new());
         }
-        // Overlays replace the glyph under them, so a strike on that
-        // cell must not cross the overlay out.
-        let mut overlaid: std::collections::HashSet<(usize, usize)> =
-            std::collections::HashSet::new();
-        let mut put = |lines: &mut Vec<Vec<char>>, r: usize, c: usize, ch: char| {
-            overlaid.insert((r, c));
+        let put = |lines: &mut Vec<Vec<char>>, r: usize, c: usize, ch: char| {
             // Overlays may land past the last rendered row (the command
             // preview sits one row below the caret): grow, never index
             // out of bounds.
@@ -110,8 +102,8 @@ impl MasciiEditor {
             row[c] = ch;
         };
         // Selection / cell / lane ranges show as a combining underline
-        // on every covered cell (like the cancel strike: zero-width,
-        // so no glyph is hidden and the geometry stays true). Pair the
+        // on every covered cell (zero-width, so no glyph is hidden and
+        // the geometry stays true). Pair the
         // marks per row; the label emphasis is a double underline.
         let mut underlined: Vec<(usize, usize, usize)> = Vec::new(); // (row, x0, x1)
         {
@@ -207,11 +199,8 @@ impl MasciiEditor {
                 put(&mut lines, r, c, CURSOR_CHAR);
             }
         }
-        // Assemble, appending the combining channels per cell: the
-        // cancel strike (U+0338) and the range underline (U+0332) are
+        // Assemble, appending the combining underline per cell: it is
         // zero-width, so overlay coordinates stay cell coordinates.
-        let struck: std::collections::HashSet<(usize, usize)> =
-            block.cancel.iter().copied().collect();
         let selected: std::collections::HashSet<(usize, usize)> = underlined
             .iter()
             .flat_map(|&(r, x0, x1)| (x0..x1.max(x0 + 1)).map(move |c| (r, c)))
@@ -223,10 +212,6 @@ impl MasciiEditor {
                 let mut out = String::with_capacity(l.len() * 2);
                 for (c, ch) in l.into_iter().enumerate() {
                     out.push(ch);
-                    if ch != CURSOR_CHAR && struck.contains(&(r, c)) && !overlaid.contains(&(r, c))
-                    {
-                        out.push('\u{338}');
-                    }
                     if selected.contains(&(r, c)) {
                         out.push('\u{332}');
                     }

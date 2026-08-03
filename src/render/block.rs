@@ -1,8 +1,7 @@
 //! The 2D block algebra: rectangular character grids with a baseline
-//! and three zero-width annotation channels (cancel strikes, the
-//! caret, display marks), plus the compositions — horizontal
-//! concatenation on the baseline, vertical stacking, centered padding
-//! — that carry all four through. Nothing here knows what a `Node`
+//! and two zero-width annotation channels (the caret, display marks),
+//! plus the compositions — horizontal concatenation on the baseline,
+//! vertical stacking, centered padding — that carry them through. Nothing here knows what a `Node`
 //! is; the AST rules live in the parent module. The channel
 //! propagation is the footgun CLAUDE.md warns about, so it is
 //! unit-tested HERE, where a violation names the composition that
@@ -17,9 +16,6 @@ pub struct Block {
     /// Index of the baseline row. May equal `height()` for blocks that sit
     /// entirely above the baseline (superscripts) — never index with it.
     pub baseline: usize,
-    /// Cells struck through by \cancel, as (row, col). Emitted as a
-    /// combining long solidus (U+0338) after the cell char in text output.
-    pub cancel: Vec<(usize, usize)>,
     /// Editing caret cell (row, col): the glyph right of the insertion
     /// point. Zero-width metadata — the caret never occupies a column,
     /// so the layout is identical to the cursor-less render. None in
@@ -38,7 +34,6 @@ impl Block {
         Block {
             lines,
             baseline,
-            cancel: vec![],
             caret: None,
             marks: vec![],
         }
@@ -76,22 +71,7 @@ impl Block {
     }
 
     pub fn to_strings(&self) -> Vec<String> {
-        let flagged: std::collections::HashSet<(usize, usize)> =
-            self.cancel.iter().copied().collect();
-        self.lines
-            .iter()
-            .enumerate()
-            .map(|(r, l)| {
-                let mut out = String::with_capacity(l.len() * 2);
-                for (c, &ch) in l.iter().enumerate() {
-                    out.push(ch);
-                    if flagged.contains(&(r, c)) {
-                        out.push('\u{338}');
-                    }
-                }
-                out
-            })
-            .collect()
+        self.lines.iter().map(|l| l.iter().collect()).collect()
     }
 
     pub fn to_text(&self) -> String {
@@ -140,7 +120,6 @@ pub(super) fn hcat(blocks: &[Block]) -> Block {
     let height = above + below;
     let width: usize = blocks.iter().map(|b| b.width()).sum();
     let mut grid = vec![vec![' '; width]; height];
-    let mut cancel = Vec::new();
     let mut caret = None;
     let mut marks = Vec::new();
     let mut x = 0;
@@ -151,7 +130,6 @@ pub(super) fn hcat(blocks: &[Block]) -> Block {
                 grid[y0 + dy][x + dx] = c;
             }
         }
-        cancel.extend(b.cancel.iter().map(|&(r, c)| (y0 + r, x + c)));
         if let Some((r, c)) = b.caret {
             caret = Some(if b.is_empty() {
                 // Zero-width marker: caret at this x, on the baseline.
@@ -172,19 +150,17 @@ pub(super) fn hcat(blocks: &[Block]) -> Block {
     Block {
         lines: grid,
         baseline: above,
-        cancel,
         caret,
         marks,
     }
 }
 
-/// The zero-width annotation channels of a Block (cancel strikes,
+/// The zero-width annotation channels of a Block (caret,
 /// caret, display marks), accumulated as children are centered into a
 /// parent. One `centered` call per child replaces the three per-channel
 /// translations every composite node used to spell out.
 #[derive(Default)]
 pub(super) struct Annots {
-    cancel: Vec<(usize, usize)>,
     caret: Option<(usize, usize)>,
     marks: Vec<(usize, usize, char)>,
 }
@@ -194,8 +170,6 @@ impl Annots {
     /// (first caret wins — a cursor lives in at most one child).
     pub(super) fn centered(mut self, b: &Block, width: usize, row_off: usize) -> Self {
         let left = (width - b.width()) / 2;
-        self.cancel
-            .extend(b.cancel.iter().map(|&(r, c)| (r + row_off, c + left)));
         self.caret = self
             .caret
             .or_else(|| b.caret.map(|(r, c)| (r + row_off, c + left)));
@@ -211,7 +185,6 @@ impl Annots {
         Block {
             lines,
             baseline,
-            cancel: self.cancel,
             caret: self.caret,
             marks: self.marks,
         }
@@ -239,7 +212,6 @@ pub(super) fn vstack(blocks: &[Block]) -> Block {
     // every segment is empty (Enter on an empty formula).
     let width = blocks.iter().map(|b| b.width()).max().unwrap_or(0).max(1);
     let mut lines: Vec<Vec<char>> = Vec::new();
-    let mut cancel = Vec::new();
     let mut caret = None;
     let mut marks = Vec::new();
     let mut baseline = 0;
@@ -263,7 +235,6 @@ pub(super) fn vstack(blocks: &[Block]) -> Block {
             l.resize(width, ' ');
             lines.push(l);
         }
-        cancel.extend(b.cancel.iter().map(|&(r, c)| (y0 + r, c)));
         if let Some((r, c)) = b.caret {
             caret = Some((y0 + r.min(b.height().saturating_sub(1)), c));
         }
@@ -272,7 +243,6 @@ pub(super) fn vstack(blocks: &[Block]) -> Block {
     Block {
         lines,
         baseline,
-        cancel,
         caret,
         marks,
     }
@@ -287,40 +257,6 @@ mod tests {
             lines.iter().map(|l| l.chars().collect()).collect(),
             baseline,
         )
-    }
-
-    /// hcat aligns on the baseline and carries every channel at the
-    /// shifted offsets — the invariant every render arm leans on.
-    #[test]
-    fn hcat_carries_all_channels() {
-        let mut left = b(&["ab"], 0);
-        left.cancel.push((0, 1));
-        left.marks.push((0, 0, '\u{E0F0}'));
-        let mut right = b(&["c", "d"], 1);
-        right.caret = Some((1, 0));
-        let out = hcat(&[left, right]);
-        // Baselines meet: left's row 0 lands on the joint baseline.
-        assert_eq!(out.baseline, 1);
-        // (to_strings embeds the strike as its combining solidus.)
-        assert_eq!(out.to_strings(), vec!["  c", "ab\u{338}d"]);
-        assert_eq!(out.cancel, vec![(1, 1)], "strike shifted to the joint row");
-        assert_eq!(out.marks, vec![(1, 0, '\u{E0F0}')]);
-        assert_eq!(out.caret, Some((1, 2)), "caret shifted by left's width");
-    }
-
-    #[test]
-    fn vstack_carries_all_channels() {
-        let mut top = b(&["x"], 0);
-        top.caret = Some((0, 0));
-        let mut bot = b(&["yy"], 0);
-        bot.cancel.push((0, 1));
-        bot.marks.push((0, 0, '\u{E0F1}'));
-        let out = vstack(&[top, bot]);
-        assert_eq!(out.caret, Some((0, 0)), "caret stays in its own row");
-        // The lone-band separator row sits between the stacked lines.
-        let sep = 1;
-        assert_eq!(out.cancel, vec![(sep + 1, 1)]);
-        assert_eq!(out.marks, vec![(sep + 1, 0, '\u{E0F1}')]);
     }
 
     /// A baseline may equal height() (a block entirely above the

@@ -49,12 +49,6 @@ pub const BORDER_FG: Color = Color::DarkGray;
 /// The visible space atom ␣.
 pub const SPACE_FG: Color = Color::DarkGray;
 
-/// Struck (\cancel) glyphs: the strike is the terminal's own
-/// crossed-out attribute plus this tint — combining overlays (U+0338)
-/// stay out of the TUI cells (fonts draw astral char + combining pairs
-/// wider than one cell and the overflow smears under partial repaints).
-pub const CANCEL_FG: Color = Color::Red;
-
 // ----- 紫: cursor & selection -----
 
 /// Selection background — every "this is selected" surface: the linear

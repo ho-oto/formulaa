@@ -232,8 +232,6 @@ fn node_to_latex(node: &Node) -> String {
                 array_body(*cols, cells)
             )
         }
-        // Requires \usepackage{cancel}.
-        Node::Cancel(c) => format!("\\cancel{{{}}}", node_to_latex(&Node::Sym(*c))),
     }
 }
 

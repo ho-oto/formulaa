@@ -221,8 +221,7 @@ impl Editor {
             | Edit::AddCol
             | Edit::DelRow
             | Edit::DelCol
-            | Edit::OpenBox(_)
-            | Edit::Cancel => None,
+            | Edit::OpenBox(_) => None,
         }
     }
 
@@ -259,14 +258,8 @@ impl Editor {
         // An edit that does not consume the selection still shifts the
         // row under it, so a surviving anchor would designate a
         // different range afterwards (the plain-key path clears it the
-        // same way). The two wrapping edits keep it; Cancel reads it
-        // and then clears it itself — a strike leaves the row shape
-        // intact, but an invisible surviving selection would turn the
-        // next wrap key or ^C into a surprise on the struck range.
-        let wraps = matches!(
-            edit,
-            Edit::Insert { wrap: true, .. } | Edit::Accent(_) | Edit::Cancel
-        );
+        // same way). Only the two wrapping edits keep it.
+        let wraps = matches!(edit, Edit::Insert { wrap: true, .. } | Edit::Accent(_));
         if !wraps {
             self.select_anchor = None;
         }
@@ -279,7 +272,7 @@ impl Editor {
                 if wrap && self.selection().is_some() {
                     // The selection becomes the node's first field; the
                     // cursor lands in the next empty field (\frac: the
-                    // denominator) or after the node (\sqrt, \cancel).
+                    // denominator) or after the node (\sqrt).
                     // A field is always an inset, where a formula line
                     // break cannot live.
                     let content: crate::ast::Row = self
@@ -336,7 +329,6 @@ impl Editor {
             Edit::DelRow => self.del_lane(false),
             Edit::DelCol => self.del_lane(true),
             Edit::OpenBox(kind) => self.op_start(kind),
-            Edit::Cancel => self.toggle_cancel(),
         }
     }
 }
@@ -380,10 +372,6 @@ pub enum Edit {
     DelCol,
     /// Open the in-place name box (`\op` `\op*` `\rm` `\text`).
     OpenBox(BoxKind),
-    /// Toggle the strike on the selection's tokens, or on the element
-    /// left of the cursor: a mixed region strikes everything, an
-    /// all-struck one unstrikes.
-    Cancel,
 }
 
 /// Resolve a command spelling to the edit it performs. Pure: this is
@@ -408,7 +396,6 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
             num: vec![],
             den: vec![],
         }),
-        "cancel" | "!" => Some(Edit::Cancel),
         "norm" | "Vert" => ins(Node::Norm { arg: vec![] }),
         "overbrace" | "underbrace" => wrap(Node::Brace {
             over: cmd == "overbrace",

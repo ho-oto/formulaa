@@ -126,6 +126,26 @@ pub static ATOMS: phf::Map<char, AtomSpec> = phf::phf_map! {
     '⊉' => sym("nsupseteq"),
     '≁' => sym("nsim"),
     '≇' => sym("ncong"),
+    '≄' => sym("not\\simeq"),
+    '≉' => sym("not\\approx"),
+    '≢' => sym("not\\equiv"),
+    '≴' => sym("not\\lesssim"),
+    '≵' => sym("not\\gtrsim"),
+    '⊀' => sym("nprec"),
+    '⊁' => sym("nsucc"),
+    '⋠' => sym("npreceq"),
+    '⋡' => sym("nsucceq"),
+    '⊄' => sym("not\\subset"),
+    '⊅' => sym("not\\supset"),
+    '⋢' => sym("not\\sqsubseteq"),
+    '⋣' => sym("not\\sqsupseteq"),
+    '⋪' => sym("ntriangleleft"),
+    '⋫' => sym("ntriangleright"),
+    '⋬' => sym("ntrianglelefteq"),
+    '⋭' => sym("ntrianglerighteq"),
+    '⊬' => sym("nvdash"),
+    '⊭' => sym("nvDash"),
+    '⊮' => sym("nVdash"),
     '∋' => sym("ni"),
     '⊂' => sym("subset"),
     '⊆' => sym("subseteq"),
@@ -349,7 +369,7 @@ pub static NAMES: phf::Map<&'static str, char> = phf::phf_map! {
     "ast" => '∗',
     "le" | "leq" => '≤',
     "ge" | "geq" => '≥',
-    "ne" | "neq" | "/=" | "=/" | "=/=" | "!=" | "!eq" => '≠',
+    "ne" | "neq" | "/=" | "=/" | "=/=" => '≠',
     "approx" | "~~" => '≈',
     "equiv" | "-=" | "=-" => '≡',
     "sim" => '∼',
@@ -367,16 +387,36 @@ pub static NAMES: phf::Map<&'static str, char> = phf::phf_map! {
     "mapsto" | "|->" => '↦',
     // Sets / logic
     "in" => '∈',
-    "notin" | "!in" => '∉',
-    "notni" | "!ni" => '∌',
-    "nless" | "!<" => '≮',
-    "ngtr" | "!>" => '≯',
-    "nleq" | "nle" | "!le" | "!leq" | "!<=" => '≰',
-    "ngeq" | "nge" | "!ge" | "!geq" | "!>=" => '≱',
-    "nsubseteq" | "!subseteq" => '⊈',
-    "nsupseteq" | "!supseteq" => '⊉',
-    "nsim" | "!sim" | "!~" => '≁',
-    "ncong" | "!cong" => '≇',
+    "notin" => '∉',
+    "notni" => '∌',
+    "nless" => '≮',
+    "ngtr" => '≯',
+    "nleq" | "nle" => '≰',
+    "ngeq" | "nge" => '≱',
+    "nsubseteq" => '⊈',
+    "nsupseteq" => '⊉',
+    "nsim" => '≁',
+    "ncong" => '≇',
+    "nsimeq" => '≄',
+    "napprox" => '≉',
+    "nequiv" => '≢',
+    "nlesssim" => '≴',
+    "ngtrsim" => '≵',
+    "nprec" => '⊀',
+    "nsucc" => '⊁',
+    "npreceq" => '⋠',
+    "nsucceq" => '⋡',
+    "nsubset" => '⊄',
+    "nsupset" => '⊅',
+    "nsqsubseteq" => '⋢',
+    "nsqsupseteq" => '⋣',
+    "ntriangleleft" => '⋪',
+    "ntriangleright" => '⋫',
+    "ntrianglelefteq" => '⋬',
+    "ntrianglerighteq" => '⋭',
+    "nvdash" => '⊬',
+    "nvDash" => '⊭',
+    "nVdash" => '⊮',
     "ni" => '∋',
     "subset" => '⊂',
     "subseteq" => '⊆',
@@ -388,7 +428,7 @@ pub static NAMES: phf::Map<&'static str, char> = phf::phf_map! {
     "emptyset" | "empty" => '∅',
     "forall" | "A" | "all" => '∀',
     "exists" | "E" | "exist" => '∃',
-    "nexists" | "!exists" | "!exist" | "!E" => '∄',
+    "nexists" => '∄',
     "neg" | "not" => '¬',
     "land" | "and" | "wedge" => '∧',
     "lor" | "or" | "vee" => '∨',
@@ -406,7 +446,7 @@ pub static NAMES: phf::Map<&'static str, char> = phf::phf_map! {
     "angle" => '∠',
     "perp" | "bot" => '⊥',
     "parallel" => '∥',
-    "nparallel" | "!parallel" => '∦',
+    "nparallel" => '∦',
     "prime" => '′',
     "degree" => '°',
     "cdots" | "---" => '⋯',
@@ -541,6 +581,50 @@ pub static NAMES: phf::Map<&'static str, char> = phf::phf_map! {
 /// The char a curated `\name` types (any spelling in its `NAMES` entry).
 pub fn named_char(name: &str) -> Option<char> {
     NAMES.get(name).copied()
+}
+
+/// The slashed (negated) form of a relation, where Unicode has one and
+/// the base is typeable. This is what the `!` spellings resolve
+/// through (`\!=` / `\=!` → ≠): one table, so every new pair
+/// automatically gains its `!name` / `name!` aliases.
+pub fn negated(c: char) -> Option<char> {
+    Some(match c {
+        '=' => '≠',
+        '~' => '≁',
+        '∈' => '∉',
+        '∋' => '∌',
+        '<' => '≮',
+        '>' => '≯',
+        '≤' => '≰',
+        '≥' => '≱',
+        '∼' => '≁',
+        '≃' => '≄',
+        '≅' => '≇',
+        '≈' => '≉',
+        '≡' => '≢',
+        '≲' => '≴',
+        '≳' => '≵',
+        '≺' => '⊀',
+        '≻' => '⊁',
+        '≼' => '⋠',
+        '≽' => '⋡',
+        '⊂' => '⊄',
+        '⊃' => '⊅',
+        '⊆' => '⊈',
+        '⊇' => '⊉',
+        '⊑' => '⋢',
+        '⊒' => '⋣',
+        '⊲' => '⋪',
+        '⊳' => '⋫',
+        '⊴' => '⋬',
+        '⊵' => '⋭',
+        '⊢' => '⊬',
+        '⊨' => '⊭',
+        '⊩' => '⊮',
+        '∥' => '∦',
+        '∃' => '∄',
+        _ => return None,
+    })
 }
 
 /// Every character the format accepts as an atom. Derived from the
@@ -694,8 +778,19 @@ mod tests {
         for (&ch, a) in ATOMS.entries() {
             assert!(names.insert(a.latex), "\\{} is claimed twice", a.latex);
             assert_eq!(latex_name(ch), Some(a.latex));
-            assert_eq!(named_char(a.latex), Some(ch), "\\{}", a.latex);
-            assert_eq!(symbol_by_name(a.latex), Some(ch), "\\{}", a.latex);
+            if a.latex.contains('\\') {
+                // Compound `\not\xxx` spellings cannot be typed as one
+                // name; the char must still be typeable through some
+                // curated name (\nsimeq etc.).
+                assert!(
+                    NAMES.values().any(|&c| c == ch),
+                    "\\{} has no input name",
+                    a.latex
+                );
+            } else {
+                assert_eq!(named_char(a.latex), Some(ch), "\\{}", a.latex);
+                assert_eq!(symbol_by_name(a.latex), Some(ch), "\\{}", a.latex);
+            }
         }
         for (&name, &ch) in NAMES.entries() {
             // Every target spells its LaTeX — a curated row, or a
@@ -707,6 +802,46 @@ mod tests {
             );
             assert_eq!(symbol_by_name(name), Some(ch), "\\{}", name);
         }
+    }
+
+    /// Every slashed relation the `!` spellings produce is a first-class
+    /// atom: present in ATOMS (so it spells its LaTeX) and typeable
+    /// through some curated name of its own.
+    #[test]
+    fn negations_are_atoms_and_typeable() {
+        let mut seen = std::collections::HashSet::new();
+        for (&name, &base) in NAMES.entries() {
+            let Some(neg) = negated(base) else { continue };
+            assert!(
+                ATOMS.contains_key(&neg),
+                "!{} → {} is not a curated atom",
+                name,
+                neg
+            );
+            assert!(
+                NAMES.values().any(|&c| c == neg),
+                "{} has no direct input name",
+                neg
+            );
+            seen.insert(neg);
+        }
+        // The single-keyboard-char bases work through the same door.
+        for (base, neg) in [('=', '≠'), ('<', '≮'), ('>', '≯'), ('~', '≁')] {
+            assert_eq!(negated(base), Some(neg));
+            assert_eq!(
+                crate::symbols::symbol_by_name(&format!("!{}", base)),
+                Some(neg)
+            );
+            assert_eq!(
+                crate::symbols::symbol_by_name(&format!("{}!", base)),
+                Some(neg)
+            );
+        }
+        // Spot-check both affix forms through a curated name.
+        assert_eq!(crate::symbols::symbol_by_name("!in"), Some('∉'));
+        assert_eq!(crate::symbols::symbol_by_name("in!"), Some('∉'));
+        assert_eq!(crate::symbols::symbol_by_name("subset!"), Some('⊄'));
+        assert!(seen.len() >= 30, "the table covers the negation family");
     }
 
     /// Every atom is exactly one cell wide and stands alone — that is

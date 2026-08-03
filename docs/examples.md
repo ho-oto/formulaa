@@ -223,47 +223,6 @@ LaTeX:
 \begin{bmatrix} \frac{1}{2} & 0 \\ \begin{bmatrix} a & b \\ c & d \end{bmatrix} & x^{2} \end{bmatrix}
 ```
 
-### cancel-simple
-
-```
- 𝑥𝑦̸
-────=𝑥
- 𝑦̸
-```
-
-LaTeX:
-
-```latex
-\frac{x\cancel{y}}{\cancel{y}}=x
-```
-
-### cancel-frac
-
-```
- 𝑎̸+̸𝑏̸
-─────𝑑̸+𝑒
-  𝑐̸
-```
-
-LaTeX:
-
-```latex
-\frac{\cancel{a}\cancel{+}\cancel{b}}{\cancel{c}}\cancel{d}+e
-```
-
-### cancel-in-sup
-
-```
- 𝑥2̸α̸
-𝑒
-```
-
-LaTeX:
-
-```latex
-e^{x\cancel{2}\cancel{\alpha }}
-```
-
 ### continued-fraction
 
 ```

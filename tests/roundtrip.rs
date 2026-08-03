@@ -111,13 +111,6 @@ fn mat(rows: usize, cols: usize, cells: Vec<Row>) -> Node {
     delim('[', ']', vec![], vec![vec![array(rows, cols, cells)]])
 }
 
-/// Strike every token of the row (the atom-only Cancel model: a strike
-/// on a structure means striking the tokens inside it).
-fn cancel(mut arg: Row) -> Row {
-    mascii::ast::cancel_all(&mut arg);
-    arg
-}
-
 fn cat(parts: &[Row]) -> Row {
     parts.concat()
 }
@@ -230,17 +223,14 @@ fn foreign_latex_reads_right() {
     assert_eq!(tex(r"a \not= b"), r"a\ne b");
     assert_eq!(tex(r"a \not\in B"), r"a\notin B");
     assert_eq!(tex(r"a \not\leq b"), r"a\nleq b");
-    // No Unicode negation -> the bare relation survives, not garbage.
-    assert_eq!(tex(r"a \not\equiv b"), r"a\equiv b");
-    // Our own \cancel{\sum } must strike the bare ∑ (an empty-limit
-    // big operator is its symbol), and the spliced atom must not
-    // become a limits host for a following script.
-    assert_eq!(tex(r"\cancel{\sum }"), r"\cancel{\sum }");
-    assert_eq!(tex(r"\cancel{\sum }^{2}"), r"\cancel{\sum }^{2}");
-    // Only symbol atoms can carry a strike; a struck upright run has
-    // no representation, so best effort keeps the run and drops the
-    // strike (\cancel is not standard LaTeX — partial support).
-    assert_eq!(tex(r"\cancel{\operatorname{d}}"), r"\mathrm{d}");
+    // The shared negation table covers ≢ now (spelled \not\equiv).
+    assert_eq!(tex(r"a \not\equiv b"), r"a\not\equiv b");
+    // A relation with no slashed Unicode form keeps its bare self.
+    assert_eq!(tex(r"a \not\perp b"), r"a\perp b");
+    // \cancel has no struck form here: best effort keeps the content
+    // and drops the line.
+    assert_eq!(tex(r"\cancel{\frac{a}{b}}"), r"\frac{a}{b}");
+    assert_eq!(tex(r"\cancel{x}+y"), r"x+y");
     assert_eq!(
         tex(r"\sum\limits_{i=1}^{n} a"),
         tex(r"\sum_{i=1}^{n} a"),
@@ -487,13 +477,13 @@ fn wide_accents() {
             base: 'x'
         }]
     );
-    // A struck accent still carries a band, so it needs the same
-    // separation space as a bare one (the band has no closing glyph).
+    // Two bands side by side need the separation space (a band has no
+    // closing glyph).
     let row = cat(&[
         n(sup(n(wa(None, Some(Accent::Underline), s("px"))))),
-        cancel(n(wa(Some(Accent::Tilde), None, s("bc")))),
+        n(wa(Some(Accent::Tilde), None, s("bc"))),
     ]);
-    roundtrip("band-next-to-struck-band", &row);
+    roundtrip("band-next-to-band", &row);
     // A markless wide accent is just its base (spliced).
     let row = n(wa(None, None, s("ab")));
     assert_eq!(normalize(&row), s("ab"));
@@ -1079,31 +1069,10 @@ fn nested_matrices() {
     roundtrip("nested-matrices", &row);
 }
 
-/// Cancellation: (x̸ y̸ / y̸ z̸) style strikes, including a struck fraction.
+/// A bare one-char Func lands on its final shape in one pass
+/// (normalize idempotence: Func("1") must go straight to Sym).
 #[test]
-fn cancel_strikes() {
-    // x·y/y = x with the y's cancelled
-    let row = cat(&[
-        n(frac(cat(&[s("x"), cancel(s("y"))]), cancel(s("y")))),
-        s("="),
-        s("x"),
-    ]);
-    roundtrip("cancel-simple", &row);
-    // cancel over a whole fraction, next to an uncancelled sibling
-    let row = cat(&[
-        cancel(cat(&[n(frac(s("a+b"), s("c"))), s("d")])),
-        s("+"),
-        s("e"),
-    ]);
-    roundtrip("cancel-frac", &row);
-    // cancel inside a superscript
-    let row = cat(&[s("e"), n(sup(cat(&[s("x"), cancel(s("2α"))])))]);
-    roundtrip("cancel-in-sup", &row);
-    // A struck big-operator atom (the bare ∑ is a Sym).
-    let row = vec![Node::Cancel('∑')];
-    roundtrip("cancel-bigop-atom", &row);
-    // A bare one-char Func lands on its final shape in one pass
-    // (normalize idempotence: Func("1") must go straight to Sym).
+fn bare_one_char_func_is_final() {
     let row = vec![Node::Func("1".into()), Node::Func(".".into())];
     roundtrip("bare-one-char-func", &row);
 }
@@ -1678,13 +1647,9 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             let segs = (0..nsegs).map(|_| gen_row(rng, d, 3)).collect::<Vec<_>>();
             delim(l, r, vec!['|'; nsegs - 1], segs)
         }
-        7 => match rng.below(4) {
-            // Norms nest (the outer pair renders two rows taller).
-            0 => Node::Norm {
-                arg: gen_row(rng, d, 3),
-            },
-            // A strike wraps one symbol atom.
-            _ => Node::Cancel(['x', 'y', 'α', 'B', '+', '∑'][rng.below(6)]),
+        // Norms nest (the outer pair renders two rows taller).
+        7 => Node::Norm {
+            arg: gen_row(rng, d, 3),
         },
         13 => {
             // Stretchy accent; the band rides over any base block.

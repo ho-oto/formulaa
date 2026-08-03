@@ -53,40 +53,11 @@ fn err<T>(msg: impl Into<String>, r: usize, c: usize) -> Result<T> {
 
 pub struct Grid {
     g: Vec<Vec<char>>,
-    /// Cells carrying a combining long solidus (U+0338) = \cancel strike.
-    cancel: Vec<Vec<bool>>,
-    /// Strikes claimed by a parsed token. A strike is only legal on a
-    /// whole atom-shaped token, so any flag still unclaimed when the
-    /// parse finishes is an error (never dropped silently).
-    consumed: std::cell::RefCell<Vec<Vec<bool>>>,
 }
 
 impl Grid {
     fn at(&self, r: usize, c: usize) -> char {
         self.g[r][c]
-    }
-
-    fn cancelled(&self, r: usize, c: usize) -> bool {
-        self.cancel[r][c]
-    }
-
-    fn consume_strikes(&self, r: usize, c0: usize, c1: usize) {
-        let mut con = self.consumed.borrow_mut();
-        for c in c0..=c1 {
-            con[r][c] = true;
-        }
-    }
-}
-
-/// Wrap a symbol atom in Cancel when its cell is struck. Only a Sym
-/// can carry a strike; flags on any other cell are left unclaimed and
-/// error at the end of the parse.
-fn strike_sym(g: &Grid, bl: usize, col: usize, c: char) -> Node {
-    if g.cancelled(bl, col) {
-        g.consume_strikes(bl, col, col);
-        Node::Cancel(c)
-    } else {
-        Node::Sym(c)
     }
 }
 
@@ -1055,8 +1026,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                 col += 1;
             }
             _ if unsuperscript_char(ch).is_some() => {
-                let run_end =
-                    scan_while_same_flag(g, bl, col, rect.r, |c| unsuperscript_char(c).is_some());
+                let run_end = scan_while(g, bl, col, rect.r, |c| unsuperscript_char(c).is_some());
                 check_flat_columns(g, rect, bl, col, run_end, 0, 0)?;
                 let arg = (col..=run_end)
                     .map(|c| Node::Sym(unsuperscript_char(g.at(bl, c)).unwrap()))
@@ -1065,8 +1035,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                 col = run_end + 1;
             }
             _ if unsubscript_char(ch).is_some() => {
-                let run_end =
-                    scan_while_same_flag(g, bl, col, rect.r, |c| unsubscript_char(c).is_some());
+                let run_end = scan_while(g, bl, col, rect.r, |c| unsubscript_char(c).is_some());
                 check_flat_columns(g, rect, bl, col, run_end, 0, 0)?;
                 let arg = (col..=run_end)
                     .map(|c| Node::Sym(unsubscript_char(g.at(bl, c)).unwrap()))
@@ -1083,21 +1052,15 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                 // an interior dot must be followed by a letter, and one
                 // trailing dot joins iff the run already has a dot — so
                 // `sin.` stays Func + period while `i.i.d.` is one run.
-                let mut run_end =
-                    scan_while_same_flag(g, bl, col, rect.r, |c| c.is_ascii_alphabetic());
-                let flag = g.cancelled(bl, col);
+                let mut run_end = scan_while(g, bl, col, rect.r, |c| c.is_ascii_alphabetic());
                 loop {
                     let dot = run_end + 1;
-                    if dot > rect.r || g.at(bl, dot) != '.' || g.cancelled(bl, dot) != flag {
+                    if dot > rect.r || g.at(bl, dot) != '.' {
                         break;
                     }
                     let next = dot + 1;
-                    if next <= rect.r
-                        && g.at(bl, next).is_ascii_alphabetic()
-                        && g.cancelled(bl, next) == flag
-                    {
-                        run_end =
-                            scan_while_same_flag(g, bl, next, rect.r, |c| c.is_ascii_alphabetic());
+                    if next <= rect.r && g.at(bl, next).is_ascii_alphabetic() {
+                        run_end = scan_while(g, bl, next, rect.r, |c| c.is_ascii_alphabetic());
                     } else if (col..=run_end).any(|c2| g.at(bl, c2) == '.') {
                         run_end = dot;
                         break;
@@ -1113,7 +1076,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                     if prev_letter || next_letter {
                         Node::Roman(word.chars().next().unwrap())
                     } else {
-                        strike_sym(g, bl, col, ch)
+                        Node::Sym(ch)
                     }
                 } else {
                     // Any upright multi-letter run is a Func; the
@@ -1145,7 +1108,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                         base,
                     });
                 } else {
-                    out.push(strike_sym(g, bl, col, base));
+                    out.push(Node::Sym(base));
                 }
                 col += 1 + extra;
             }
@@ -1158,23 +1121,6 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
 fn scan_while(g: &Grid, row: usize, from: usize, max: usize, pred: impl Fn(char) -> bool) -> usize {
     let mut c = from;
     while c < max && pred(g.at(row, c + 1)) {
-        c += 1;
-    }
-    c
-}
-
-/// Like `scan_while`, but the run must also keep the cancel flag of its
-/// first cell (a struck token never merges with an unstruck neighbour).
-fn scan_while_same_flag(
-    g: &Grid,
-    row: usize,
-    from: usize,
-    max: usize,
-    pred: impl Fn(char) -> bool,
-) -> usize {
-    let flag = g.cancelled(row, from);
-    let mut c = from;
-    while c < max && pred(g.at(row, c + 1)) && g.cancelled(row, c + 1) == flag {
         c += 1;
     }
     c
@@ -1904,32 +1850,26 @@ fn vertical_extent(g: &Grid, rect: Rect, col: usize, bl: usize, chars: &[char]) 
 
 /// Parse a formula from its AA text form.
 pub fn parse(text: &str) -> Result<Row> {
-    // Fold combining long solidus overlays (\cancel strikes) into a
-    // parallel flag grid so they do not occupy cells of their own.
+    // Combining strike overlays (the old \cancel form) are refused up
+    // front with a pointed message: they would otherwise occupy cells
+    // and desync every column.
     let mut lines: Vec<Vec<char>> = Vec::new();
-    let mut flags: Vec<Vec<bool>> = Vec::new();
-    for raw in text.lines() {
+    for (r, raw) in text.lines().enumerate() {
         let mut line = Vec::new();
-        let mut flag = Vec::new();
         for c in raw.trim_end().chars() {
             match c {
                 '\u{338}' | '\u{336}' => {
-                    if let Some(f) = flag.last_mut() {
-                        *f = true;
-                    }
+                    return err(
+                        "strike overlays (\u{338}) are not supported — use the slashed                          relation atoms (≠ ∉ …)",
+                        r,
+                        line.len(),
+                    );
                 }
-                '\t' => {
-                    line.push(' ');
-                    flag.push(false);
-                }
-                c => {
-                    line.push(c);
-                    flag.push(false);
-                }
+                '\t' => line.push(' '),
+                c => line.push(c),
             }
         }
         lines.push(line);
-        flags.push(flag);
     }
     if lines.iter().all(|l| l.is_empty()) {
         return Ok(vec![]);
@@ -1938,15 +1878,7 @@ pub fn parse(text: &str) -> Result<Row> {
     for l in &mut lines {
         l.resize(width, ' ');
     }
-    for f in &mut flags {
-        f.resize(width, false);
-    }
-    let consumed = std::cell::RefCell::new(vec![vec![false; width]; flags.len()]);
-    let g = Grid {
-        g: lines,
-        cancel: flags,
-        consumed,
-    };
+    let g = Grid { g: lines };
     // Multi-line formulas: a row whose only glyph is a single ┈ is a
     // line separator (a band always sandwiches its pieces, so a lone ┈
     // never occurs inside one formula). Each segment between separators
@@ -1996,23 +1928,6 @@ pub fn parse(text: &str) -> Result<Row> {
         };
         if let Some(rect) = trim(&g, rect) {
             out.extend(parse_region(&g, rect, None)?)
-        }
-    }
-    // Strikes only live on atom-shaped tokens; one left unclaimed sat
-    // on structure (a bar, a script, a lattice edge) and cannot be
-    // represented — refuse rather than drop it.
-    {
-        let con = g.consumed.borrow();
-        for (r, row) in g.cancel.iter().enumerate() {
-            for (c, &f) in row.iter().enumerate() {
-                if f && !con[r][c] {
-                    return err(
-                        "a strike must cover a whole atom, upright run, or text",
-                        r,
-                        c,
-                    );
-                }
-            }
         }
     }
     // Normalize: a script arg that mixes padded structures with atoms

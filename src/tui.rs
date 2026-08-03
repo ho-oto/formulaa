@@ -200,15 +200,10 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
 
 /// The painted screen: the char grid plus every parallel channel that
 /// must stay the same shape as it. Growing a row, inserting a row or
-/// moving the caret goes through here, so the channels cannot drift
-/// (a preview that shifted `lines` but forgot `struck` used to paint
-/// its strikes a row off).
+/// moving the caret goes through here, so the channels cannot drift.
 struct Decor {
     lines: Vec<Vec<char>>,
     bg: Vec<Vec<Option<Color>>>,
-    /// Cells wearing a \cancel strike (drawn as the crossed-out
-    /// attribute + tint at emission, never as a combining char).
-    struck: std::collections::HashSet<(usize, usize)>,
     caret: Option<(usize, usize)>,
     /// The edited grid's frame rectangle (x0, x1, top, bottom).
     frame: Option<(usize, usize, usize, usize)>,
@@ -223,9 +218,8 @@ impl Decor {
         }
     }
 
-    /// Open `n` blank rows at `at`, carrying the strike channel with
-    /// them (the preview box opens a gap rather than covering the
-    /// formula).
+    /// Open `n` blank rows at `at` (the preview box opens a gap rather
+    /// than covering the formula).
     fn open_rows(&mut self, at: usize, n: usize) {
         while self.lines.len() < at {
             self.lines.push(Vec::new());
@@ -235,11 +229,6 @@ impl Decor {
             self.lines.insert(at, Vec::new());
             self.bg.insert(at, Vec::new());
         }
-        self.struck = self
-            .struck
-            .iter()
-            .map(|&(y, x)| if y >= at { (y + n, x) } else { (y, x) })
-            .collect();
     }
 
     fn height(&self) -> usize {
@@ -275,9 +264,7 @@ fn marker_boxes(
     block_selected: Option<usize>,
 ) -> Decor {
     let (lines, marks, caret) = (&block.lines, &block.marks[..], block.caret);
-    // Cell coordinates throughout — cancel strikes are a separate
-    // channel applied as a style at span emission, so a struck cell
-    // never desyncs the column indexing.
+    // Cell coordinates throughout.
     let mut grid: Vec<Vec<char>> = lines.to_vec();
     if grid.is_empty() {
         grid.push(Vec::new());
@@ -530,7 +517,6 @@ fn marker_boxes(
     let mut decor = Decor {
         lines: grid,
         bg,
-        struck: block.cancel.iter().copied().collect(),
         caret: None,
         frame,
     };
@@ -603,8 +589,8 @@ fn overlay_minibuffer(ed: &Editor, d: &mut Decor) {
     // box right under the typed name — a symbol as its one character,
     // a structure (\frac, \pmatrix …) with its empty ⬚ slots. The box
     // gets rows of its own: everything below the caret row shifts down
-    // by the preview's height (backgrounds and cancel strikes ride
-    // along), so the preview never hides the formula it points into.
+    // by the preview's height (backgrounds ride along), so the preview
+    // never hides the formula it points into.
     if let Some(row) = ed.command_preview_row() {
         use mascii::render::{RenderCtx, render_root};
         let block = render_root(&row, None, &RenderCtx::canonical());
@@ -653,11 +639,7 @@ fn is_delim_piece(c: char) -> bool {
 
 /// Turn a rendered cell row into spans: private-use marker chars become
 /// colored jump/block labels, the cursor glyph blinks, and box
-/// backgrounds from `marker_boxes` are applied to plain glyphs. A
-/// struck cell is drawn with the terminal's crossed-out attribute and
-/// a tint — never a combining U+0338 in the cell: fonts render the
-/// astral-glyph + combining pair wider than one column, and the
-/// overflow smears into ghost glyphs under partial repaints.
+/// backgrounds from `marker_boxes` are applied to plain glyphs.
 fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec<Span<'static>> {
     let (line, bg) = (&d.lines[y], &d.bg[y]);
     let cursor = d.caret.and_then(|(cy, cx)| (cy == y).then_some(cx));
@@ -710,30 +692,13 @@ fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec
             _ if is_display_marker(c) => ' ',
             _ => c,
         };
-        // An overlay (jump label, fender, blanked marker) replaced the
-        // glyph, so a strike on the cell below must not cross it out.
-        let struck_here = shown == c && d.struck.contains(&(y, i));
         let cell = shown.to_string();
         if cursor == Some(i) {
             flush(&mut buf, buf_bg, &mut spans);
-            let mut style = match cell_bg {
+            let style = match cell_bg {
                 Some(color) if caret != CaretStyle::Free => cursor_style.bg(color),
                 _ => cursor_style,
             };
-            if struck_here {
-                style = style.add_modifier(Modifier::CROSSED_OUT);
-            }
-            spans.push(Span::styled(cell, style));
-        } else if struck_here {
-            // Struck glyphs break the plain run: their own span carries
-            // the crossed-out attribute and tint.
-            flush(&mut buf, buf_bg, &mut spans);
-            let mut style = Style::default()
-                .fg(theme::CANCEL_FG)
-                .add_modifier(Modifier::CROSSED_OUT);
-            if let Some(color) = cell_bg {
-                style = style.bg(color);
-            }
             spans.push(Span::styled(cell, style));
         } else if c == FENDER_L || c == FENDER_R {
             // The open box's fenders: green glyphs, no ground.
@@ -1268,7 +1233,6 @@ mod tests {
             let d = Decor {
                 lines: vec![vec![label, Mark::Gap { cols: true }.ch()]],
                 bg: vec![vec![None, None]],
-                struck: std::collections::HashSet::new(),
                 caret: cursor.map(|x| (0, x)),
                 frame: None,
             };
@@ -1276,49 +1240,6 @@ mod tests {
             let painted: String = spans.iter().map(|s| s.content.as_ref()).collect();
             assert_eq!(painted, "a ", "cursor={:?}", cursor);
         }
-    }
-
-    /// The preview's row insertion must carry the strike channel with
-    /// it: a \cancel below the caret keeps its strike glued to the
-    /// (shifted) cell, or the slash paints a row off.
-    #[test]
-    fn preview_rows_shift_the_strikes_with_them() {
-        let mut ed = Editor::new();
-        // a + x/b with the denominator struck; caret back in the
-        // numerator, command open → the preview inserts below row 0
-        // and the strike (row 2) must move down with its cell.
-        for k in "a//x".chars() {
-            ed.input(Key::Char(k), false, false);
-        }
-        ed.input(Key::Down, false, false);
-        ed.input(Key::Char('b'), false, false);
-        ed.input(Key::Left, true, false);
-        ed.input(Key::Char('\\'), false, false);
-        for k in "cancel".chars() {
-            ed.input(Key::Char(k), false, false);
-        }
-        ed.input(Key::Enter, false, false);
-        ed.input(Key::Up, false, false);
-        ed.input(Key::Char('\\'), false, false);
-        for k in "alpha".chars() {
-            ed.input(Key::Char(k), false, false);
-        }
-        let (root, cursor) = ed.decorated();
-        let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
-        let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        assert!(!block.cancel.is_empty(), "the strike exists");
-        let mut d = marker_boxes(&block, &ed.marker_extents(), None, None);
-        let before = d.struck.clone();
-        overlay_minibuffer(&ed, &mut d);
-        assert!(ed.command_preview_row().is_some(), "preview open");
-        let h = 1; // \alpha previews one row
-        let at = d.caret.unwrap().0; // caret row after overlay = original row
-        let shifted: std::collections::HashSet<_> = before
-            .iter()
-            .map(|&(y, x)| if y > at { (y + h, x) } else { (y, x) })
-            .collect();
-        assert_ne!(before, shifted, "the strike really sits below the caret");
-        assert_eq!(d.struck, shifted, "strikes ride the inserted rows");
     }
 
     /// The name box never shows the reparse-quoting quotes: typing a
@@ -1395,69 +1316,6 @@ mod tests {
         assert!(d.bg[cy][cx].is_some(), "overlay cells are tinted");
     }
 
-    #[test]
-    fn struck_cells_survive_cursor_decoration() {
-        // A cancel next to the cursor: cell indexing must not shift,
-        // every cell stays exactly one char (no combining overlays in
-        // the TUI — fonts draw astral + combining pairs wider than a
-        // column and the overflow smears under partial repaints), and
-        // the struck cell's span carries the crossed-out attribute.
-        let mut ed = Editor::new();
-        type_script_keys(&mut ed, "ab");
-        ed.input(Key::Left, true, false); // select b
-        ed.input(Key::Char('\\'), false, false);
-        for c in "cancel".chars() {
-            ed.input(Key::Char(c), false, false);
-        }
-        ed.input(Key::Enter, false, false);
-        // Cursor sits right of the struck b; walk it across the strike.
-        for _ in 0..3 {
-            let (root, cursor) = ed.decorated();
-            let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
-            let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-            assert!(!block.cancel.is_empty(), "cancel present");
-            let d = marker_boxes(&block, &ed.marker_extents(), None, None);
-            let (y, _) = d.caret.expect("caret visible");
-            let spans = decorate_line(&d, y, CaretStyle::Normal, 0);
-            let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
-            assert!(
-                !joined.contains('\u{338}') && !joined.contains('\u{336}'),
-                "no combining strike reaches the terminal: {:?}",
-                joined
-            );
-            // Column indexing intact: char count == cell count.
-            assert_eq!(joined.chars().count(), d.lines[y].len());
-            // The struck cell's span is crossed out; its glyph is there.
-            for &(r, c) in &block.cancel {
-                if r == y {
-                    let mut col = 0usize;
-                    let mut found = false;
-                    for sp in &spans {
-                        let n = sp.content.chars().count();
-                        if (col..col + n).contains(&c) {
-                            assert!(
-                                sp.style.add_modifier.contains(Modifier::CROSSED_OUT),
-                                "struck cell crossed out at col {}: {:?}",
-                                c,
-                                spans
-                            );
-                            assert_eq!(
-                                sp.content.chars().nth(c - col),
-                                Some(d.lines[y][c]),
-                                "glyph survives"
-                            );
-                            found = true;
-                            break;
-                        }
-                        col += n;
-                    }
-                    assert!(found, "struck col {} covered by spans", c);
-                }
-            }
-            ed.input(Key::Left, false, false);
-        }
-    }
-
     fn type_script_keys(ed: &mut Editor, s: &str) {
         for c in s.chars() {
             ed.input(Key::Char(c), false, false);
@@ -1474,7 +1332,6 @@ mod tests {
         let block = mascii::render::Block {
             lines: lines.clone(),
             baseline: 0,
-            cancel: vec![],
             caret: None,
             marks: marks.to_vec(),
         };
@@ -1508,7 +1365,6 @@ mod tests {
         let block = |marks: &[(usize, usize, char)]| mascii::render::Block {
             lines: lines.clone(),
             baseline: 1,
-            cancel: vec![],
             caret: None,
             marks: marks.to_vec(),
         };
@@ -1528,7 +1384,6 @@ mod tests {
         let block = mascii::render::Block {
             lines: lines.clone(),
             baseline: 0,
-            cancel: vec![],
             caret: Some((0, 2)),
             marks: vec![(0, 0, label)],
         };

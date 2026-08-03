@@ -401,6 +401,10 @@ fn aliases_resolve_to_the_same_command() {
             return None;
         }
         let to = mascii::symbols::latex_name(ch)?;
+        // Compound `\not\xxx` spellings are not typeable as one name.
+        if to.contains('\\') {
+            return None;
+        }
         (from != to).then_some((from, to))
     });
     for (from, to) in command_aliases.into_iter().chain(symbol_aliases) {
@@ -435,95 +439,13 @@ fn typing_inside_a_norm_works() {
 }
 
 #[test]
-fn cancel_strikes_the_selections_tokens() {
-    // Shift-selection then \cancel: every token in the range is struck.
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"x+y S-Left S-Left \cancel");
-    assert_eq!(latex(&ed), "x\\cancel{+}\\cancel{y}");
-    // Re-selecting an all-struck range and repeating the command
-    // unstrikes (the anchor does not survive the edit: an invisible
-    // selection would make the next wrap key a surprise).
-    type_script(&mut ed, r"S-Right S-Right \cancel");
-    assert_eq!(latex(&ed), "x+y");
-    // A mixed range (b struck, + and c bare) strikes everything.
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"b \! +c S-Left S-Left S-Left \cancel");
-    assert_eq!(latex(&ed), "\\cancel{b}\\cancel{+}\\cancel{c}");
-    // Block selection (^B from inside, Enter picks the parent): the
-    // strike walks into the delimiter block.
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"a+(b+c C-b Enter \cancel");
-    assert_eq!(
-        latex(&ed),
-        "a+\\left(\\cancel{b}\\cancel{+}\\cancel{c}\\right)"
-    );
-    // Parent selection (Shift+Up) covers the fraction's fields.
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"\frac u Down v Tab S-Up \cancel");
-    assert_eq!(latex(&ed), "\\frac{\\cancel{u}}{\\cancel{v}}");
-}
-
-#[test]
-fn cancel_with_no_selection_strikes_the_preceding_element() {
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"xy \!");
-    assert_eq!(latex(&ed), "x\\cancel{y}");
-    // Toggle back off.
-    type_script(&mut ed, r"\!");
-    assert_eq!(latex(&ed), "xy");
-    // A preceding structure gets its tokens struck.
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"\frac a Down b Tab \cancel");
-    assert_eq!(latex(&ed), "\\frac{\\cancel{a}}{\\cancel{b}}");
-}
-
-#[test]
 fn jump_sheds_a_stale_selection() {
     // ^G landing in the anchor's row must not resurrect a selection
-    // the user never chose (anchor -> landing), or the next \cancel
-    // strikes the whole phantom range.
+    // the user never chose (anchor -> landing), or the next selection
+    // consumer acts on the phantom range.
     let mut ed = Editor::new();
     type_script(&mut ed, r"abcdef S-Left C-g a");
     assert_eq!(ed.selection(), None);
-    // Landing on label `a` puts the cursor at the row start: \! has
-    // nothing to its left, so with the anchor shed it strikes nothing
-    // (with the phantom selection it struck all six).
-    type_script(&mut ed, r"\!");
-    let struck = ed
-        .root
-        .iter()
-        .filter(|n| matches!(n, mascii::ast::Node::Cancel(_)))
-        .count();
-    assert_eq!(struck, 0, "nothing struck at the row start");
-}
-
-#[test]
-fn cancel_collapses_an_empty_limit_big_operator() {
-    // ∑ promoted to a band but left with empty limits is its bare
-    // atom (normalize's collapse); striking it strikes the ∑ instead
-    // of finding nothing in the empty limits.
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"\sum Down Tab \!");
-    assert_eq!(latex(&ed), "\\cancel{\\sum }");
-    // A lim-class band collapses to a Func, which cannot carry a
-    // strike (symbol atoms only) — the toggle reports the error
-    // instead of striking or silently changing anything.
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"\lim Tab \!");
-    assert_eq!(latex(&ed), "\\operatorname{lim}");
-    assert!(ed.message_error);
-}
-
-#[test]
-fn backspace_peels_the_strike_before_the_token() {
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"xy \!");
-    assert_eq!(latex(&ed), "x\\cancel{y}");
-    // First press removes the strike, the second the token itself.
-    type_script(&mut ed, r"Backspace");
-    assert_eq!(latex(&ed), "xy");
-    type_script(&mut ed, r"Backspace");
-    assert_eq!(latex(&ed), "x");
 }
 
 #[test]
@@ -1018,16 +940,15 @@ fn jump_from_a_grid_gap_measures_the_undecorated_picture() {
     assert_roundtrip(&ed, &[]);
 }
 
-/// `\!` is \cancel, and `!`-prefixed spellings are the slashed
-/// relations (`\!=` is ≠, `\!in` is ∉ — the slash through the whole
-/// operator).
+/// `!`-prefixed (and `!`-suffixed) spellings are the slashed
+/// relations: `\!=` and `\=!` are ≠, `\!in` is ∉.
 #[test]
-fn bang_is_cancel_and_negates_relations() {
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"ab S-Left \!");
-    assert_eq!(latex(&ed), "a\\cancel{b}");
+fn bang_spellings_negate_relations() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"a \!= b");
+    assert_eq!(latex(&ed), "a\\ne b");
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a \=! b");
     assert_eq!(latex(&ed), "a\\ne b");
     let mut ed = Editor::new();
     type_script(&mut ed, r"a \!in B");
@@ -1035,6 +956,9 @@ fn bang_is_cancel_and_negates_relations() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"a \!le b");
     assert_eq!(latex(&ed), "a\\nleq b");
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a \subset! b");
+    assert_eq!(latex(&ed), "a\\not\\subset b");
 }
 
 /// \rm of a digit has no upright/italic distinction to preserve: it
@@ -1173,11 +1097,10 @@ fn block_select_mode_selects_a_structure() {
     assert_eq!((ed.path, ed.col), (path, col), "cursor untouched");
     // Enter on the outer ancestor selects the delimiter block.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\pmatrix x C-b Up Enter \cancel");
-    // The strike walks into the structure and covers its tokens.
+    type_script(&mut ed, r"\pmatrix x C-b Up Enter \sqrt");
     assert_eq!(
         latex(&ed),
-        "\\begin{pmatrix} \\cancel{x} &  \\\\  &  \\end{pmatrix}"
+        "\\sqrt{\\begin{pmatrix} x &  \\\\  &  \\end{pmatrix}}"
     );
 }
 
