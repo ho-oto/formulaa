@@ -1281,8 +1281,10 @@ impl Editor {
     /// `\mid`: split the current Delim segment at the cursor, inserting a
     /// │ middle; the cursor lands at the start of the new segment.
     pub fn insert_mid(&mut self) {
+        // Outside a delimiter block, \mid is the divides atom ∣ (its
+        // LaTeX meaning); directly inside one it splits the segment.
         let Some(&(i, Field::Seg(k))) = self.path.last() else {
-            self.info("\\mid works directly inside a delimiter block");
+            self.insert_sym('∣');
             return;
         };
         let col = self.col;
@@ -1291,7 +1293,7 @@ impl Editor {
         // pair and has nothing to split.
         let Node::Delim { mids, segs, .. } = &mut row_at_mut(&mut self.root, &parent_path)[i]
         else {
-            self.info("\\mid works directly inside a delimiter block");
+            self.insert_sym('∣');
             return;
         };
         let tail: Row = segs[k].split_off(col);

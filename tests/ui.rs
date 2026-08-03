@@ -940,6 +940,22 @@ fn jump_from_a_grid_gap_measures_the_undecorated_picture() {
     assert_roundtrip(&ed, &[]);
 }
 
+/// \mid is contextual: the divides atom ∣ in a plain row, the segment
+/// separator directly inside a delimiter block.
+#[test]
+fn mid_is_divides_outside_a_delimiter() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a \mid b");
+    assert_eq!(latex(&ed), "a\\mid b");
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a \!mid b");
+    assert_eq!(latex(&ed), "a\\nmid b");
+    // Inside a paren it still splits the segment.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"( x \mid P");
+    assert_eq!(latex(&ed), "\\left(x\\middle|P\\right)");
+}
+
 /// `!`-prefixed (and `!`-suffixed) spellings are the slashed
 /// relations: `\!=` and `\=!` are ≠, `\!in` is ∉.
 #[test]
@@ -1011,13 +1027,11 @@ fn a_line_break_stays_out_of_insets() {
         latex(&ed)
     );
     // \mid only splits a real delimiter; a norm numbers its field the
-    // same way but is not a pair.
+    // same way but is not a pair, so inside one it is the divides
+    // atom (like any plain row).
     let mut ed = Editor::new();
     type_script(&mut ed, r"\norm \mid");
-    assert!(
-        ed.message.contains("delimiter"),
-        "reports instead of panicking"
-    );
+    assert_eq!(latex(&ed), "\\left\\|\\mid \\right\\|");
     // The same guard the other way round: with the cursor right before
     // the break, Shift+→ refuses to cross it.
     let mut ed = Editor::new();
