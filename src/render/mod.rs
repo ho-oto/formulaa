@@ -165,8 +165,8 @@ fn quoted(t: &str, q: char) -> Block {
 
 /// Does this node's picture put an accent band next to its neighbours?
 /// A band has no closing glyph, so the scan would run into whatever
-/// touches it. (A `Cancel` payload is a `Token` and can never carry a
-/// band, so the wrapper needs no look-through.)
+/// touches it. (A `Cancel` payload is a `CancellableNode` and can never
+/// carry a band, so the wrapper needs no look-through.)
 fn has_wide_accent(n: &Node) -> bool {
     matches!(n, Node::WideAccent { .. })
 }
@@ -248,7 +248,8 @@ pub fn render_row(
         };
         let info = Info {
             wide_accent: has_wide_accent(node),
-            dot_run: matches!(node, Node::Func(t) if t.contains('.')),
+            dot_run: matches!(node, Node::Func(t) if t.contains('.'))
+                || matches!(node, Node::Cancel(crate::ast::CancellableNode::Func(t)) if t.contains('.')),
             marker: is_marker_node(node),
             script: matches!(node, Node::Sup { .. } | Node::Sub { .. }),
         };

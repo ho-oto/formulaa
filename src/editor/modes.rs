@@ -458,6 +458,11 @@ impl Editor {
             if let Some((_, (p, c))) = targets.iter().find(|(r, _)| *r == rank) {
                 self.path = p.clone();
                 self.col = *c;
+                // A landing in the anchor's row would resurrect a
+                // selection the user never chose (anchor→landing) — a
+                // jump moves the cursor like an arrow key, so it sheds
+                // the anchor the same way.
+                self.select_anchor = None;
             }
             self.clear_message();
         }
@@ -502,6 +507,8 @@ impl Editor {
             {
                 self.path = p.clone();
                 self.col = *c;
+                // Same anchor shedding as jump_confirm.
+                self.select_anchor = None;
             }
             self.clear_message();
         }

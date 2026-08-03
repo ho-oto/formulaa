@@ -478,6 +478,26 @@ fn cancel_with_no_selection_strikes_the_preceding_element() {
 }
 
 #[test]
+fn jump_sheds_a_stale_selection() {
+    // ^G landing in the anchor's row must not resurrect a selection
+    // the user never chose (anchor -> landing), or the next \cancel
+    // strikes the whole phantom range.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"abcdef S-Left C-g a");
+    assert_eq!(ed.selection(), None);
+    // Landing on label `a` puts the cursor at the row start: \! has
+    // nothing to its left, so with the anchor shed it strikes nothing
+    // (with the phantom selection it struck all six).
+    type_script(&mut ed, r"\!");
+    let struck = ed
+        .root
+        .iter()
+        .filter(|n| matches!(n, mascii::ast::Node::Cancel(_)))
+        .count();
+    assert_eq!(struck, 0, "nothing struck at the row start");
+}
+
+#[test]
 fn backspace_peels_the_strike_before_the_token() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"xy \!");

@@ -83,11 +83,17 @@ impl Grid {
 /// canonical AA never draws one, and accepting it would guess at the
 /// user's intent.
 fn strike_token(g: &Grid, bl: usize, c0: usize, c1: usize, tok: CancellableNode) -> Result<Node> {
-    let struck = (c0..=c1).filter(|&c| g.cancelled(bl, c)).count();
+    // Blank cells don't count: a Text keeps its real spaces, and the
+    // renderer has no glyph there to hang the strike on (a struck
+    // space cell in the input is simply absorbed with the token).
+    let struck = (c0..=c1)
+        .filter(|&c| g.at(bl, c) != ' ' && g.cancelled(bl, c))
+        .count();
+    let cells = (c0..=c1).filter(|&c| g.at(bl, c) != ' ').count();
     if struck == 0 {
         return Ok(tok.into_node());
     }
-    if struck < c1 - c0 + 1 {
+    if struck < cells {
         return err("a strike must cover the whole token", bl, c0);
     }
     g.consume_strikes(bl, c0, c1);

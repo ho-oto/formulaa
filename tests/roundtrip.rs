@@ -232,6 +232,12 @@ fn foreign_latex_reads_right() {
     assert_eq!(tex(r"a \not\leq b"), r"a\nleq b");
     // No Unicode negation -> the bare relation survives, not garbage.
     assert_eq!(tex(r"a \not\equiv b"), r"a\equiv b");
+    // Our own \cancel{\sum } must strike the bare ∑ (an empty-limit
+    // big operator is its symbol), and the spliced atom must not
+    // become a limits host for a following script.
+    assert_eq!(tex(r"\cancel{\sum }"), r"\cancel{\sum }");
+    assert_eq!(tex(r"\cancel{\sum }^{2}"), r"\cancel{\sum }^{2}");
+    assert_eq!(tex(r"\cancel{\operatorname{d}}"), r"\cancel{\mathrm{d}}");
     assert_eq!(
         tex(r"\sum\limits_{i=1}^{n} a"),
         tex(r"\sum_{i=1}^{n} a"),
@@ -1090,6 +1096,25 @@ fn cancel_strikes() {
     // cancel inside a superscript
     let row = cat(&[s("e"), n(sup(cat(&[s("x"), cancel(s("2α"))])))]);
     roundtrip("cancel-in-sup", &row);
+    // A struck Text keeps its real space; the space cell has no glyph
+    // to strike, and the parser must absorb it with the token.
+    let row = vec![Node::Cancel(CancellableNode::Text("a b".into()))];
+    roundtrip("cancel-text-space", &row);
+    // A struck one-letter Func collapses to Roman through the strike
+    // (reachable via \cancel{\operatorname{d}} in the LaTeX reader).
+    let row = vec![Node::Cancel(CancellableNode::Func("d".into()))];
+    roundtrip("cancel-func-one-letter", &row);
+    // A struck dotted run before a dot atom keeps its separating
+    // space, or the dot would be absorbed into the run on reparse.
+    let row = vec![
+        Node::Cancel(CancellableNode::Func("w.r.t".into())),
+        Node::Cancel(CancellableNode::Sym('.')),
+    ];
+    roundtrip("cancel-dot-run", &row);
+    // A bare one-char Func lands on its final shape in one pass
+    // (normalize idempotence: Func("1") must go straight to Sym).
+    let row = vec![Node::Func("1".into()), Node::Func(".".into())];
+    roundtrip("bare-one-char-func", &row);
 }
 
 /// Generalized delimiters: |x|, ⟨x|y⟩, {x | P(x)}, cases, bare arrays,
@@ -1668,10 +1693,12 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
                 arg: gen_row(rng, d, 3),
             },
             // A strike wraps one atom-shaped token.
-            _ => Node::Cancel(match rng.below(3) {
+            _ => Node::Cancel(match rng.below(4) {
                 0 => CancellableNode::Sym(['x', 'y', 'α', 'B'][rng.below(4)]),
-                1 => CancellableNode::Func("sin".into()),
-                _ => CancellableNode::Text("ok".into()),
+                1 => CancellableNode::Func(["sin", "w.r.t"][rng.below(2)].into()),
+                2 => CancellableNode::Roman(['d', 'A'][rng.below(2)]),
+                // The spaced text pins the blank-cell strike rule.
+                _ => CancellableNode::Text(["ok", "a b"][rng.below(2)].into()),
             }),
         },
         13 => {

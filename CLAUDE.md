@@ -100,7 +100,8 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
   `left`/`right` は enum(`Radical`/`Arrow`/`Accent`/`Delim`)。`Node::Accent` の base は
   1 文字(Row ではない)。`Node::Cancel(CancellableNode)` の payload は原子形4種
   (Sym/Func/Roman/Text)だけの専用 enum — 制約は型が持つ。構造の打ち消しは `cancel_all` で中のトークンへ押し下げる
-  (normalize も迷子のラッパーをそうする)。
+  (エディタと LaTeX リーダーが呼ぶ — 型が迷子のラッパーを許さないので
+  normalize には押し下げ規則が無い)。
 - 括弧は `Node::Delim{left,right,mids,segs}` に統一(旧 Paren/Matrix は廃止)。
   `left`/`right` は `Delim` enum(スロットが側を決める — `]` は左に置けない)、
   `mids` は │ の本数。

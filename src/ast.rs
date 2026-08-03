@@ -143,8 +143,9 @@ pub enum Node {
     /// token carries a combining long solidus overlay (U+0338). The
     /// payload is `CancellableNode`, not `Node` — only the atom-shaped nodes can
     /// be struck, so a strike always covers one whole token; cancelling
-    /// a structure means cancelling its tokens (`cancel_all`; normalize
-    /// pushes a stray wrapper down the same way before it can exist).
+    /// a structure means cancelling the tokens inside it (`cancel_all`,
+    /// used by the editor toggle and the LaTeX reader — the type leaves
+    /// a stray structural wrapper nothing to be).
     Cancel(CancellableNode),
 }
 
@@ -306,7 +307,12 @@ pub fn row_at_mut<'a>(root: &'a mut Row, path: &[(usize, Field)]) -> &'a mut Row
 fn bare_upright(name: String) -> Node {
     let mut cs = name.chars();
     match (cs.next(), cs.next()) {
-        (Some(c), None) => Node::Roman(c),
+        // One char: Roman for a letter; a digit or dot has no
+        // italic/upright distinction, so it lands straight on the
+        // plain atom (idempotence: the Roman arm below must not need
+        // a second pass to finish the job).
+        (Some(c), None) if c.is_alphabetic() => Node::Roman(c),
+        (Some(c), None) => Node::Sym(c),
         _ => Node::Func(name),
     }
 }
@@ -683,9 +689,19 @@ fn normalize_node(node: &Node) -> Node {
                 segs,
             }
         }
-        // The atom rules apply through the strike (an upright
-        // non-letter has no roman/italic distinction, struck or not).
+        // The bare-atom rules apply through the strike: a one-letter
+        // Func is a Roman, and an upright non-letter has no
+        // roman/italic distinction, struck or not (each rule lands on
+        // its final shape in one pass — idempotence).
         Node::Cancel(tok) => Node::Cancel(match tok {
+            CancellableNode::Func(t) if t.chars().count() == 1 => {
+                let c = t.chars().next().unwrap();
+                if c.is_alphabetic() {
+                    CancellableNode::Roman(c)
+                } else {
+                    CancellableNode::Sym(c)
+                }
+            }
             CancellableNode::Roman(c) if !c.is_alphabetic() => CancellableNode::Sym(*c),
             tok => tok.clone(),
         }),

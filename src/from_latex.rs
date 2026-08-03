@@ -503,8 +503,30 @@ impl Parser {
             }
             "cancel" => {
                 // \cancel over a structure means its tokens are struck;
-                // push the strike down to them and splice.
-                let (mut arg, t) = self.arg(t);
+                // push the strike down to them and splice. An
+                // empty-limit big operator is just its symbol (our own
+                // `\cancel{\sum }` output must strike the ∑, and the
+                // spliced atom must not become a limits host for a
+                // following script). A struck band (external
+                // `\cancel{\sum_{i}}`) has no representation: best
+                // effort keeps the limits and strikes what it can.
+                let (arg, t) = self.arg(t);
+                let mut arg: Row = arg
+                    .into_iter()
+                    .map(|n| match n {
+                        Node::BigOpSym { op, lower, upper }
+                            if lower.is_empty() && upper.is_empty() =>
+                        {
+                            Node::Sym(op)
+                        }
+                        Node::BigOp { name, lower, upper }
+                            if lower.is_empty() && upper.is_empty() =>
+                        {
+                            Node::Func(name)
+                        }
+                        n => n,
+                    })
+                    .collect();
                 crate::ast::cancel_all(&mut arg);
                 out.extend(arg);
                 t
