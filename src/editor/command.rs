@@ -259,7 +259,10 @@ impl Editor {
         // An edit that does not consume the selection still shifts the
         // row under it, so a surviving anchor would designate a
         // different range afterwards (the plain-key path clears it the
-        // same way). Only the two wrapping edits keep it.
+        // same way). The two wrapping edits keep it; Cancel reads it
+        // and then clears it itself — a strike leaves the row shape
+        // intact, but an invisible surviving selection would turn the
+        // next wrap key or ^C into a surprise on the struck range.
         let wraps = matches!(
             edit,
             Edit::Insert { wrap: true, .. } | Edit::Accent(_) | Edit::Cancel

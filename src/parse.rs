@@ -10,7 +10,7 @@
 //! like `x+1` works), and known function names in upright ASCII ("sin")
 //! parse as `Node::Func`.
 
-use crate::ast::{Node, Row, Token};
+use crate::ast::{CancellableNode, Node, Row};
 use crate::glyphs::{
     ARM_FALL, ARM_RISE, BRACE_BL, BRACE_TL, COL_MARK_BOT, COL_MARK_TOP, CROSSING, DOUBLE_BODY,
     FRAC_BAR, HEAD_LEFT, HEAD_RIGHT, LATTICE, LATTICE_LEFT, LATTICE_RIGHT, LATTICE_TOP, MID, NORM,
@@ -82,7 +82,7 @@ impl Grid {
 /// A partial strike is an error: a strike covers whole tokens only, so
 /// canonical AA never draws one, and accepting it would guess at the
 /// user's intent.
-fn strike_token(g: &Grid, bl: usize, c0: usize, c1: usize, tok: Token) -> Result<Node> {
+fn strike_token(g: &Grid, bl: usize, c0: usize, c1: usize, tok: CancellableNode) -> Result<Node> {
     let struck = (c0..=c1).filter(|&c| g.cancelled(bl, c)).count();
     if struck == 0 {
         return Ok(tok.into_node());
@@ -960,7 +960,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                         }
                     }
                 }
-                out.push(strike_token(g, bl, col, close, Token::Text(t))?);
+                out.push(strike_token(g, bl, col, close, CancellableNode::Text(t))?);
                 col = close + 1;
             }
             '\'' => {
@@ -994,9 +994,9 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                     return err("an upright run cannot be only spaces", bl, col);
                 }
                 let tok = if t.chars().count() == 1 {
-                    Token::Roman(t.chars().next().unwrap())
+                    CancellableNode::Roman(t.chars().next().unwrap())
                 } else {
-                    Token::Func(t)
+                    CancellableNode::Func(t)
                 };
                 out.push(strike_token(g, bl, col, close, tok)?);
                 col = close + 1;
@@ -1116,14 +1116,14 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                     let prev_letter = col > rect.l && g.at(bl, col - 1).is_alphabetic();
                     let next_letter = run_end < rect.r && g.at(bl, run_end + 1).is_alphabetic();
                     if prev_letter || next_letter {
-                        Token::Roman(word.chars().next().unwrap())
+                        CancellableNode::Roman(word.chars().next().unwrap())
                     } else {
-                        Token::Sym(ch)
+                        CancellableNode::Sym(ch)
                     }
                 } else {
                     // Any upright multi-letter run is a Func; the
                     // dictionary only decides limits and lexing.
-                    Token::Func(word)
+                    CancellableNode::Func(word)
                 };
                 out.push(strike_token(g, bl, col, run_end, tok)?);
                 col = run_end + 1;
@@ -1151,7 +1151,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                         base,
                     });
                 } else {
-                    out.push(strike_token(g, bl, col, col, Token::Sym(base))?);
+                    out.push(strike_token(g, bl, col, col, CancellableNode::Sym(base))?);
                 }
                 col += 1 + extra;
             }

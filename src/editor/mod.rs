@@ -899,6 +899,7 @@ impl Editor {
             crate::ast::uncancel_all(&mut slice);
         }
         self.cur_row_mut().splice(range, slice);
+        self.select_anchor = None;
     }
 
     // ----- deletion -----
@@ -1550,7 +1551,7 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::Token;
+    use crate::ast::CancellableNode;
     use crate::latex::row_to_latex;
 
     /// Type "x^2 + \frac 1 2" the way a user would.
@@ -1932,19 +1933,27 @@ mod tests {
             ed.root,
             vec![
                 Node::Sym('a'),
-                Node::Cancel(Token::Sym('b')),
-                Node::Cancel(Token::Sym('c')),
+                Node::Cancel(CancellableNode::Sym('b')),
+                Node::Cancel(CancellableNode::Sym('c')),
             ]
         );
-        // The selection survives (a strike changes no widths), so the
-        // same command toggles the strikes back off.
+        // The anchor is consumed by the edit (the cursor stays at the
+        // range's left end); re-selecting the struck range and
+        // repeating the command unstrikes.
+        assert_eq!(ed.selection(), None);
+        ed.select_move(true);
+        ed.select_move(true);
         ed.execute("cancel");
         assert_eq!(
             ed.root,
             vec![Node::Sym('a'), Node::Sym('b'), Node::Sym('c')]
         );
         // Re-strike and delete the selection.
+        ed.select_move(false);
+        ed.select_move(false);
         ed.execute("cancel");
+        ed.select_move(true);
+        ed.select_move(true);
         assert!(ed.delete_selection());
         assert_eq!(ed.root, vec![Node::Sym('a')]);
 

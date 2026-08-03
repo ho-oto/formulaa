@@ -141,11 +141,11 @@ pub enum Node {
     },
     /// A struck-through token (\cancel): every cell of the rendered
     /// token carries a combining long solidus overlay (U+0338). The
-    /// payload is `Token`, not `Node` — only the atom-shaped nodes can
+    /// payload is `CancellableNode`, not `Node` — only the atom-shaped nodes can
     /// be struck, so a strike always covers one whole token; cancelling
     /// a structure means cancelling its tokens (`cancel_all`; normalize
     /// pushes a stray wrapper down the same way before it can exist).
-    Cancel(Token),
+    Cancel(CancellableNode),
 }
 
 /// The atom-shaped tokens a strike can cover: the payload of
@@ -153,35 +153,35 @@ pub enum Node {
 /// atom-only restriction lives in the type. Peeling the strike turns
 /// it back into its `Node` with `into_node`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Token {
+pub enum CancellableNode {
     Sym(char),
     Func(String),
     Roman(char),
     Text(String),
 }
 
-impl Token {
+impl CancellableNode {
     /// The bare node this token reads as once the strike is peeled.
     pub fn into_node(self) -> Node {
         match self {
-            Token::Sym(c) => Node::Sym(c),
-            Token::Func(t) => Node::Func(t),
-            Token::Roman(c) => Node::Roman(c),
-            Token::Text(t) => Node::Text(t),
+            CancellableNode::Sym(c) => Node::Sym(c),
+            CancellableNode::Func(t) => Node::Func(t),
+            CancellableNode::Roman(c) => Node::Roman(c),
+            CancellableNode::Text(t) => Node::Text(t),
         }
     }
 }
 
-/// Node -> Token, giving the node back unchanged when it is not
+/// Node -> CancellableNode, giving the node back unchanged when it is not
 /// atom-shaped (so callers can restore it in place).
-impl TryFrom<Node> for Token {
+impl TryFrom<Node> for CancellableNode {
     type Error = Node;
-    fn try_from(n: Node) -> Result<Token, Node> {
+    fn try_from(n: Node) -> Result<CancellableNode, Node> {
         match n {
-            Node::Sym(c) => Ok(Token::Sym(c)),
-            Node::Func(t) => Ok(Token::Func(t)),
-            Node::Roman(c) => Ok(Token::Roman(c)),
-            Node::Text(t) => Ok(Token::Text(t)),
+            Node::Sym(c) => Ok(CancellableNode::Sym(c)),
+            Node::Func(t) => Ok(CancellableNode::Func(t)),
+            Node::Roman(c) => Ok(CancellableNode::Roman(c)),
+            Node::Text(t) => Ok(CancellableNode::Text(t)),
             n => Err(n),
         }
     }
@@ -383,7 +383,9 @@ pub fn normalize(row: &Row) -> Row {
             // An empty text run has no picture of its own worth
             // keeping, struck or not.
             Node::Text(t) | Node::Func(t) if t.is_empty() => continue,
-            Node::Cancel(Token::Text(t) | Token::Func(t)) if t.is_empty() => continue,
+            Node::Cancel(CancellableNode::Text(t) | CancellableNode::Func(t)) if t.is_empty() => {
+                continue;
+            }
             _ => {}
         }
         // Scripts merge *across* spacers: the blank column a spacer
@@ -426,7 +428,7 @@ pub fn normalize(row: &Row) -> Row {
 /// cancelling a structure cancels the tokens inside it.
 pub fn cancel_all(row: &mut Row) {
     for n in row.iter_mut() {
-        match Token::try_from(std::mem::replace(n, Node::Spacer)) {
+        match CancellableNode::try_from(std::mem::replace(n, Node::Spacer)) {
             Ok(tok) => *n = Node::Cancel(tok),
             Err(orig) => {
                 *n = orig;
@@ -475,7 +477,7 @@ pub fn cancel_census(row: &Row) -> (usize, usize) {
     (bare, struck)
 }
 
-/// The nodes a strike can cover whole: exactly those with a `Token`
+/// The nodes a strike can cover whole: exactly those with a `CancellableNode`
 /// counterpart.
 pub fn cancellable(n: &Node) -> bool {
     matches!(
@@ -684,7 +686,7 @@ fn normalize_node(node: &Node) -> Node {
         // The atom rules apply through the strike (an upright
         // non-letter has no roman/italic distinction, struck or not).
         Node::Cancel(tok) => Node::Cancel(match tok {
-            Token::Roman(c) if !c.is_alphabetic() => Token::Sym(*c),
+            CancellableNode::Roman(c) if !c.is_alphabetic() => CancellableNode::Sym(*c),
             tok => tok.clone(),
         }),
         Node::Array { rows, cols, cells } => Node::Array {

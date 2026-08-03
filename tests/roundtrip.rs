@@ -10,7 +10,7 @@
 //! "Three famous mathematical formulas" (Cardano, Cauchy–Schwarz,
 //! Vandermonde determinant).
 
-use mascii::ast::{Node, Row, Token, normalize, strip_spacers};
+use mascii::ast::{CancellableNode, Node, Row, normalize, strip_spacers};
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
 use mascii::render::{RenderCtx, render_root};
@@ -1669,9 +1669,9 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
             },
             // A strike wraps one atom-shaped token.
             _ => Node::Cancel(match rng.below(3) {
-                0 => Token::Sym(['x', 'y', 'α', 'B'][rng.below(4)]),
-                1 => Token::Func("sin".into()),
-                _ => Token::Text("ok".into()),
+                0 => CancellableNode::Sym(['x', 'y', 'α', 'B'][rng.below(4)]),
+                1 => CancellableNode::Func("sin".into()),
+                _ => CancellableNode::Text("ok".into()),
             }),
         },
         13 => {

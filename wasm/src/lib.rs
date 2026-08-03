@@ -200,7 +200,10 @@ impl MasciiEditor {
                 }
                 let cur = self.ed.op_cursor.min(shown.chars().count());
                 put(&mut lines, r, c + 1 + cur, CURSOR_CHAR);
-            } else {
+            } else if self.ed.selection().is_none() {
+                // With a selection active the caret is not drawn: the
+                // underlined range alone says what is selected (a ▌ at
+                // one end would read as "maybe included").
                 put(&mut lines, r, c, CURSOR_CHAR);
             }
         }

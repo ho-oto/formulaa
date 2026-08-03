@@ -440,9 +440,10 @@ fn cancel_strikes_the_selections_tokens() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"x+y S-Left S-Left \cancel");
     assert_eq!(latex(&ed), "x\\cancel{+}\\cancel{y}");
-    // The selection survives, so the command toggles: an all-struck
-    // range unstrikes.
-    type_script(&mut ed, r"\cancel");
+    // Re-selecting an all-struck range and repeating the command
+    // unstrikes (the anchor does not survive the edit: an invisible
+    // selection would make the next wrap key a surprise).
+    type_script(&mut ed, r"S-Right S-Right \cancel");
     assert_eq!(latex(&ed), "x+y");
     // A mixed range (b struck, + and c bare) strikes everything.
     let mut ed = Editor::new();

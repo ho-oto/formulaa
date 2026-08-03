@@ -149,7 +149,7 @@ Backspace は中身クリアではなく構造の削除)。
 | `\frac` | 分数(選択中はそれが分子に) |
 | `\sqrt` `\cbrt` `\qdrt` | √ ∛ ∜ |
 | `\tex` / `\latex` | LaTeX 入力ボックス: 打ち込むかペーストして Enter で確定(best-effort 読み込み。KaTeX/MathJax 方言、不明コマンドは無視) |
-| `\cancel` / `\!` | 打ち消しのトグル。選択なしなら直前の要素(構造なら中のトークン全部)。混在選択は全部打ち消し、全部打ち消し済みなら解除。打ち消し済みトークンの直後の Backspace は、1回目で線を剥がし2回目で本体を消す |
+| `\cancel` / `\!` | 打ち消しのトグル。選択なしなら直前の要素(構造なら中のトークン全部)。混在選択は全部打ち消し、全部打ち消し済みなら解除(コマンド後、選択は解除される)。打ち消し済みトークンの直後の Backspace は、1回目で線を剥がし2回目で本体を消す |
 | `\matrix` / `\array` / `\smallmatrix` | 裸の格子(2×2。`\matrix34` で 3行×4列) |
 | `\pmatrix` `\bmatrix` `\Bmatrix` `\vmatrix` `\Vmatrix` `\cases` `\rcases` | 括弧付きの行列(同様に `\cases32` などサイズ指定可)。`\Vmatrix` は ‖ ‖ |
 | `\overbrace` `\underbrace` | ╭──╮ / ╰──╯(ラベル付き) |

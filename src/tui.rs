@@ -134,6 +134,15 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
     }
 
     overlay_minibuffer(ed, &mut d);
+    // With a selection active the caret cell is not drawn: the colored
+    // range alone says what is selected (a reverse-video cell at one
+    // end reads as "maybe included"). Scrolling still follows the
+    // moving end, and the minibuffer/name-box overlays keep the caret
+    // they anchor on.
+    let follow = d.caret;
+    if ed.selection().is_some() && ed.minibuffer.is_none() && ed.op_entry.is_none() {
+        d.caret = None;
+    }
 
     let width = (block.width() as u16).max(d.width() as u16);
     let height = d.height() as u16;
@@ -160,13 +169,13 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
     let left = scroll(
         width,
         inner.width,
-        d.caret.map(|(_, cx)| cx),
+        follow.map(|(_, cx)| cx),
         &mut view.scroll_x,
     );
     let top = scroll(
         height,
         inner.height,
-        d.caret.map(|(cy, _)| cy),
+        follow.map(|(cy, _)| cy),
         &mut view.scroll_y,
     );
 
