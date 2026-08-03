@@ -1111,6 +1111,9 @@ fn cancel_strikes() {
         Node::Cancel(CancellableNode::Sym('.')),
     ];
     roundtrip("cancel-dot-run", &row);
+    // A struck big-operator atom (the bare ∑ is a Sym).
+    let row = vec![Node::Cancel(CancellableNode::Sym('∑'))];
+    roundtrip("cancel-bigop-atom", &row);
     // A bare one-char Func lands on its final shape in one pass
     // (normalize idempotence: Func("1") must go straight to Sym).
     let row = vec![Node::Func("1".into()), Node::Func(".".into())];

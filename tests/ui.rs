@@ -498,6 +498,21 @@ fn jump_sheds_a_stale_selection() {
 }
 
 #[test]
+fn cancel_collapses_an_empty_limit_big_operator() {
+    // ∑ promoted to a band but left with empty limits is its bare
+    // atom (normalize's collapse); striking it strikes the ∑ instead
+    // of finding nothing in the empty limits.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\sum Down Tab \!");
+    assert_eq!(latex(&ed), "\\cancel{\\sum }");
+    // Same for a lim-class band (a bare Func always spells
+    // \operatorname — identical typesetting to \lim).
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\lim Tab \!");
+    assert_eq!(latex(&ed), "\\cancel{\\operatorname{lim}}");
+}
+
+#[test]
 fn backspace_peels_the_strike_before_the_token() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"xy \!");

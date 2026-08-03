@@ -434,7 +434,20 @@ pub fn normalize(row: &Row) -> Row {
 /// cancelling a structure cancels the tokens inside it.
 pub fn cancel_all(row: &mut Row) {
     for n in row.iter_mut() {
-        match CancellableNode::try_from(std::mem::replace(n, Node::Spacer)) {
+        let node = std::mem::replace(n, Node::Spacer);
+        // An empty-limit big operator is its bare atom (the same
+        // collapse normalize applies), so striking it strikes the
+        // atom instead of finding no tokens in its empty limits.
+        let node = match node {
+            Node::BigOpSym { op, lower, upper } if lower.is_empty() && upper.is_empty() => {
+                Node::Sym(op)
+            }
+            Node::BigOp { name, lower, upper } if lower.is_empty() && upper.is_empty() => {
+                bare_upright(name)
+            }
+            node => node,
+        };
+        match CancellableNode::try_from(node) {
             Ok(tok) => *n = Node::Cancel(tok),
             Err(orig) => {
                 *n = orig;
@@ -467,8 +480,17 @@ pub fn uncancel_all(row: &mut Row) {
 pub fn cancel_census(row: &Row) -> (usize, usize) {
     let mut bare = 0;
     let mut struck = 0;
+    // Empty-limit big operators count as bare tokens: cancel_all
+    // collapses them to their atom (census and effect must agree).
+    let bare_bigop = |n: &Node| {
+        matches!(
+            n,
+            Node::BigOpSym { lower, upper, .. } | Node::BigOp { lower, upper, .. }
+                if lower.is_empty() && upper.is_empty()
+        )
+    };
     for n in row {
-        if cancellable(n) {
+        if cancellable(n) || bare_bigop(n) {
             bare += 1;
         } else if matches!(n, Node::Cancel(_)) {
             struck += 1;
