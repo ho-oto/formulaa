@@ -256,17 +256,28 @@ impl Editor {
     /// Apply a resolved edit to the tree. All command-driven mutation
     /// funnels through here; `resolve` decides *what*, this does *how*.
     pub fn apply(&mut self, edit: Edit) {
-        // An edit that does not consume the selection still shifts the
-        // row under it, so a surviving anchor would designate a
-        // different range afterwards. The two wrapping edits keep it
-        // (the selection lands inside the node); a plain symbol keeps
-        // it too, but to *replace* it — typing over a selection is the
-        // standard editor behavior. Everything else drops it.
-        let wraps = matches!(
+        // Three fates for an active selection. The wrapping edits
+        // consume it into the node (\frac, ( — the selection becomes
+        // the first field); every content-inserting edit *replaces* it
+        // (typing over a selection, the standard editor behavior); the
+        // structural rest just drops the anchor (the row shifts under
+        // it, so a survivor would designate a different range).
+        let wraps = matches!(edit, Edit::Insert { wrap: true, .. } | Edit::Accent(_));
+        let replaces = matches!(
             edit,
-            Edit::Insert { wrap: true, .. } | Edit::Accent(_) | Edit::Sym(_)
+            Edit::Sym(_)
+                | Edit::Insert { wrap: false, .. }
+                | Edit::Grid { .. }
+                | Edit::Mid
+                | Edit::OpenBox(_)
         );
-        if !wraps {
+        if replaces {
+            if self.selection().is_some() {
+                self.take_selection();
+            } else {
+                self.select_anchor = None;
+            }
+        } else if !wraps {
             self.select_anchor = None;
         }
         match edit {

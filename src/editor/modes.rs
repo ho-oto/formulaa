@@ -156,7 +156,13 @@ impl Editor {
 
     /// Enter at the top level: start a new formula line (Node::Break).
     pub fn break_line(&mut self) {
-        self.select_anchor = None;
+        // Enter is a content insert too: it replaces an active
+        // selection with the line break.
+        if self.selection().is_some() {
+            self.take_selection();
+        } else {
+            self.select_anchor = None;
+        }
         let col = self.col;
         self.cur_row_mut().insert(col, Node::Break);
         self.col += 1;

@@ -450,7 +450,6 @@ impl Editor {
             // Space is a formatting space (Tab leaves insets; \space gives
             // the semantic ␣ atom).
             Key::Char(' ') => {
-                self.select_anchor = None;
                 self.apply(Edit::Insert {
                     node: Node::Spacer,
                     wrap: false,

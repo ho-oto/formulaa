@@ -902,6 +902,37 @@ fn a_symbol_replaces_the_selection() {
     assert_eq!(latex(&ed), "\\widehat{ab}");
 }
 
+/// Every content-inserting edit replaces the selection: spacer, Func,
+/// ∑-band, grid, name box, and the Enter line break.
+#[test]
+fn content_inserts_replace_the_selection() {
+    // Space: the range becomes one formatting spacer.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"abc S-Left S-Left Space");
+    assert_eq!(latex(&ed), "a");
+    // A dictionary function name.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"ab S-Left \sin");
+    assert_eq!(latex(&ed), "a\\operatorname{sin}");
+    // A ∑-class band replaces and enters its lower limit.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"ab S-Left \sum n Tab");
+    assert_eq!(latex(&ed), "a\\sum_{n}");
+    // A grid replaces and enters its first cell.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"ab S-Left \pmatrix x");
+    assert_eq!(latex(&ed), "a\\begin{pmatrix} x &  \\\\  &  \\end{pmatrix}");
+    // A name box deletes the selection when it opens; the commit
+    // lands where the range was.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"ab S-Left \rm d Enter");
+    assert_eq!(latex(&ed), "a\\mathrm{d}");
+    // Enter: the range becomes the line break.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"ab S-Left Enter c");
+    assert_eq!(latex(&ed), "a \\\\ c");
+}
+
 /// \mid is contextual: the divides atom ∣ in a plain row, the segment
 /// separator directly inside a delimiter block.
 #[test]
