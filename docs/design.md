@@ -1043,9 +1043,9 @@
     (`Mark::BlockOpen{rank}`/`BlockClose`。文字ラベルは描かない)。
     `Mark::Label/Rank`・JUMP_LABELS・ラベル描画・docs/jump-spec.md は
     削除。^F は温存(スナップ用の候補列挙 `jump_candidates` と近接
-    自動展開の ghost 機構はここが所有)。`\!` は同時に「直前の Sym を
-    否定形に置換」コマンド(`Edit::Negate`、`NEGATIONS` 経由)として
-    再定義。
+    自動展開の ghost 機構はここが所有)。`\!` は同時に「直前の Sym と否定形の
+    トグル」コマンド(`Edit::Negate`、`NEGATIONS` と鏡映テーブル
+    `UNNEGATIONS` 経由 — 鏡映性はテストが固定)として再定義。
 
 ## テスト戦略
 

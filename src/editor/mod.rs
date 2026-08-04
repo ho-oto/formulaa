@@ -855,19 +855,21 @@ impl Editor {
         self.select_anchor = None;
     }
 
-    /// `\!`: the symbol atom left of the cursor becomes its slashed
-    /// negation (= → ≠, ∈ → ∉) when the table has one.
+    /// `\!`: toggle the symbol atom left of the cursor with its
+    /// slashed negation (= → ≠ → = …) when the tables have one.
     pub fn negate_prev(&mut self) {
         let Some(col) = self.col.checked_sub(1) else {
-            self.error("\\! negates the symbol left of the cursor");
+            self.error("\\! toggles the negation of the symbol left of the cursor");
             return;
         };
         match self.cur_row()[col] {
-            Node::Sym(c) => match crate::symbols::negated(c) {
-                Some(neg) => self.cur_row_mut()[col] = Node::Sym(neg),
-                None => self.error(format!("{} has no slashed negation", c)),
-            },
-            _ => self.error("\\! negates the symbol left of the cursor"),
+            Node::Sym(c) => {
+                match crate::symbols::negated(c).or_else(|| crate::symbols::unnegated(c)) {
+                    Some(flipped) => self.cur_row_mut()[col] = Node::Sym(flipped),
+                    None => self.error(format!("{} has no slashed negation", c)),
+                }
+            }
+            _ => self.error("\\! toggles the negation of the symbol left of the cursor"),
         }
     }
 

@@ -999,19 +999,24 @@ fn mid_is_divides_outside_a_delimiter() {
     assert_eq!(latex(&ed), "\\left(x\\middle|P\\right)");
 }
 
-/// `\!` right after a symbol replaces it with its slashed negation.
+/// `\!` right after a symbol toggles it with its slashed negation.
 #[test]
-fn bang_negates_the_preceding_symbol() {
+fn bang_toggles_the_preceding_symbol() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"a = \! b");
     assert_eq!(latex(&ed), "a\\ne b");
-    // ∈ → ∉ the same way; a second \! has no ∉-negation and errors.
+    // The toggle closes: ∈ → ∉ → ∈ → ∉.
     let mut ed = Editor::new();
     type_script(&mut ed, r"x \in \!");
     assert_eq!(latex(&ed), "x\\notin ");
     type_script(&mut ed, r"\!");
-    assert!(ed.message_error);
+    assert_eq!(latex(&ed), "x\\in ");
+    type_script(&mut ed, r"\!");
     assert_eq!(latex(&ed), "x\\notin ");
+    // A directly-typed slashed atom un-negates the same way.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a \ne \! b");
+    assert_eq!(latex(&ed), "a=b");
     // No negation for a letter; nothing left of the cursor at col 0.
     let mut ed = Editor::new();
     type_script(&mut ed, r"a \!");

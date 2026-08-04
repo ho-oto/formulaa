@@ -636,6 +636,53 @@ pub fn negated(c: char) -> Option<char> {
     NEGATIONS.get(&c).copied()
 }
 
+/// The inverse: slashed relation → its canonical base (≠ → =). Kept as
+/// its own table rather than derived at runtime — the mirror test
+/// walks both and pins them to each other. Where a base has two
+/// spellings (`~` is the keyboard alias of `∼`), the canonical char is
+/// the entry here.
+pub static UNNEGATIONS: phf::Map<char, char> = phf::phf_map! {
+    '≠' => '=',
+    '∉' => '∈',
+    '∌' => '∋',
+    '≮' => '<',
+    '≯' => '>',
+    '≰' => '≤',
+    '≱' => '≥',
+    '≁' => '∼',
+    '≄' => '≃',
+    '≇' => '≅',
+    '≉' => '≈',
+    '≢' => '≡',
+    '≴' => '≲',
+    '≵' => '≳',
+    '⊀' => '≺',
+    '⊁' => '≻',
+    '⋠' => '≼',
+    '⋡' => '≽',
+    '⊄' => '⊂',
+    '⊅' => '⊃',
+    '⊈' => '⊆',
+    '⊉' => '⊇',
+    '⋢' => '⊑',
+    '⋣' => '⊒',
+    '⋪' => '⊲',
+    '⋫' => '⊳',
+    '⋬' => '⊴',
+    '⋭' => '⊵',
+    '⊬' => '⊢',
+    '⊭' => '⊨',
+    '⊮' => '⊩',
+    '∤' => '∣',
+    '∦' => '∥',
+    '∄' => '∃',
+};
+
+/// The base a slashed relation reverts to, if the table has one.
+pub fn unnegated(c: char) -> Option<char> {
+    UNNEGATIONS.get(&c).copied()
+}
+
 /// Every character the format accepts as an atom. Derived from the
 /// tables themselves — a char is an atom exactly when some `\name`
 /// produces it (or it is plain ASCII, which the keyboard types
@@ -853,6 +900,31 @@ mod tests {
         assert_eq!(crate::symbols::symbol_by_name("in!"), Some('∉'));
         assert_eq!(crate::symbols::symbol_by_name("subset!"), Some('⊄'));
         assert!(seen.len() >= 30, "the table covers the negation family");
+    }
+
+    /// NEGATIONS and UNNEGATIONS are exact mirrors: every slashed form
+    /// reverts to a base that negates back to it, and vice versa —
+    /// the \! toggle depends on the two never drifting apart.
+    #[test]
+    fn negation_tables_mirror_each_other() {
+        for (&base, &neg) in NEGATIONS.entries() {
+            let back = unnegated(neg).unwrap_or_else(|| panic!("{} has no un-negation", neg));
+            assert_eq!(
+                negated(back),
+                Some(neg),
+                "{} → {} → {} does not close",
+                base,
+                neg,
+                back
+            );
+        }
+        for (&neg, &base) in UNNEGATIONS.entries() {
+            assert_eq!(negated(base), Some(neg), "{} ↔ {} mismatch", neg, base);
+        }
+        // Same family, minus the keyboard aliases (~ for ∼): the
+        // inverse has exactly one row per distinct slashed form.
+        let distinct: std::collections::HashSet<char> = NEGATIONS.values().copied().collect();
+        assert_eq!(UNNEGATIONS.len(), distinct.len());
     }
 
     /// Every atom is exactly one cell wide and stands alone — that is
