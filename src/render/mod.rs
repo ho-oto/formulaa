@@ -165,8 +165,7 @@ fn quoted(t: &str, q: char) -> Block {
 
 /// Does this node's picture put an accent band next to its neighbours?
 /// A band has no closing glyph, so the scan would run into whatever
-/// touches it. (A `Cancel` payload is a bare symbol char and can never
-/// carry a band, so the wrapper needs no look-through.)
+/// touches it.
 fn has_wide_accent(n: &Node) -> bool {
     matches!(n, Node::WideAccent { .. })
 }

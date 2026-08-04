@@ -211,7 +211,10 @@ impl Editor {
         // " or \ can be typed); a bare " closes the box. Brackets stay
         // out entirely — quoted content is opaque to the delimiter
         // depth scans, so ( ) [ ] { } inside would desync them.
-        let text_char = |c: char| !"()[]{}".contains(c);
+        // Combining strike overlays are also barred: the parser hard-
+        // rejects them (one char = one cell), so letting a paste smuggle
+        // one into a Text would trip the roundtrip guard on every edit.
+        let text_char = |c: char| !"()[]{}".contains(c) && !matches!(c, '\u{338}' | '\u{336}');
         if kind == BoxKind::Text && self.op_escape {
             self.op_escape = false;
             if let Key::Char(c) = key
@@ -247,7 +250,14 @@ impl Editor {
             Key::Char(c) if !ctrl && kind == BoxKind::Text && text_char(c) => self.op_type(c),
             // The \tex box takes any printable input (LaTeX is pasted
             // into it verbatim; Enter commits).
-            Key::Char(c) if !ctrl && kind == BoxKind::Tex && !c.is_control() => self.op_type(c),
+            Key::Char(c)
+                if !ctrl
+                    && kind == BoxKind::Tex
+                    && !c.is_control()
+                    && !matches!(c, '\u{338}' | '\u{336}') =>
+            {
+                self.op_type(c)
+            }
             Key::Char(c) if !ctrl && kind != BoxKind::Text && name_char(c) => self.op_type(c),
             Key::Enter | Key::Tab | Key::Char(' ') => self.op_commit(),
             _ => {

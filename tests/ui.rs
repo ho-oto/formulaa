@@ -439,6 +439,34 @@ fn typing_inside_a_norm_works() {
 }
 
 #[test]
+fn plain_motions_shed_the_anchor() {
+    // Home/End are plain motions: keeping the anchor would silently
+    // grow the selection to the whole line and the next Backspace
+    // would delete it all.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a+b S-Left Home");
+    assert_eq!(ed.selection(), None);
+    type_script(&mut ed, r"Backspace");
+    assert_eq!(latex(&ed), "a+b", "nothing left of the cursor to delete");
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a+b Left S-Left End");
+    assert_eq!(ed.selection(), None);
+    // A dormant anchor inside an inset must not resurrect when
+    // Backspace steps back in (Tab out, then Backspace).
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"x ^ abc Left Left S-Right Tab Backspace");
+    assert_eq!(ed.selection(), None);
+    type_script(&mut ed, r"Backspace");
+    assert_eq!(latex(&ed), "x^{ab}", "only one char deleted");
+    // Same via the contextual close key.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"( abc Left Left S-Right ) Backspace");
+    assert_eq!(ed.selection(), None);
+    type_script(&mut ed, r"Backspace");
+    assert_eq!(latex(&ed), "\\left(ab\\right)");
+}
+
+#[test]
 fn jump_sheds_a_stale_selection() {
     // ^G landing in the anchor's row must not resurrect a selection
     // the user never chose (anchor -> landing), or the next selection

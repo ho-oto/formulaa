@@ -338,8 +338,7 @@ pub fn normalize(row: &Row) -> Row {
             Node::Sup { arg } | Node::Sub { arg } if arg.is_empty() => {
                 continue;
             }
-            // An empty text run has no picture of its own worth
-            // keeping, struck or not.
+            // An empty text run has no picture of its own worth keeping.
             Node::Text(t) | Node::Func(t) if t.is_empty() => continue,
             _ => {}
         }

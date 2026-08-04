@@ -16,5 +16,5 @@ cp -r editors/obsidian/* <vault>/.obsidian/plugins/mascii/
 
 コマンドパレット →「Edit mascii formula at cursor」。カーソルが
 ```math ブロック内ならその数式を、外なら新規数式をカーソル位置に挿入。
-キー操作は TUI と同じ(`\frac`␣ `^` `_` `(` Space ⇧←→ 選択 `\cancel` …)。
+キー操作は TUI と同じ(`\frac`␣ `^` `_` `(` Space ⇧←→ 選択 …)。
 Ctrl+Enter で反映、Esc 2回でキャンセル。

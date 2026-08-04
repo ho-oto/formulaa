@@ -91,6 +91,9 @@ fn tokenize(s: &str) -> Vec<Tok> {
             }
             // Inline/display math fences of pasted fragments.
             '$' => {}
+            // Combining strike overlays cannot be represented (the AA
+            // grid is one char per cell); best effort drops them.
+            '\u{338}' | '\u{336}' => {}
             ' ' => {
                 if out.last() != Some(&Tok::Space) {
                     out.push(Tok::Space);
@@ -406,14 +409,26 @@ impl Parser {
                 while t.get(i) == Some(&Tok::Space) {
                     i += 1;
                 }
-                let rel = match t.get(i) {
-                    Some(Tok::Ch(c)) => Some(*c),
-                    Some(Tok::Cmd(w)) => crate::symbols::symbol_by_name(w),
-                    _ => None,
+                let (rel, next) = match t.get(i) {
+                    Some(Tok::Ch(c)) => (Some(*c), i + 1),
+                    Some(Tok::Cmd(w)) => (crate::symbols::symbol_by_name(w), i + 1),
+                    // \not{=}: a one-token group is its relation.
+                    Some(Tok::Open) => match find_match(&t[i + 1..], |k| *k == Tok::Close) {
+                        Some(end) => {
+                            let rel = match &t[i + 1..i + 1 + end] {
+                                [Tok::Ch(c)] => Some(*c),
+                                [Tok::Cmd(w)] => crate::symbols::symbol_by_name(w),
+                                _ => None,
+                            };
+                            (rel, i + 2 + end)
+                        }
+                        None => (None, i),
+                    },
+                    _ => (None, i),
                 };
                 if let Some(neg) = rel.and_then(negated) {
                     out.push(Node::Sym(neg));
-                    return &t[i + 1..];
+                    return &t[next..];
                 }
                 t
             }

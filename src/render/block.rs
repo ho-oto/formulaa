@@ -1,8 +1,9 @@
 //! The 2D block algebra: rectangular character grids with a baseline
 //! and two zero-width annotation channels (the caret, display marks),
 //! plus the compositions — horizontal concatenation on the baseline,
-//! vertical stacking, centered padding — that carry them through. Nothing here knows what a `Node`
-//! is; the AST rules live in the parent module. The channel
+//! vertical stacking, centered padding — that carry them through.
+//! Nothing here knows what a `Node` is; the AST rules live in the
+//! parent module. The channel
 //! propagation is the footgun CLAUDE.md warns about, so it is
 //! unit-tested HERE, where a violation names the composition that
 //! dropped it.
@@ -155,10 +156,10 @@ pub(super) fn hcat(blocks: &[Block]) -> Block {
     }
 }
 
-/// The zero-width annotation channels of a Block (caret,
-/// caret, display marks), accumulated as children are centered into a
-/// parent. One `centered` call per child replaces the three per-channel
-/// translations every composite node used to spell out.
+/// The zero-width annotation channels of a Block (caret, display
+/// marks), accumulated as children are centered into a parent. One
+/// `centered` call per child replaces the per-channel translations
+/// every composite node used to spell out.
 #[derive(Default)]
 pub(super) struct Annots {
     caret: Option<(usize, usize)>,
@@ -257,6 +258,36 @@ mod tests {
             lines.iter().map(|l| l.chars().collect()).collect(),
             baseline,
         )
+    }
+
+    /// hcat must translate every annotation channel by each child's
+    /// (row, col) offset — a channel a composition forgets goes stale
+    /// silently, so each one is pinned here by name.
+    #[test]
+    fn hcat_carries_all_channels() {
+        let mut left = b(&["ab"], 0);
+        left.marks.push((0, 0, '\u{E0F0}'));
+        let mut right = b(&["c", "d"], 1);
+        right.caret = Some((1, 0));
+        let out = hcat(&[left, right]);
+        // Baselines meet: left's row 0 lands on the joint baseline.
+        assert_eq!(out.baseline, 1);
+        assert_eq!(out.to_strings(), vec!["  c", "abd"]);
+        assert_eq!(out.marks, vec![(1, 0, '\u{E0F0}')]);
+        assert_eq!(out.caret, Some((1, 2)), "caret shifted by left's width");
+    }
+
+    #[test]
+    fn vstack_carries_all_channels() {
+        let mut top = b(&["x"], 0);
+        top.caret = Some((0, 0));
+        let mut bot = b(&["yy"], 0);
+        bot.marks.push((0, 0, '\u{E0F1}'));
+        let out = vstack(&[top, bot]);
+        assert_eq!(out.caret, Some((0, 0)), "caret stays in its own row");
+        // The lone-band separator row sits between the stacked lines.
+        let sep = 1;
+        assert_eq!(out.marks, vec![(sep + 1, 0, '\u{E0F1}')]);
     }
 
     /// A baseline may equal height() (a block entirely above the

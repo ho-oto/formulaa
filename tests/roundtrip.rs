@@ -223,6 +223,8 @@ fn foreign_latex_reads_right() {
     assert_eq!(tex(r"a \not= b"), r"a\ne b");
     assert_eq!(tex(r"a \not\in B"), r"a\notin B");
     assert_eq!(tex(r"a \not\leq b"), r"a\nleq b");
+    // \not{=}: a one-token group is its relation.
+    assert_eq!(tex(r"a \not{=} b"), r"a\ne b");
     // The shared negation table covers ≢ now (spelled \not\equiv).
     assert_eq!(tex(r"a \not\equiv b"), r"a\not\equiv b");
     // A relation with no slashed Unicode form keeps its bare self.
@@ -1071,6 +1073,21 @@ fn nested_matrices() {
 
 /// A bare one-char Func lands on its final shape in one pass
 /// (normalize idempotence: Func("1") must go straight to Sym).
+/// Combining strike overlays (the removed \cancel form) are refused at
+/// the door with a pointed error, never a panic or a silent drop.
+#[test]
+fn strike_overlays_are_rejected() {
+    for aa in ["x\u{338}", "\u{338}", "a\u{336}b", "\"x\u{338}\""] {
+        let e = parse(aa).expect_err("overlay must be rejected");
+        assert!(
+            e.to_string().contains("strike overlays"),
+            "pointed message for {:?}: {}",
+            aa,
+            e
+        );
+    }
+}
+
 #[test]
 fn bare_one_char_func_is_final() {
     let row = vec![Node::Func("1".into()), Node::Func(".".into())];

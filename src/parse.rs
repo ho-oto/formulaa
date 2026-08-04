@@ -1099,9 +1099,6 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                     return err(format!("{:?} is not a valid atom", base), bl, col);
                 }
                 if !overs.is_empty() || !unders.is_empty() {
-                    // Accents are not strikable (a struck accent has no
-                    // canonical form); an unclaimed flag errors at the
-                    // end of the parse.
                     out.push(Node::Accent {
                         overs,
                         unders,
@@ -1860,7 +1857,7 @@ pub fn parse(text: &str) -> Result<Row> {
             match c {
                 '\u{338}' | '\u{336}' => {
                     return err(
-                        "strike overlays (\u{338}) are not supported — use the slashed                          relation atoms (≠ ∉ …)",
+                        "strike overlays (\u{338}) are not supported — use the slashed relation atoms (≠ ∉ …)",
                         r,
                         line.len(),
                     );

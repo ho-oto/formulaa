@@ -852,6 +852,10 @@ impl Editor {
     pub fn exit_inset(&mut self) {
         if let Some((i, _)) = self.path.pop() {
             self.col = i + 1;
+            // A dormant anchor in the inset would resurrect the moment
+            // a later step lands back on its row — moving out sheds it,
+            // like any other plain cursor motion.
+            self.select_anchor = None;
         }
     }
 
@@ -863,6 +867,9 @@ impl Editor {
             .iter()
             .rposition(|n| matches!(n, Node::Break))
             .map_or(0, |i| i + 1);
+        // A plain motion, not an extension: keeping the anchor would
+        // silently grow the selection to the whole line.
+        self.select_anchor = None;
     }
 
     /// End of the current formula line (before the next Break).
@@ -872,6 +879,8 @@ impl Editor {
             .iter()
             .position(|n| matches!(n, Node::Break))
             .map_or(row.len(), |i| self.col + i);
+        // Same anchor shedding as `home`.
+        self.select_anchor = None;
     }
 
     // ----- deletion -----
@@ -881,7 +890,11 @@ impl Editor {
             let target = &self.cur_row()[self.col - 1];
             if !target.fields().is_empty() && !target.is_empty_structure() {
                 // Non-empty structure: step inside (LyX behaviour) so the
-                // user deletes its content first instead of losing it all.
+                // user deletes its content first instead of losing it
+                // all. The internal `left` bypasses the key layer's
+                // anchor clearing, so shed it here — landing inside
+                // could re-arm a dormant selection.
+                self.select_anchor = None;
                 self.left();
             } else {
                 self.col -= 1;
@@ -907,6 +920,8 @@ impl Editor {
         if self.col < row.len() {
             let target = &row[self.col];
             if !target.fields().is_empty() && !target.is_empty_structure() {
+                // Same anchor shedding as backspace's step-inside.
+                self.select_anchor = None;
                 self.right();
             } else {
                 let col = self.col;
@@ -940,6 +955,8 @@ impl Editor {
             if matches!(node, Node::Delim { right: r, .. } if *r == right) {
                 self.path.truncate(k);
                 self.col = i + 1;
+                // Same anchor shedding as `exit_inset`.
+                self.select_anchor = None;
                 return true;
             }
         }
@@ -963,6 +980,7 @@ impl Editor {
         if let Some((k, i, _)) = self.enclosing_array() {
             self.path.truncate(k);
             self.col = i + 1;
+            self.select_anchor = None;
         } else {
             self.info("not inside a [ ] block ([ inserts one; \\matrix for grids)");
         }

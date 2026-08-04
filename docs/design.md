@@ -1099,7 +1099,7 @@
       max+2)。`\overline{x+y}` 等の可変幅アクセントは同じ型で追加可能
 - [x] `\lim_{x→0}` — バンド一般化(§24)で解決: `┈lim┈`
 - [x] 行列の行・列の追加/削除(Enter で行追加、\addrow \addcol \delrow \delcol)
-- [x] 選択(Shift+←→)と包み込み操作(\cancel/\frac/\sqrt/^/_/()・一括削除
+- [x] 選択(Shift+←→)と包み込み操作(\frac/\sqrt/^/_/(。\cancel は §67 で撤去)・一括削除
 - [x] エディタの undo/redo(^Z/^R、§40)
 - [x] `\op` の入力ボックス(§38)— `\op`/`\op*` でその場に名前ボックス。
       引数密着スタイル(`\opvol`)は廃止。他コマンドのプロンプト UI は
