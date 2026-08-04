@@ -312,7 +312,6 @@ impl Editor {
                 Key::Char('a') => self.document_start(),
                 Key::Char('f') => self.start_free(),
                 Key::Char('b') => self.start_block_select(),
-                Key::Char('t') => self.italic = !self.italic,
                 // In grid mode, copy/cut act on the cell rectangle;
                 // paste routes by clipboard shape inside `paste`.
                 Key::Char('c') if self.grid.is_some() => self.grid_copy_cells(),
@@ -323,7 +322,7 @@ impl Editor {
                 // Emacs pairing: ^A start, ^E end of the formula.
                 Key::Char('e') => self.document_end(),
                 // ^O: grid edit mode (inside a matrix).
-                Key::Char('o') => self.grid_mode_toggle(),
+                Key::Char('t') => self.grid_mode_toggle(),
                 _ => {}
             }
             return Effect::None;

@@ -15,7 +15,7 @@ use mascii::render::{RenderCtx, render_root};
 
 use crate::theme;
 
-const HELP: &str = "^F free move  ^B select block  \\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ⇧←→/⇧↑ select  ^Z/^R undo/redo  ^T italic  ^Y copy AA  Esc/^Q quit";
+const HELP: &str = "^F free move  ^B select block  \\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ⇧←→/⇧↑ select  ^T table/grid  ^Z/^R undo/redo  ^Y copy AA  Esc/^Q quit";
 
 /// Context-sensitive last line: generic keys normally, the relevant
 /// commands when the cursor is inside a grid cell or a delimiter.
@@ -40,7 +40,7 @@ pub fn help_line(ed: &Editor) -> &'static str {
     if let Some(gs) = ed.grid {
         return match gs {
             mascii::editor::GridSel::Cells { .. } => {
-                "grid: ←→↑↓ cells  ⇧ select (past the edge = lane)  c/| columns  r/- rows  ^C/^X/^V cells  ⌫ clear  Enter edit  Esc/^O exit"
+                "grid: ←→↑↓ cells  ⇧ select (past the edge = lane)  c/| columns  r/- rows  ^C/^X/^V cells  ⌫ clear  Enter edit  Esc/^T exit"
             }
             mascii::editor::GridSel::Lanes { cols: true, .. } => {
                 "columns: ←→ gap/column  Enter on gap = insert here  ⌫ delete column  ⇧←→ extend  ↑↓ cells  c/| cells  Esc exit"
@@ -52,7 +52,7 @@ pub fn help_line(ed: &Editor) -> &'static str {
     }
     match ed.path.last() {
         Some((_, Field::Cell(_))) => {
-            "grid: ^O edit mode (move cells, add/delete rows & cols)  Enter add row  ] exit  (then ^/_ etc. as usual)"
+            "grid: ^T edit mode (move cells, add/delete rows & cols)  Enter add row  ] exit  (then ^/_ etc. as usual)"
         }
         Some((_, Field::Seg(_))) => {
             "delim: \\mid adds a │ segment  ) ] } close  \\lr<spec> visual pairs (\\lr(] \\lr{|}, . = none)"
@@ -106,7 +106,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
     let inner = border.inner(area);
     f.render_widget(border, area);
 
-    let ctx = RenderCtx { italic: ed.italic };
+    let ctx = RenderCtx::canonical();
     let (root, cursor) = ed.decorated();
     let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
     let block = render_root(&root, cursor_ref, &ctx);
@@ -251,7 +251,7 @@ enum CaretStyle {
 /// Turn the zero-width display annotations of a rendered block into
 /// colored boxes and the caret cell. Marks carry (row, col, char):
 /// selection mark pairs paint a background box (theme::SELECTION_BG),
-/// grid cell/lane pairs their own colors, and the ^O frame recolors
+/// grid cell/lane pairs their own colors, and the ^T frame recolors
 /// the edited grid's border.
 fn marker_boxes(
     block: &mascii::render::Block,
@@ -507,7 +507,7 @@ fn overlay_minibuffer(ed: &Editor, d: &mut Decor) {
             buf.chars().collect()
         };
         // The box shows as [content]: bracket fenders drawn as green
-        // glyphs (no ground — same look as the ^O grid frame), content
+        // glyphs (no ground — same look as the ^T grid frame), content
         // on the box ground.
         let end = cx + content.len() + 2;
         d.widen(cy, end);
@@ -575,7 +575,7 @@ fn pop_matching(
 }
 
 /// Display sentinels for the open name box's [ ] fenders: drawn as
-/// green glyphs (the ^O frame color), never as ordinary text.
+/// green glyphs (the ^T frame color), never as ordinary text.
 const FENDER_L: char = '\u{F8F0}';
 const FENDER_R: char = '\u{F8F1}';
 
@@ -771,7 +771,7 @@ mod tests {
         for c in "\\bmatrix a".chars() {
             ed.input(Key::Char(c), false, false);
         }
-        ed.input(Key::Char('o'), false, true); // ^O
+        ed.input(Key::Char('t'), false, true); // ^T grid
         // Cell cursor: the current (top-left) cell is painted.
         let d = bg_of(&ed);
         let painted =
@@ -877,7 +877,7 @@ mod tests {
         for c in r"\bmatrix a".chars() {
             ed.input(Key::Char(c), false, false);
         }
-        ed.input(Key::Char('o'), false, true);
+        ed.input(Key::Char('t'), false, true);
         ed.input(Key::Char('r'), false, false);
         ed.input(Key::Down, false, false); // the gap between the rows
         let (root, cursor) = ed.decorated();
@@ -901,7 +901,7 @@ mod tests {
         for c in r"\pmatrix a".chars() {
             ed.input(Key::Char(c), false, false);
         }
-        ed.input(Key::Char('o'), false, true); // ^O
+        ed.input(Key::Char('t'), false, true); // ^T grid
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
@@ -960,7 +960,7 @@ mod tests {
         }];
         ed.path = vec![(0, Field::Seg(0)), (0, Field::Cell(0))];
         ed.col = 0;
-        ed.input(Key::Char('o'), false, true); // ^O
+        ed.input(Key::Char('t'), false, true); // ^T grid
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
@@ -1003,11 +1003,11 @@ mod tests {
         for c in r"\pmatrix x".chars() {
             ed.input(Key::Char(c), false, false);
         }
-        ed.input(Key::Char('o'), false, true); // grid mode on the INNER grid
+        ed.input(Key::Char('t'), false, true); // grid mode on the INNER grid
         ed.input(Key::Esc, false, false);
         ed.input(Key::Tab, false, false); // out of inner seg…
         ed.input(Key::Tab, false, false); // …back into the outer cell
-        ed.input(Key::Char('o'), false, true); // grid mode on the OUTER grid
+        ed.input(Key::Char('t'), false, true); // grid mode on the OUTER grid
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
@@ -1042,7 +1042,7 @@ mod tests {
         for c in r"\bmatrix x".chars() {
             ed.input(Key::Char(c), false, false);
         }
-        ed.input(Key::Char('o'), false, true);
+        ed.input(Key::Char('t'), false, true);
         ed.input(Key::Char('|'), false, false);
         ed.input(Key::Left, false, false); // gap 0: ghost left of column 0
         let (root, cursor) = ed.decorated();

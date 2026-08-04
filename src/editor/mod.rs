@@ -50,7 +50,6 @@ pub struct Editor {
     /// The status line's severity: errors paint red, everything else
     /// in the ordinary message color. Set through `info`/`error`.
     pub message_error: bool,
-    pub italic: bool,
     /// Free-cursor mode (^F): Some while active.
     pub free: Option<FreeCursor>,
     /// Block-select mode (Ctrl+B): Some(ancestors of the cursor,
@@ -380,7 +379,6 @@ impl Editor {
             redo: Vec::new(),
             message: String::new(),
             message_error: false,
-            italic: true,
             free: None,
             block: None,
             block_sel: 0,

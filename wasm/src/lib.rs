@@ -77,9 +77,7 @@ impl MasciiEditor {
     pub fn screen(&self) -> String {
         let (root, cursor) = self.ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
-        let ctx = RenderCtx {
-            italic: self.ed.italic,
-        };
+        let ctx = RenderCtx::canonical();
         let block = render_root(&root, cursor_ref, &ctx);
         // Caret and decorations are zero-width metadata; the text screen
         // draws them over the glyphs (▌ caret, selection underlines).
@@ -257,7 +255,7 @@ impl MasciiEditor {
     }
 
     /// Like `key`, with a ctrl flag for the editing chords (^C/^X/^V
-    /// copy/cut/paste, ^B block select, ^T italic, ^O structure). Host effects
+    /// copy/cut/paste, ^B block select, ^T grid edit). Host effects
     /// (save/copy-AA/quit) are ignored here.
     pub fn key_with(&mut self, key: &str, shift: bool, ctrl: bool) {
         use mascii::input::Key;

@@ -91,6 +91,9 @@ fn inline_script(row: &Row, map: fn(char) -> Option<char>) -> Option<Vec<char>> 
         .collect()
 }
 
+/// Render options. `italic: false` renders letters as plain ASCII —
+/// a readability convenience for tests; canonical AA (and every UI
+/// surface) is always the math-italic form.
 #[derive(Clone, Copy)]
 pub struct RenderCtx {
     pub italic: bool,

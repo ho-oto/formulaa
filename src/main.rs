@@ -108,10 +108,10 @@ fn copy_to_clipboard(text: &str) -> Result<(), String> {
 
 /// Returns true when the app should quit.
 fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers) -> bool {
-    // F2 aliases ^T for terminals that capture the ctrl chord.
+    // F2 aliases ^T (grid edit) for terminals that capture the chord.
     let key = match code {
         KeyCode::F(2) => {
-            ed.italic = !ed.italic;
+            let _ = ed.input(Key::Char('t'), false, true);
             return false;
         }
         KeyCode::Char(c) => Key::Char(c),
