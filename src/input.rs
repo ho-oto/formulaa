@@ -321,7 +321,7 @@ impl Editor {
                 Key::Char('v') => self.paste(),
                 // Emacs pairing: ^A start, ^E end of the formula.
                 Key::Char('e') => self.document_end(),
-                // ^O: grid edit mode (inside a matrix).
+                // ^T: grid edit mode (inside a matrix).
                 Key::Char('t') => self.grid_mode_toggle(),
                 _ => {}
             }
@@ -437,13 +437,12 @@ impl Editor {
             // `//` makes a fraction (a lone `/` stays the slash atom).
             Key::Char('/') => self.slash(),
             Key::Tab => self.exit_inset(),
-            // Enter inside a grid: new row below (like LyX table
-            // editing); at the top level: a formula line break.
+            // Enter at the top level: a formula line break. Inside an
+            // inset it does nothing (grid rows are added in ^T grid
+            // mode or with \addrow).
             Key::Enter => {
                 if self.path.is_empty() {
                     self.break_line();
-                } else {
-                    self.apply(Edit::AddRow);
                 }
             }
             // Space is a formatting space (Tab leaves insets; \space gives

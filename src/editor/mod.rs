@@ -38,7 +38,7 @@ pub struct Editor {
     /// Pending backslash escape inside the \text box (the next key is
     /// typed literally, so \" enters a quote).
     pub(crate) op_escape: bool,
-    /// Grid edit mode (^O inside a matrix): cell-unit selection, with
+    /// Grid edit mode (^T inside a matrix): cell-unit selection, with
     /// column/row lane sub-modes (see `GridSel`).
     pub grid: Option<GridSel>,
     /// Undo/redo stacks of snapshots. Pushed by `input` whenever a key

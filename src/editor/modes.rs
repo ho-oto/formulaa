@@ -557,7 +557,7 @@ impl Editor {
         (root, Some((path, col)))
     }
 
-    /// Toggle grid edit mode (only meaningful inside a matrix).
+    /// Toggle grid edit mode (^T; only meaningful inside a matrix).
     pub fn grid_mode_toggle(&mut self) {
         if self.grid.is_some() {
             self.grid = None;
@@ -565,7 +565,7 @@ impl Editor {
             self.grid = Some(GridSel::Cells { anchor: None });
             self.select_anchor = None;
         } else {
-            self.info("^O works inside a matrix/array");
+            self.info("^T works inside a matrix/array");
         }
     }
 

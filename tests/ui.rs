@@ -702,12 +702,21 @@ fn enter_at_top_level_breaks_the_line() {
 }
 
 #[test]
-fn enter_adds_a_grid_row() {
+fn enter_inside_an_inset_is_inert() {
+    // Enter only breaks lines at the top level; inside a grid cell it
+    // does nothing (rows are added in ^T grid mode or with \addrow).
     let mut ed = Editor::new();
     type_script(&mut ed, r"\pmatrix a Enter");
-    let aa = aa(&ed);
-    // 2×2 pmatrix plus one added row = 3 rows ⇒ two ┼ separator rows.
-    assert_eq!(aa.matches('┼').count(), 2, "grid:\n{}", aa);
+    let pic = aa(&ed);
+    assert_eq!(pic.matches('┼').count(), 1, "still 2×2:\n{}", pic);
+    assert!(
+        !ed.root
+            .iter()
+            .any(|n| matches!(n, mascii::ast::Node::Break))
+    );
+    // \addrow still works.
+    type_script(&mut ed, r"\addrow");
+    assert_eq!(aa(&ed).matches('┼').count(), 2);
 }
 
 #[test]

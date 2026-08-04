@@ -52,7 +52,7 @@ pub fn help_line(ed: &Editor) -> &'static str {
     }
     match ed.path.last() {
         Some((_, Field::Cell(_))) => {
-            "grid: ^T edit mode (move cells, add/delete rows & cols)  Enter add row  ] exit  (then ^/_ etc. as usual)"
+            "grid: ^T edit mode (move cells, add/delete rows & cols)  ] exit  (then ^/_ etc. as usual)"
         }
         Some((_, Field::Seg(_))) => {
             "delim: \\mid adds a │ segment  ) ] } close  \\lr<spec> visual pairs (\\lr(] \\lr{|}, . = none)"

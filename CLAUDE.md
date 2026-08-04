@@ -108,7 +108,7 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
   波括弧は融合しない)。空白の個数に
   依存する規則は存在しない(docs/parse-model.md §0)。
 - Space は整形スペーサ(再パースで消える)、`\space`=␣、脱出は Tab、
-  Enter はグリッド内で行追加・トップレベルで数式改行(`Node::Break`、
+  Enter はトップレベルで数式改行(`Node::Break`、
   行間に `┈` 単体の区切り行)、Ctrl+Y で AA をクリップボードへ。
   トップレベルの描画入口は `render_root`(Break 分割+縦積み)——
   ルート行を描くときに `render_row` を直接呼ばない。
