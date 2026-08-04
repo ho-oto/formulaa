@@ -53,6 +53,13 @@ pub struct Editor {
     pub italic: bool,
     /// Free-cursor mode (^F): Some while active.
     pub free: Option<FreeCursor>,
+    /// Block-select mode (Ctrl+B): Some(ancestors of the cursor,
+    /// innermost first); each target is (parent row path, node index).
+    /// ↑/→ widen the highlighted ancestor, ↓/← narrow it, Enter
+    /// selects the whole block.
+    pub block: Option<Vec<BlockRef>>,
+    /// Index into `block` of the highlighted ancestor.
+    pub block_sel: usize,
     /// Empty slots the free cursor keeps materialized (the ⬚ cells and
     /// expanded inline scripts near it stay visible until the next
     /// plain input, so approaching them does not shift the layout).
@@ -375,6 +382,8 @@ impl Editor {
             message_error: false,
             italic: true,
             free: None,
+            block: None,
+            block_sel: 0,
             ghost: Vec::new(),
             select_anchor: None,
             select_path: Vec::new(),
@@ -439,6 +448,7 @@ impl Editor {
     /// nearest position (single-render coordinate table).
     pub fn click(&mut self, x: usize, y: usize) {
         self.free = None;
+        self.block = None;
         self.select_anchor = None;
         // Clicking away from an open name box commits it, like the
         // edge-exit does — the box must not follow the cursor to the

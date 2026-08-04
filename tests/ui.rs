@@ -904,6 +904,67 @@ fn a_minibuffer_insert_clears_a_stale_selection() {
 
 /// \mid is contextual: the divides atom ∣ in a plain row, the segment
 /// separator directly inside a delimiter block.
+#[test]
+fn block_select_mode_selects_a_structure() {
+    let mut ed = Editor::new();
+    // Cursor inside the fraction's denominator: ^B highlights the
+    // fraction (innermost parent); Enter selects it.
+    type_script(&mut ed, r"1 // 2 Down 3 C-b");
+    // The block marks must appear in the decorated view.
+    let (root, cursor) = ed.decorated();
+    assert!(cursor.is_some(), "cursor stays threaded during modes");
+    assert!(
+        root.iter().any(
+            |n| matches!(n, mascii::ast::Node::Sym(c) if (0xE000..0xE0F0).contains(&(*c as u32)))
+        ),
+        "block mark missing: {:?}",
+        root
+    );
+    type_script(&mut ed, "Enter");
+    assert_eq!(ed.selection(), Some((1, 2)));
+    // The cursor leaves on the right end; Shift+← must still grow the
+    // selection leftward (the ends flip instead of collapsing).
+    type_script(&mut ed, "S-Left");
+    assert_eq!(ed.selection(), Some((0, 2)));
+    type_script(&mut ed, "S-Right");
+    assert_eq!(ed.selection(), Some((1, 2)), "shrinks back");
+    type_script(&mut ed, "Backspace");
+    assert_eq!(latex(&ed), "1");
+    // Shift+←/→ inside the mode: select the highlighted block and move
+    // straight into the linear selection.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"1 // 2 Down 3 C-b S-Left");
+    assert!(ed.block.is_none(), "mode exits");
+    assert_eq!(ed.selection(), Some((0, 2)));
+    // Arrow walk: outward Array -> Delim; a second ^B cancels without
+    // moving the cursor.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\pmatrix x");
+    let (path, col) = (ed.path.clone(), ed.col);
+    type_script(&mut ed, r"C-b");
+    assert_eq!(ed.block.as_ref().map(Vec::len), Some(2), "Array + Delim");
+    assert_eq!(ed.block_sel, 0, "innermost parent first");
+    type_script(&mut ed, "Up");
+    assert_eq!(ed.block_sel, 1);
+    type_script(&mut ed, "Down");
+    assert_eq!(ed.block_sel, 0);
+    type_script(&mut ed, "C-b");
+    assert!(ed.block.is_none());
+    assert_eq!((ed.path, ed.col), (path, col), "cursor untouched");
+    // Enter on the outer ancestor selects the delimiter block, ready
+    // for wrapping.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\pmatrix x C-b Up Enter \sqrt");
+    assert_eq!(
+        latex(&ed),
+        "\\sqrt{\\begin{pmatrix} x &  \\\\  &  \\end{pmatrix}}"
+    );
+    // A letter key is no longer a label: it cancels the mode.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"1 // 2 Down 3 C-b a");
+    assert!(ed.block.is_none());
+}
+
 /// Shift+↑ places a whole selection with the cursor on an end the
 /// user did not pick: the first Shift+←/→ flips to grow on that side,
 /// then plain shrink semantics resume.
@@ -1122,9 +1183,9 @@ fn property_random_key_sequences_roundtrip() {
             } else if r < 95 {
                 // Ctrl toggles (host effects are inert here).
                 (
-                    Key::Char(
-                        *rng.pick(&['t', 'e', 'y', 's', 'z', 'r', 'c', 'x', 'v', 'f', 'a', 'o']),
-                    ),
+                    Key::Char(*rng.pick(&[
+                        't', 'b', 'e', 'y', 's', 'z', 'r', 'c', 'x', 'v', 'f', 'a', 'o',
+                    ])),
                     false,
                     true,
                 )

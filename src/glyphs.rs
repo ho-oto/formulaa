@@ -131,6 +131,12 @@ pub const CROSSING: char = LATTICE[1][1]; // ┼
 pub enum Mark {
     /// Selection range ends (drawn as a background-colored box).
     Sel { open: bool },
+    /// Start of a ^B ancestor box: `rank` is the ancestry depth
+    /// (0 = innermost), which picks the shade and the highlight. No
+    /// letter is drawn — the arrows move the highlight.
+    BlockOpen { rank: usize },
+    /// End of a ^B ancestor box, paired with the BlockOpen before it.
+    BlockClose,
     /// Keeps an empty slot materialized (⬚) while the free cursor is
     /// near it, so approaching it does not shift the layout. No box.
     SlotGhost,
@@ -150,6 +156,8 @@ pub enum Mark {
 }
 
 const SEL_BASE: u32 = 0xE0F0;
+/// ^B ancestor-box opens (rank = depth) fill the page below SEL_BASE.
+const BLOCK_BASE: u32 = 0xE000;
 /// Coordinate probes.
 pub const PROBE_BASE: u32 = 0xF000;
 /// Capacity of the probe block.
@@ -160,6 +168,8 @@ impl Mark {
     pub fn ch(self) -> char {
         let u = match self {
             Mark::Sel { open } => SEL_BASE + u32::from(!open),
+            Mark::BlockOpen { rank } => BLOCK_BASE + rank as u32,
+            Mark::BlockClose => SEL_BASE + 2,
             Mark::SlotGhost => SEL_BASE + 3,
             Mark::Gap { cols: true } => SEL_BASE + 4,
             Mark::Lane { open, cols: true } => SEL_BASE + 5 + u32::from(!open),
@@ -179,6 +189,7 @@ impl Mark {
         match u {
             _ if (SEL_BASE..SEL_BASE + 16).contains(&u) => Some(match u - SEL_BASE {
                 n @ (0 | 1) => Mark::Sel { open: open(n) },
+                2 => Mark::BlockClose,
                 3 => Mark::SlotGhost,
                 4 => Mark::Gap { cols: true },
                 n @ (5 | 6) => Mark::Lane {
@@ -193,6 +204,9 @@ impl Mark {
                 },
                 15 => Mark::Gap { cols: false },
                 _ => return None,
+            }),
+            _ if (BLOCK_BASE..SEL_BASE).contains(&u) => Some(Mark::BlockOpen {
+                rank: (u - BLOCK_BASE) as usize,
             }),
             _ if (PROBE_BASE..PROBE_BASE + PROBE_MAX as u32).contains(&u) => Some(Mark::Probe {
                 index: (u - PROBE_BASE) as usize,
@@ -209,6 +223,9 @@ impl Mark {
             Mark::Cells { open: false } => Some(Mark::Cells { open: true }),
             Mark::Lane { open: false, cols } => Some(Mark::Lane { open: true, cols }),
             Mark::Frame { open: false } => Some(Mark::Frame { open: true }),
+            // A BlockOpen of any rank opens the box BlockClose ends;
+            // which rank it is only matters to the paint.
+            Mark::BlockClose => Some(Mark::BlockOpen { rank: 0 }),
             _ => None,
         }
     }
@@ -227,7 +244,12 @@ mod tests {
     /// escapes the private-use page (where fonts keep their logos).
     #[test]
     fn marks_round_trip_through_their_wire_chars() {
-        let mut all: Vec<Mark> = vec![Mark::SlotGhost];
+        let mut all: Vec<Mark> = vec![
+            Mark::SlotGhost,
+            Mark::BlockClose,
+            Mark::BlockOpen { rank: 0 },
+            Mark::BlockOpen { rank: 0xEF },
+        ];
         for open in [true, false] {
             all.push(Mark::Sel { open });
             all.push(Mark::Cells { open });

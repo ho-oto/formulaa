@@ -73,6 +73,9 @@ impl Editor {
         if let Some(e) = self.free_keys(key, ctrl) {
             return e;
         }
+        if let Some(e) = self.block_keys(key, shift, ctrl) {
+            return e;
+        }
         if let Some(e) = self.minibuffer_keys(key) {
             return e;
         }
@@ -83,6 +86,32 @@ impl Editor {
             return e;
         }
         self.base_keys(key, shift, ctrl)
+    }
+
+    /// Block-select mode: arrows walk the ancestor chain (↑/→ wider,
+    /// ↓/← narrower), Enter selects, ^B/Esc cancels. Shift+arrows
+    /// leave the mode and start an ordinary selection.
+    fn block_keys(&mut self, key: Key, shift: bool, ctrl: bool) -> Option<Effect> {
+        self.block.as_ref()?;
+        if shift && matches!(key, Key::Up | Key::Down) {
+            self.block_cancel();
+            return None; // fall through to the normal selection keys
+        }
+        match key {
+            // Shift+←/→ leave the mode into a live selection: the
+            // highlighted block becomes the selection and the step
+            // already extends it.
+            Key::Left | Key::Right if shift && !ctrl => {
+                self.block_commit();
+                self.select_move(key == Key::Right);
+            }
+            Key::Up | Key::Right if !ctrl => self.block_move(true),
+            Key::Down | Key::Left if !ctrl => self.block_move(false),
+            Key::Enter => self.block_commit(),
+            Key::Char('b') if ctrl => self.block_cancel(),
+            _ => self.block_cancel(),
+        }
+        Some(Effect::None)
     }
 
     /// Free-cursor mode: arrows move the cell cursor, Enter snaps.
@@ -282,6 +311,7 @@ impl Editor {
                 Key::Char('y') => return Effect::CopyAa,
                 Key::Char('a') => self.document_start(),
                 Key::Char('f') => self.start_free(),
+                Key::Char('b') => self.start_block_select(),
                 Key::Char('t') => self.italic = !self.italic,
                 // In grid mode, copy/cut act on the cell rectangle;
                 // paste routes by clipboard shape inside `paste`.

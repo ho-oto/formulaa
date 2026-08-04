@@ -114,12 +114,14 @@ impl MasciiEditor {
                     Some(
                         Mark::Sel { open: true }
                         | Mark::Cells { open: true }
-                        | Mark::Lane { open: true, .. },
+                        | Mark::Lane { open: true, .. }
+                        | Mark::BlockOpen { .. },
                     ) => open_at.push((r, c)),
                     Some(
                         Mark::Sel { open: false }
                         | Mark::Cells { open: false }
-                        | Mark::Lane { open: false, .. },
+                        | Mark::Lane { open: false, .. }
+                        | Mark::BlockClose,
                     ) => {
                         if let Some((r0, x0)) = open_at.pop()
                             && r0 == r
@@ -255,7 +257,7 @@ impl MasciiEditor {
     }
 
     /// Like `key`, with a ctrl flag for the editing chords (^C/^X/^V
-    /// copy/cut/paste, ^T italic, ^O structure). Host effects
+    /// copy/cut/paste, ^B block select, ^T italic, ^O structure). Host effects
     /// (save/copy-AA/quit) are ignored here.
     pub fn key_with(&mut self, key: &str, shift: bool, ctrl: bool) {
         use mascii::input::Key;

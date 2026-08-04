@@ -47,7 +47,7 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 | `src/render/` | AST → 2D ブロック(基線つき)。正準AAの生成側。`block.rs` は Node 非依存のブロック代数(4チャンネル伝搬のユニットテスト付き)、`mod.rs` がノード規則 |
 | `src/parse.rs` | AA → AST。領域+基線の再帰下降。正準AAの受理側+寛容入力 |
 | `src/editor/mod.rs` | 構造エディタ(LyX 型カーソル、挿入・移動・削除・選択) |
-| `src/editor/modes.rs` | ^F フリーカーソル・^O グリッド編集(セル矩形選択+行/列レーンモード `GridSel`)・表示装飾 |
+| `src/editor/modes.rs` | ^F フリーカーソル・^B ブロック選択(矢印+Enter のみ、ラベル無し)・^O グリッド編集(セル矩形選択+行/列レーンモード `GridSel`)・表示装飾 |
 | `src/editor/command.rs` | **`Edit` enum + `resolve`/`apply`**(綴り→編集の純粋解決と適用の分離)、`\op` 名前ボックス |
 | `src/input.rs` | **共有キーマップ**(`Key`/`Effect`/`Editor::input`)。TUI と wasm は変換だけ。木を変えるキーは `Edit` を組んで `apply` に流す(モード・ナビゲーション・文脈キー `// ) ] }` はキー層) |
 | `src/output/latex.rs` | AST → LaTeX(crate ルートの `mascii::latex` で再輸出)。スクリプトを吸収しうるノードは `{…}` で保護(往復のため) |
@@ -115,11 +115,12 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 - ratatui は feature "tui"(bin 専用)。ライブラリ本体に TUI 依存を
   持ち込まない(wasm ビルドが壊れる)。
 - ratatui のイベントは `KeyEventKind::Press` のみ処理(Windows の重複対策)。
-- 選択範囲・グリッド装飾は私用領域文字のマーカー原子を表示用クローン
-  AST に挿入する方式(editor/modes.rs `decorated`)。
+- 選択範囲・^B ブロック・グリッド装飾は私用領域文字のマーカー原子を
+  表示用クローン AST に挿入する方式(editor/modes.rs `decorated`)。
   私用領域 **U+E000–F8FF 全域**が表示用予約(`glyphs::is_display_marker`):
-  E0F0–E0FF 選択・グリッドのセル/レーン対・フレーム角・隙間ゴースト、
-  F000+ 座標プローブ、F8F0/F8F1 は tui のボックス囲み。**生のまま端末に出してはならない**
+  E000+ ^B ブロック対(rank=深さ)、E0F0–E0FF 選択・グリッドのセル/
+  レーン対・フレーム角・隙間ゴースト、F000+ 座標プローブ、
+  F8F0/F8F1 は tui のボックス囲み。**生のまま端末に出してはならない**
   (フォントが私用領域にロゴを持つ — decorate_line が描画前に必ず
   グリフへ解決する)。
   マーカー原子は**幅ゼロで描画**され

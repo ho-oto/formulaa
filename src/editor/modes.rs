@@ -248,12 +248,71 @@ impl Editor {
         out
     }
 
+    // ----- block-select mode (Ctrl+B: the cursor's ancestor chain) -----
+
+    /// The cursor's enclosing structure nodes, innermost first: one
+    /// (parent row path, node index) per ancestor.
+    pub fn block_targets(&self) -> Vec<BlockRef> {
+        (0..self.path.len())
+            .rev()
+            .map(|k| (self.path[..k].to_vec(), self.path[k].0))
+            .collect()
+    }
+
+    pub fn start_block_select(&mut self) {
+        if self.block.is_some() {
+            // ^B again: back to where the cursor was (it never moved).
+            self.block_cancel();
+            return;
+        }
+        let targets = self.block_targets();
+        if targets.is_empty() {
+            self.info("no enclosing block (cursor is at the top level)");
+            return;
+        }
+        self.block_sel = 0;
+        self.block = Some(targets);
+        self.info("block: ↑/→ wider  ↓/← narrower  Enter select  ^B/Esc cancel");
+    }
+
+    pub fn block_cancel(&mut self) {
+        self.block = None;
+        self.clear_message();
+    }
+
+    /// Move the highlighted ancestor outward (↑/→) or inward (↓/←).
+    pub fn block_move(&mut self, outward: bool) {
+        let len = self.block.as_ref().map_or(0, Vec::len);
+        if outward {
+            self.block_sel = (self.block_sel + 1).min(len.saturating_sub(1));
+        } else {
+            self.block_sel = self.block_sel.saturating_sub(1);
+        }
+    }
+
+    /// Select the highlighted ancestor: the whole node becomes the
+    /// selection, ready for ^C/^X, wrapping or deletion.
+    pub fn block_commit(&mut self) {
+        let sel = self.block_sel;
+        if let Some(targets) = self.block.take()
+            && let Some((p, i)) = targets.get(sel)
+        {
+            self.path = p.clone();
+            self.select_anchor = Some(*i);
+            self.select_path = p.clone();
+            self.col = i + 1;
+            self.select_whole = true;
+        }
+        self.clear_message();
+    }
+
     /// Vertical extents (rows above / below the marker's baseline row)
     /// of the boxes the display should paint: one entry for the active
-    /// selection, or one per painted grid cell. Computed by laying out
-    /// the covered slice — the char grid alone cannot tell a block's
-    /// rows apart from other content (e.g. a denominator centered
-    /// under the same columns).
+    /// selection, one per ^B target in ascending-open-column
+    /// (= document) order, or one per painted grid cell. Computed by
+    /// laying out the covered slice — the char grid alone cannot tell
+    /// a block's rows apart from other content (e.g. a denominator
+    /// centered under the same columns).
     pub fn marker_extents(&self) -> Vec<(usize, usize, usize)> {
         use crate::render::{RenderCtx, render_root};
         let extent =
@@ -263,7 +322,34 @@ impl Editor {
                 let (h, bl) = (b.height(), b.baseline);
                 (bl.min(h), h.saturating_sub(bl + 1), depth)
             };
-        if let Some(gs) = self.grid
+        if let Some(targets) = &self.block {
+            targets
+                .iter()
+                .enumerate()
+                .map(|(rank, (p, i))| {
+                    // An Array fused into its delimiter has no isolated
+                    // layout of its own: measure the parent Delim slice
+                    // instead (the fused interior spans its full height).
+                    let (p, i) = if self.fused_in_delim(p, *i) {
+                        (&p[..p.len() - 1], p.last().unwrap().0)
+                    } else {
+                        (&p[..], *i)
+                    };
+                    // If the cursor is inside this block, lay the slice
+                    // out in its editing view (matches the display).
+                    let cur = (self.path.len() > p.len()
+                        && self.path[..p.len()] == p[..]
+                        && self.path[p.len()].0 == i)
+                        .then(|| {
+                            let mut rel = self.path[p.len()..].to_vec();
+                            rel[0].0 = 0;
+                            (rel, self.col)
+                        });
+                    // The gradient ranks by ancestry (innermost first).
+                    extent(&row_at(&self.root, p)[i..i + 1], cur, rank)
+                })
+                .collect()
+        } else if let Some(gs) = self.grid
             && let Some((k, i, rows, cols, c)) = self.grid_info()
         {
             // One extent per painted cell, in row-major (= mark
@@ -292,6 +378,24 @@ impl Editor {
         }
     }
 
+    /// Is the node at (p, i) an Array that fuses with its enclosing
+    /// delimiter (sole node of a Seg of a fusing ( [ ⌈ ⌊ | pair)?
+    fn fused_in_delim(&self, p: &[(usize, Field)], i: usize) -> bool {
+        let Some(&(pi, Field::Seg(_))) = p.last() else {
+            return false;
+        };
+        let row = row_at(&self.root, p);
+        if i != 0 || row.len() != 1 || !matches!(row[0], Node::Array { .. }) {
+            return false;
+        }
+        match &row_at(&self.root, &p[..p.len() - 1])[pi] {
+            Node::Delim {
+                left, right, mids, ..
+            } => *mids == 0 && left.fuses() && right.fuses(),
+            _ => false,
+        }
+    }
+
     // ----- display decoration (selection / grid) -----
 
     /// A copy of the AST with display markers inserted, plus the
@@ -300,11 +404,36 @@ impl Editor {
     /// never appear in a real document. One branch per mode — they
     /// share only `bump`, which threads a position past an insertion.
     pub fn decorated(&self) -> (Row, Option<CursorPos>) {
-        if self.grid.is_some() {
+        if self.block.is_some() {
+            self.decorate_block()
+        } else if self.grid.is_some() {
             self.decorate_grid()
         } else {
             self.decorate_plain()
         }
+    }
+
+    /// ^B: a rank mark left of each ancestor block and a close marker
+    /// right of it (the display paints depth-shaded boxes; no letters).
+    fn decorate_block(&self) -> (Row, Option<CursorPos>) {
+        let mut root = self.root.clone();
+        let targets = self.block.as_ref().expect("block mode");
+
+        let mut path = self.path.clone();
+        let mut col = self.col;
+        // The open mark sits immediately left of its block and a close
+        // marker right after it, so the display can paint its extent.
+        // Targets are innermost first = deepest first: inserting into
+        // a deep row never shifts a shallower target's position.
+        for (idx, (p, i)) in targets.iter().enumerate() {
+            let mark = Mark::BlockOpen { rank: idx }.ch();
+            let row = row_at_mut(&mut root, p);
+            row.insert(i + 1, Node::Sym(Mark::BlockClose.ch()));
+            row.insert(*i, Node::Sym(mark));
+            bump(&mut path, &mut col, p, i + 1);
+            bump(&mut path, &mut col, p, *i);
+        }
+        (root, Some((path, col)))
     }
 
     /// ^O: the frame corners, the cell/lane selection pair, and the gap ghost (the one decoration with real width).
@@ -616,7 +745,10 @@ impl Editor {
     /// A modal state is capturing keys (free/minibuffer/op box) —
     /// undo/redo chords stay out of the way there.
     pub fn mode_active(&self) -> bool {
-        self.free.is_some() || self.minibuffer.is_some() || self.op_entry.is_some()
+        self.free.is_some()
+            || self.block.is_some()
+            || self.minibuffer.is_some()
+            || self.op_entry.is_some()
     }
 
     pub(crate) fn push_undo(&mut self, state: Snapshot) {
@@ -685,6 +817,21 @@ pub(crate) fn splice_lane(
             cells.insert(g.min(rows) * cols + j, fill());
         }
         (rows + 1, cols)
+    }
+}
+
+// Nudge the cursor position past a marker inserted at slot `k` of the
+// row at `at` (only positions in that row, at or right of `k`, move).
+fn bump(path: &mut [(usize, Field)], col: &mut usize, at: &[(usize, Field)], k: usize) {
+    let d = at.len();
+    if path.len() >= d && path[..d] == *at {
+        if path.len() > d {
+            if path[d].0 >= k {
+                path[d].0 += 1;
+            }
+        } else if *col > k {
+            *col += 1;
+        }
     }
 }
 

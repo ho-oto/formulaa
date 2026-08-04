@@ -15,7 +15,7 @@ use mascii::render::{RenderCtx, render_root};
 
 use crate::theme;
 
-const HELP: &str = "^F free move  \\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ⇧←→/⇧↑ select  ^Z/^R undo/redo  ^T italic  ^Y copy AA  Esc/^Q quit";
+const HELP: &str = "^F free move  ^B select block  \\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ⇧←→/⇧↑ select  ^Z/^R undo/redo  ^T italic  ^Y copy AA  Esc/^Q quit";
 
 /// Context-sensitive last line: generic keys normally, the relevant
 /// commands when the cursor is inside a grid cell or a delimiter.
@@ -33,6 +33,9 @@ pub fn help_line(ed: &Editor) -> &'static str {
     }
     if ed.free.is_some() {
         return "free move: ←→↑↓ cells  Enter snap  Esc cancel";
+    }
+    if ed.block.is_some() {
+        return "block: ↑/→ wider  ↓/← narrower  Enter select  ⇧←→ select + extend  ^B/Esc cancel";
     }
     if let Some(gs) = ed.grid {
         return match gs {
@@ -107,7 +110,11 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
     let (root, cursor) = ed.decorated();
     let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
     let block = render_root(&root, cursor_ref, &ctx);
-    let mut d = marker_boxes(&block, &ed.marker_extents());
+    let mut d = marker_boxes(
+        &block,
+        &ed.marker_extents(),
+        ed.block.is_some().then_some(ed.block_sel),
+    );
     // ^F: the free cursor itself gets the prominent caret style; the
     // snap preview is the subtler colored cell.
     if let Some(f) = &ed.free {
@@ -246,7 +253,11 @@ enum CaretStyle {
 /// selection mark pairs paint a background box (theme::SELECTION_BG),
 /// grid cell/lane pairs their own colors, and the ^O frame recolors
 /// the edited grid's border.
-fn marker_boxes(block: &mascii::render::Block, extents: &[(usize, usize, usize)]) -> Decor {
+fn marker_boxes(
+    block: &mascii::render::Block,
+    extents: &[(usize, usize, usize)],
+    block_selected: Option<usize>,
+) -> Decor {
     let (lines, marks, caret) = (&block.lines, &block.marks[..], block.caret);
     // Cell coordinates throughout.
     let mut grid: Vec<Vec<char>> = lines.to_vec();
@@ -334,17 +345,38 @@ fn marker_boxes(block: &mascii::render::Block, extents: &[(usize, usize, usize)]
                         }
                     }
                 }
-                Mark::Sel { open: false } => {
+                Mark::Sel { open: false } | Mark::BlockClose => {
+                    // A BlockOpen's rank is not part of the pairing
+                    // (any open ends at the next BlockClose).
                     let opener = mark.opener();
-                    if let Some((o, _)) = pop_matching(&mut stack, |k| Some(k) == opener) {
-                        let (t, b, _) = extent(None);
-                        boxes.push((o, x, theme::SELECTION_BG, t, b));
-                        order.push(0);
+                    let matches_opener = |k: Mark| match (k, opener) {
+                        (Mark::BlockOpen { .. }, Some(Mark::BlockOpen { .. })) => true,
+                        (k, o) => Some(k) == o,
+                    };
+                    if let Some((o, oc)) = pop_matching(&mut stack, matches_opener) {
+                        let (color, depth, t, b) = match oc {
+                            Mark::BlockOpen { rank } => {
+                                let (t, b, d) = extent(Some(rank));
+                                let color = if block_selected == Some(rank) {
+                                    theme::SELECTED_BG
+                                } else {
+                                    theme::DEPTH_BG[d % theme::DEPTH_BG.len()]
+                                };
+                                (color, d, t, b)
+                            }
+                            _ => {
+                                let (t, b, _) = extent(None);
+                                (theme::SELECTION_BG, 0, t, b)
+                            }
+                        };
+                        boxes.push((o, x, color, t, b));
+                        order.push(depth);
                     }
                 }
                 Mark::Sel { open: true }
                 | Mark::Cells { open: true }
-                | Mark::Lane { open: true, .. } => stack.push((x, mark)),
+                | Mark::Lane { open: true, .. }
+                | Mark::BlockOpen { .. } => stack.push((x, mark)),
                 _ => {}
             }
         }
@@ -712,7 +744,11 @@ mod tests {
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let ctx = RenderCtx { italic: true };
         let block = render_root(&root, cursor_ref, &ctx);
-        let d = marker_boxes(&block, &ed.marker_extents());
+        let d = marker_boxes(
+            &block,
+            &ed.marker_extents(),
+            ed.block.is_some().then_some(ed.block_sel),
+        );
         d.lines.into_iter().map(String::from_iter).collect()
     }
 
@@ -725,7 +761,11 @@ mod tests {
             let (root, cursor) = ed.decorated();
             let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
             let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-            marker_boxes(&block, &ed.marker_extents())
+            marker_boxes(
+                &block,
+                &ed.marker_extents(),
+                ed.block.is_some().then_some(ed.block_sel),
+            )
         };
         let mut ed = Editor::new();
         for c in "\\bmatrix a".chars() {
@@ -772,7 +812,11 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let d = marker_boxes(&block, &ed.marker_extents());
+        let d = marker_boxes(
+            &block,
+            &ed.marker_extents(),
+            ed.block.is_some().then_some(ed.block_sel),
+        );
         assert!(d.frame.is_some(), "grid mode reports its frame rect");
         // The gap's green bar runs unbroken through the lattice rows:
         // every display row between the first and last green cell has
@@ -839,7 +883,11 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let d = marker_boxes(&block, &ed.marker_extents());
+        let d = marker_boxes(
+            &block,
+            &ed.marker_extents(),
+            ed.block.is_some().then_some(ed.block_sel),
+        );
         let (o, close, t, b) = d.frame.expect("frame rect survives the gap row");
         assert!(close - o >= 6, "full-width frame: {:?}", (o, close));
         assert!(b - t >= 2, "full-height frame: {:?}", (t, b));
@@ -857,7 +905,11 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let d = marker_boxes(&block, &ed.marker_extents());
+        let d = marker_boxes(
+            &block,
+            &ed.marker_extents(),
+            ed.block.is_some().then_some(ed.block_sel),
+        );
         let (o, close, t, b) = d.frame.expect("frame rect");
         // Walk every framed row and collect which columns the draw
         // pass would tint; the leftmost and rightmost delimiter pieces
@@ -912,7 +964,11 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let d = marker_boxes(&block, &ed.marker_extents());
+        let d = marker_boxes(
+            &block,
+            &ed.marker_extents(),
+            ed.block.is_some().then_some(ed.block_sel),
+        );
         let (o, close, t, b) = d.frame.expect("frame rect");
         let mut tinted = std::collections::HashSet::new();
         for line in d.lines.iter().take(b + 1).skip(t) {
@@ -955,7 +1011,11 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let d = marker_boxes(&block, &ed.marker_extents());
+        let d = marker_boxes(
+            &block,
+            &ed.marker_extents(),
+            ed.block.is_some().then_some(ed.block_sel),
+        );
         let (o, close, t, b) = d.frame.expect("outer frame rect");
         let mut tinted = std::collections::HashSet::new();
         for line in d.lines.iter().take(b + 1).skip(t) {
@@ -1014,7 +1074,11 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let mut d = marker_boxes(&block, &ed.marker_extents());
+        let mut d = marker_boxes(
+            &block,
+            &ed.marker_extents(),
+            ed.block.is_some().then_some(ed.block_sel),
+        );
         overlay_minibuffer(&ed, &mut d);
         let (cy, _) = d.caret.unwrap();
         let below: String = d.lines[cy + 1..].iter().flatten().collect();
@@ -1033,7 +1097,11 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let mut d = marker_boxes(&block, &ed.marker_extents());
+        let mut d = marker_boxes(
+            &block,
+            &ed.marker_extents(),
+            ed.block.is_some().then_some(ed.block_sel),
+        );
         overlay_minibuffer(&ed, &mut d);
         let below: String = d.lines[1..].iter().flatten().collect();
         assert!(
@@ -1076,7 +1144,11 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let mut d = marker_boxes(&block, &ed.marker_extents());
+        let mut d = marker_boxes(
+            &block,
+            &ed.marker_extents(),
+            ed.block.is_some().then_some(ed.block_sel),
+        );
         overlay_minibuffer(&ed, &mut d);
         // The α preview is present AND every fraction bar still is.
         let all: String = d.lines.iter().flatten().collect();
@@ -1127,7 +1199,11 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let mut d = marker_boxes(&block, &ed.marker_extents());
+        let mut d = marker_boxes(
+            &block,
+            &ed.marker_extents(),
+            ed.block.is_some().then_some(ed.block_sel),
+        );
         overlay_minibuffer(&ed, &mut d);
         let all: String = d.lines.iter().flatten().collect();
         assert!(
@@ -1155,7 +1231,11 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let mut d2 = marker_boxes(&block, &ed.marker_extents());
+        let mut d2 = marker_boxes(
+            &block,
+            &ed.marker_extents(),
+            ed.block.is_some().then_some(ed.block_sel),
+        );
         overlay_minibuffer(&ed, &mut d2);
         let (cy2, cx2) = d2.caret.unwrap();
         assert_eq!(cy2, cy);
@@ -1174,7 +1254,11 @@ mod tests {
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-        let mut d = marker_boxes(&block, &ed.marker_extents());
+        let mut d = marker_boxes(
+            &block,
+            &ed.marker_extents(),
+            ed.block.is_some().then_some(ed.block_sel),
+        );
         let (cy, cx) = d.caret.unwrap();
         overlay_minibuffer(&ed, &mut d);
         // The overlay covers the glyphs to the right of the cursor in
@@ -1208,7 +1292,7 @@ mod tests {
             caret: None,
             marks: marks.to_vec(),
         };
-        let d = marker_boxes(&block, &[(0, 0, 0)]);
+        let d = marker_boxes(&block, &[(0, 0, 0)], None);
         assert_eq!(d.lines, lines, "text must be untouched");
         assert_eq!(
             d.bg[0],
@@ -1241,9 +1325,9 @@ mod tests {
             caret: None,
             marks: marks.to_vec(),
         };
-        let d = marker_boxes(&block(&marks), &[(1, 1, 0)]);
+        let d = marker_boxes(&block(&marks), &[(1, 1, 0)], None);
         assert!(d.bg.iter().all(|row| row.iter().all(|c| c.is_some())));
-        let d = marker_boxes(&block(&marks), &[(0, 0, 0)]);
+        let d = marker_boxes(&block(&marks), &[(0, 0, 0)], None);
         assert!(
             d.bg[2].iter().all(|c| c.is_none()),
             "extent must bound the box"
@@ -1259,7 +1343,7 @@ mod tests {
             caret: Some((0, 2)),
             marks: vec![],
         };
-        let d = marker_boxes(&block, &[]);
+        let d = marker_boxes(&block, &[], None);
         assert_eq!(d.caret, Some((0, 2)));
         assert_eq!(d.lines[0].len(), 3, "caret cell padded at the row end");
     }

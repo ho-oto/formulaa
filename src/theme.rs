@@ -24,6 +24,8 @@ use ratatui::style::Color;
 const PURPLE: Color = Color::Indexed(54);
 /// 紫サブ (明): secondary selection info.
 const PURPLE_SOFT: Color = Color::Indexed(97);
+/// 紫 (背景・淡2): the depth gradient's second shade.
+const PURPLE_DIM: Color = Color::Indexed(60);
 /// 緑 (背景): OK / actionable ground.
 const GREEN_BG: Color = Color::Indexed(22);
 /// 赤 (背景): errors.
@@ -50,6 +52,11 @@ pub const SPACE_FG: Color = Color::DarkGray;
 /// selection, grid cell rectangles and lanes (told apart by reach, not
 /// color), the arrow-selected marker.
 pub const SELECTION_BG: Color = PURPLE;
+
+/// ^B: the arrow-highlighted ancestor.
+pub const SELECTED_BG: Color = PURPLE;
+/// ^B: the ancestor-chain gradient (alternating, innermost first).
+pub const DEPTH_BG: [Color; 2] = [PURPLE_DIM, PURPLE_SOFT];
 /// The free cursor cell itself (^F): tinted so the mode is obvious.
 pub const FREE_CURSOR_BG: Color = PURPLE;
 /// Glyph color on the free cursor cell.
