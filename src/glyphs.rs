@@ -131,10 +131,8 @@ pub const CROSSING: char = LATTICE[1][1]; // ┼
 pub enum Mark {
     /// Selection range ends (drawn as a background-colored box).
     Sel { open: bool },
-    /// End of a ^B block, paired with the label that opened it.
-    BlockClose,
-    /// Keeps an empty slot materialized (⬚) after jump mode ends, so
-    /// re-entering ^G does not shift the layout. No label, no box.
+    /// Keeps an empty slot materialized (⬚) while the free cursor is
+    /// near it, so approaching it does not shift the layout. No box.
     SlotGhost,
     /// Grid cell-rectangle ends (contents, not structure).
     Cells { open: bool },
@@ -146,23 +144,12 @@ pub enum Mark {
     /// The ghost lane previewing an insertion at a lane gap. The one
     /// decoration with real width.
     Gap { cols: bool },
-    /// A jump / ^B label: `rank` indexes `JUMP_LABELS`.
-    Label { rank: usize },
-    /// A jump candidate beyond the label alphabet — reachable with the
-    /// arrows, drawn as a plain highlight.
-    Rank { rank: usize },
     /// Coordinate probe: never drawn, read straight off `Block.marks`
     /// to build the position → cell table.
     Probe { index: usize },
 }
 
 const SEL_BASE: u32 = 0xE0F0;
-/// Jump / ^B label chars start the private-use page.
-pub const LABEL_BASE: u32 = 0xE000;
-/// Ranks past the label alphabet.
-pub const RANK_BASE: u32 = 0xE100;
-/// Capacity of the rank block (E100..E4FF).
-pub const RANK_MAX: usize = 0x400;
 /// Coordinate probes.
 pub const PROBE_BASE: u32 = 0xF000;
 /// Capacity of the probe block.
@@ -173,7 +160,6 @@ impl Mark {
     pub fn ch(self) -> char {
         let u = match self {
             Mark::Sel { open } => SEL_BASE + u32::from(!open),
-            Mark::BlockClose => SEL_BASE + 2,
             Mark::SlotGhost => SEL_BASE + 3,
             Mark::Gap { cols: true } => SEL_BASE + 4,
             Mark::Lane { open, cols: true } => SEL_BASE + 5 + u32::from(!open),
@@ -181,8 +167,6 @@ impl Mark {
             Mark::Frame { open } => SEL_BASE + 9 + u32::from(!open),
             Mark::Lane { open, cols: false } => SEL_BASE + 13 + u32::from(!open),
             Mark::Gap { cols: false } => SEL_BASE + 15,
-            Mark::Label { rank } => LABEL_BASE + rank as u32,
-            Mark::Rank { rank } => RANK_BASE + rank as u32,
             Mark::Probe { index } => PROBE_BASE + index as u32,
         };
         char::from_u32(u).expect("marker chars are private-use scalars")
@@ -195,7 +179,6 @@ impl Mark {
         match u {
             _ if (SEL_BASE..SEL_BASE + 16).contains(&u) => Some(match u - SEL_BASE {
                 n @ (0 | 1) => Mark::Sel { open: open(n) },
-                2 => Mark::BlockClose,
                 3 => Mark::SlotGhost,
                 4 => Mark::Gap { cols: true },
                 n @ (5 | 6) => Mark::Lane {
@@ -210,12 +193,6 @@ impl Mark {
                 },
                 15 => Mark::Gap { cols: false },
                 _ => return None,
-            }),
-            _ if (LABEL_BASE..SEL_BASE).contains(&u) => Some(Mark::Label {
-                rank: (u - LABEL_BASE) as usize,
-            }),
-            _ if (RANK_BASE..RANK_BASE + RANK_MAX as u32).contains(&u) => Some(Mark::Rank {
-                rank: (u - RANK_BASE) as usize,
             }),
             _ if (PROBE_BASE..PROBE_BASE + PROBE_MAX as u32).contains(&u) => Some(Mark::Probe {
                 index: (u - PROBE_BASE) as usize,
@@ -232,9 +209,6 @@ impl Mark {
             Mark::Cells { open: false } => Some(Mark::Cells { open: true }),
             Mark::Lane { open: false, cols } => Some(Mark::Lane { open: true, cols }),
             Mark::Frame { open: false } => Some(Mark::Frame { open: true }),
-            // A ^B label opens the box that BlockClose ends; which
-            // label it is only matters to the paint.
-            Mark::BlockClose => Some(Mark::Label { rank: 0 }),
             _ => None,
         }
     }
@@ -253,7 +227,7 @@ mod tests {
     /// escapes the private-use page (where fonts keep their logos).
     #[test]
     fn marks_round_trip_through_their_wire_chars() {
-        let mut all: Vec<Mark> = vec![Mark::BlockClose, Mark::SlotGhost];
+        let mut all: Vec<Mark> = vec![Mark::SlotGhost];
         for open in [true, false] {
             all.push(Mark::Sel { open });
             all.push(Mark::Cells { open });
@@ -266,10 +240,6 @@ mod tests {
             all.push(Mark::Gap { cols });
         }
         all.extend([
-            Mark::Label { rank: 0 },
-            Mark::Label { rank: 61 },
-            Mark::Rank { rank: 0 },
-            Mark::Rank { rank: RANK_MAX - 1 },
             Mark::Probe { index: 0 },
             Mark::Probe {
                 index: PROBE_MAX - 1,

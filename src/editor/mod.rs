@@ -51,25 +51,11 @@ pub struct Editor {
     /// in the ordinary message color. Set through `info`/`error`.
     pub message_error: bool,
     pub italic: bool,
-    /// EasyMotion-style jump: Some(targets) while waiting for a label
-    /// key. Document-ordered (needed for marker insertion); each entry
-    /// carries its rank (0 = key 'a' = best candidate).
-    pub jump: Option<Vec<(usize, CursorPos)>>,
-    /// Arrow-key selection inside jump mode: the rank of the marker
-    /// currently highlighted (Enter jumps to it).
-    pub jump_selected: usize,
     /// Free-cursor mode (^F): Some while active.
     pub free: Option<FreeCursor>,
-    /// Block-select mode (Ctrl+B): Some(ancestors of the cursor,
-    /// innermost first); each target is (parent row path, node index).
-    /// ↑/→ widen the highlighted ancestor, ↓/← narrow it, Enter (or the
-    /// target's label key) selects the whole block.
-    pub block: Option<Vec<BlockRef>>,
-    /// Index into `block` of the highlighted ancestor.
-    pub block_sel: usize,
-    /// Empty slots kept materialized after jump mode ends (the ⬚ cells
-    /// ^G labeled stay visible until the next input, so toggling ^G
-    /// twice does not shift the layout).
+    /// Empty slots the free cursor keeps materialized (the ⬚ cells and
+    /// expanded inline scripts near it stay visible until the next
+    /// plain input, so approaching them does not shift the layout).
     pub ghost: Vec<Vec<(usize, Field)>>,
     /// Selection anchor column in the current row (Shift+←/→). The selected
     /// node range is between the anchor and the cursor column.
@@ -78,7 +64,7 @@ pub struct Editor {
     /// while the cursor stays in that row (leaving the row would make the
     /// anchor point into a different — possibly shorter — row).
     select_path: Vec<(usize, Field)>,
-    /// The selection was placed whole (^B commit, Shift+↑), so the
+    /// The selection was placed whole (Shift+↑), so the
     /// cursor sits on an end the user did not choose. The next
     /// Shift+←/→ may flip the ends to grow on the side pressed;
     /// afterwards the ordinary shrink-to-nothing semantics resume.
@@ -88,17 +74,12 @@ pub struct Editor {
     clip: Clip,
 }
 
-/// Label keys for jump mode, most reachable first.
-pub const JUMP_LABELS: &str = "asdfghjklqwertyuiopzxcvbnmASDFGHJKLQWERTYUIOPZXCVBNM0123456789";
-// The display markers themselves live in `glyphs::Mark` — the one
-// place their wire chars are spelled, so both front-ends decode alike.
+// The display markers live in `glyphs::Mark` — the one place their
+// wire chars are spelled, so both front-ends decode alike.
 
-/// docs/jump-spec.md §5 — tuning knobs.
+/// Vertical distance weight for free-cursor snapping (a row of
+/// distance costs as much as this many columns).
 const JUMP_W_Y: usize = 3;
-const JUMP_R_MIN: usize = 2;
-/// α = 1 / JUMP_ALPHA_DIV.
-const JUMP_ALPHA_DIV: usize = 4;
-const JUMP_C_GHOST: usize = 4;
 /// ^F auto-expansion hysteresis: collapsed elements expand within
 /// R_IN of the free cursor and fold back only beyond R_OUT (measured
 /// against the element's *visible anchor* in the current display
@@ -193,11 +174,7 @@ pub(crate) struct GapSplice {
 
 /// How the *displayed* picture's geometry differs from the raw tree:
 /// the kept ghost slots and (in lane-gap state) the grid's preview
-/// lane. `map` carries a raw position into the frame. A `Frame::raw`
-/// has no corrections — that is what jump measures, because
-/// `decorated` dispatches jump ahead of grid, so the labeled picture
-/// shows neither the gap lane nor the ghosts-as-ghosts (labeling a
-/// hidden candidate is what materializes its slot).
+/// lane. `map` carries a raw position into the frame.
 struct Frame {
     gap: Option<GapSplice>,
     ghosts: Vec<Vec<(usize, Field)>>,
@@ -243,8 +220,8 @@ fn ghost_adjust(
     (p2, c2)
 }
 
-/// A jump candidate position with the flags the selection rules need
-/// (docs/jump-spec.md §2–3).
+/// A cursor position with per-position flags (the free cursor snaps
+/// and auto-expands against this enumeration).
 #[derive(Clone, Debug)]
 pub struct JumpCand {
     pub pos: CursorPos,
@@ -397,11 +374,7 @@ impl Editor {
             message: String::new(),
             message_error: false,
             italic: true,
-            jump: None,
-            jump_selected: 0,
             free: None,
-            block: None,
-            block_sel: 0,
             ghost: Vec::new(),
             select_anchor: None,
             select_path: Vec::new(),
@@ -465,8 +438,6 @@ impl Editor {
     /// Mouse click at canvas cell (x, y): move the cursor to the
     /// nearest position (single-render coordinate table).
     pub fn click(&mut self, x: usize, y: usize) {
-        self.jump = None;
-        self.block = None;
         self.free = None;
         self.select_anchor = None;
         // Clicking away from an open name box commits it, like the
@@ -612,15 +583,6 @@ impl Editor {
         let mut root = self.root.clone();
         let frame = self.displayed_frame(&mut root);
         self.probe(root, cands, Some(&frame))
-    }
-
-    /// Cell coordinates of the candidates in the *raw* tree, every
-    /// candidate probed. This is what jump wants: `decorated`
-    /// dispatches jump ahead of grid, so the labeled picture has no
-    /// gap lane, and labeling a hidden candidate is what materializes
-    /// its slot.
-    fn coords_raw(&self, cands: &[JumpCand]) -> Vec<Option<(usize, usize)>> {
-        self.probe(self.root.clone(), cands, None)
     }
 
     fn probe(
@@ -881,6 +843,22 @@ impl Editor {
             .map_or(row.len(), |i| self.col + i);
         // Same anchor shedding as `home`.
         self.select_anchor = None;
+    }
+
+    /// `\!`: the symbol atom left of the cursor becomes its slashed
+    /// negation (= → ≠, ∈ → ∉) when the table has one.
+    pub fn negate_prev(&mut self) {
+        let Some(col) = self.col.checked_sub(1) else {
+            self.error("\\! negates the symbol left of the cursor");
+            return;
+        };
+        match self.cur_row()[col] {
+            Node::Sym(c) => match crate::symbols::negated(c) {
+                Some(neg) => self.cur_row_mut()[col] = Node::Sym(neg),
+                None => self.error(format!("{} has no slashed negation", c)),
+            },
+            _ => self.error("\\! negates the symbol left of the cursor"),
+        }
     }
 
     // ----- deletion -----
@@ -1734,143 +1712,6 @@ mod tests {
         ed.backspace();
         assert!(ed.root.is_empty());
         assert_eq!(ed.col, 0);
-    }
-
-    #[test]
-    fn jump_v2_basic_flow() {
-        let mut ed = Editor::new();
-        // x + 1/2 with cursor at the end of the top row.
-        ed.insert_sym('x');
-        ed.insert_sym('+');
-        ed.execute("frac");
-        ed.insert_sym('1');
-        ed.vertical(false);
-        ed.insert_sym('2');
-        ed.exit_inset();
-        let before = (ed.path.clone(), ed.col);
-        ed.start_jump();
-        assert!(ed.jump.is_some());
-        // 'a' exists and jumping moves the cursor to a valid position.
-        ed.jump_to('a');
-        assert!(ed.jump.is_none());
-        assert_ne!((ed.path.clone(), ed.col), before);
-        assert!(ed.col <= ed.cur_row().len());
-    }
-
-    #[test]
-    fn jump_skips_run_interiors_and_arrow1_neighbours() {
-        let mut ed = Editor::new();
-        for c in "abcde".chars() {
-            ed.insert_sym(c);
-        }
-        ed.home();
-        ed.start_jump();
-        let targets = ed.jump.as_ref().unwrap();
-        // Interior of the spaceless run: no marker between the atoms.
-        assert!(
-            targets
-                .iter()
-                .all(|(_, (p, c))| !(p.is_empty() && (1..5).contains(c))),
-            "interior marked: {:?}",
-            targets
-        );
-        // Nothing one arrow press from the cursor (col 0 → col 1 is
-        // interior anyway; check no duplicate adjacent markers).
-        for (i, (_, (p1, c1))) in targets.iter().enumerate() {
-            for (_, (p2, c2)) in targets.iter().skip(i + 1) {
-                assert!(
-                    !(p1 == p2 && c1.abs_diff(*c2) <= 1),
-                    "adjacent markers at {:?}",
-                    (p1, c1, c2)
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn jump_marks_ancestor_bounds() {
-        let mut ed = Editor::new();
-        ed.insert_sym('x');
-        ed.insert_sym('+');
-        ed.execute("frac");
-        ed.insert_sym('1');
-        // Cursor deep in the numerator: the top row's start must carry
-        // a marker (class B), reachable in one label press.
-        ed.start_jump();
-        let targets = ed.jump.as_ref().unwrap();
-        assert!(
-            targets.iter().any(|(_, (p, c))| p.is_empty() && *c == 0),
-            "top-row start unmarked: {:?}",
-            targets
-        );
-    }
-
-    #[test]
-    fn jump_anchors_cover_grid_cells() {
-        let mut ed = Editor::new();
-        ed.execute("pmatrix");
-        for c in "abcd".chars() {
-            ed.insert_sym(c);
-            ed.right(); // next cell (and finally out of the matrix)
-        }
-        ed.start_jump();
-        let cell_targets = ed
-            .jump
-            .as_ref()
-            .unwrap()
-            .iter()
-            .filter(|(_, (p, _))| matches!(p.last(), Some((_, Field::Cell(_)))))
-            .count();
-        assert!(cell_targets >= 3, "only {} cell anchors", cell_targets);
-    }
-
-    #[test]
-    fn jump_prefers_empty_slots() {
-        let mut ed = Editor::new();
-        // A fraction with an empty denominator, cursor back at top level.
-        ed.insert_sym('x');
-        ed.execute("frac");
-        ed.insert_sym('1');
-        ed.exit_inset();
-        ed.start_jump();
-        // 'a' goes to the unfilled denominator slot.
-        ed.jump_to('a');
-        assert_eq!(ed.path.last().unwrap().1, Field::FracDen);
-        assert_eq!(ed.cur_row().len(), 0);
-    }
-
-    #[test]
-    fn jump_arrow_selection_moves_and_confirms() {
-        let mut ed = Editor::new();
-        ed.insert_sym('x');
-        ed.insert_sym('+');
-        ed.execute("frac");
-        ed.insert_sym('1');
-        ed.vertical(false);
-        ed.insert_sym('2');
-        ed.exit_inset();
-        ed.start_jump();
-        let initial = ed.jump_selected;
-        // Some direction must move the selection to another marker.
-        for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-            ed.jump_select(dx, dy);
-            if ed.jump_selected != initial {
-                break;
-            }
-        }
-        assert_ne!(ed.jump_selected, initial, "selection did not move");
-        let rank = ed.jump_selected;
-        let expect = ed
-            .jump
-            .as_ref()
-            .unwrap()
-            .iter()
-            .find(|(r, _)| *r == rank)
-            .map(|(_, pos)| pos.clone())
-            .unwrap();
-        ed.jump_confirm();
-        assert!(ed.jump.is_none());
-        assert_eq!((ed.path.clone(), ed.col), expect);
     }
 
     #[test]

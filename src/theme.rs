@@ -7,7 +7,7 @@
 //! - **紫 (selection)** — one main purple for "this is selected / the
 //!   cursor itself", two softer purples for secondary selection info
 //!   (the ^F snap target, the ^B ancestor alternation).
-//! - **緑 (OK / actionable)** — known commands, jump markers, the grid
+//! - **緑 (OK / actionable)** — known commands, the grid
 //!   frame, insert ghosts, previews, normal messages.
 //! - **赤 (error)** — unknown commands, error messages.
 //! - **中立灰 (chrome)** — help line, borders, the ␣ glyph, unlabeled
@@ -24,13 +24,8 @@ use ratatui::style::Color;
 const PURPLE: Color = Color::Indexed(54);
 /// 紫サブ (明): secondary selection info.
 const PURPLE_SOFT: Color = Color::Indexed(97);
-/// 紫サブ (淡): secondary selection info, the quieter alternation
-/// partner.
-const PURPLE_DIM: Color = Color::Indexed(60);
 /// 緑 (背景): OK / actionable ground.
 const GREEN_BG: Color = Color::Indexed(22);
-/// 緑 (背景・明): the marker labels' ground — pops over GREEN_BG.
-const GREEN_BRIGHT_BG: Color = Color::Indexed(28);
 /// 赤 (背景): errors.
 const RED_BG: Color = Color::Indexed(88);
 /// 中立灰 (背景).
@@ -61,21 +56,12 @@ pub const FREE_CURSOR_BG: Color = PURPLE;
 pub const FREE_CURSOR_FG: Color = Color::White;
 /// The ^F snap-preview cell (the free cursor uses the caret style).
 pub const FREE_BG: Color = PURPLE_SOFT;
-/// The arrow-selected jump / block marker.
-pub const SELECTED_BG: Color = PURPLE;
-/// Background alternation for ^B ancestor boxes, innermost parent
-/// first, cycling outward. The highlighted ancestor overrides with
-/// SELECTED_BG.
-pub const DEPTH_BG: [Color; 2] = [PURPLE_DIM, PURPLE_SOFT];
 
 // ----- 緑: OK / actionable -----
 
 /// In-place minibuffer overlay (`\cmd` typed at the cursor) while the
 /// name is a known command.
 pub const MINIBUF_BG: Color = GREEN_BG;
-/// Marker label glyphs (jump labels, block labels).
-pub const LABEL_FG: Color = Color::Black;
-pub const LABEL_BG: Color = GREEN_BRIGHT_BG;
 /// Grid lane-gap cursor: the ghost lane previewing an insertion
 /// (Enter inserts here).
 pub const GRID_INSERT_BG: Color = GREEN_BG;
@@ -94,8 +80,6 @@ pub const MINIBUF_BAD_BG: Color = RED_BG;
 
 // ----- 中立灰 -----
 
-/// Unlabeled jump markers (beyond the label alphabet).
-pub const UNLABELED_BG: Color = GRAY_BG;
 /// The live preview of what committing the command would insert —
 /// neutral ground: it is information, not yet an action.
 pub const PREVIEW_BG: Color = GRAY_BG;

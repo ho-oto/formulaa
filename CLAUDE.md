@@ -47,7 +47,7 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 | `src/render/` | AST → 2D ブロック(基線つき)。正準AAの生成側。`block.rs` は Node 非依存のブロック代数(4チャンネル伝搬のユニットテスト付き)、`mod.rs` がノード規則 |
 | `src/parse.rs` | AA → AST。領域+基線の再帰下降。正準AAの受理側+寛容入力 |
 | `src/editor/mod.rs` | 構造エディタ(LyX 型カーソル、挿入・移動・削除・選択) |
-| `src/editor/modes.rs` | ^F フリーカーソル・^G ジャンプ・^B ブロック選択・^O グリッド編集(セル矩形選択+行/列レーンモード `GridSel`)・表示装飾 |
+| `src/editor/modes.rs` | ^F フリーカーソル・^O グリッド編集(セル矩形選択+行/列レーンモード `GridSel`)・表示装飾 |
 | `src/editor/command.rs` | **`Edit` enum + `resolve`/`apply`**(綴り→編集の純粋解決と適用の分離)、`\op` 名前ボックス |
 | `src/input.rs` | **共有キーマップ**(`Key`/`Effect`/`Editor::input`)。TUI と wasm は変換だけ。木を変えるキーは `Edit` を組んで `apply` に流す(モード・ナビゲーション・文脈キー `// ) ] }` はキー層) |
 | `src/output/latex.rs` | AST → LaTeX(crate ルートの `mascii::latex` で再輸出)。スクリプトを吸収しうるノードは `{…}` で保護(往復のため) |
@@ -81,7 +81,6 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 - `docs/aa-spec.md` — 正準AA形式の仕様(グリフ・ノード別レイアウト規則)
 - `docs/parse-model.md` — パースモデル仕様(基線復元→走査→再帰の視点。契約と fuse 表)
 - `docs/design.md` — 設計判断の経緯とロードマップ。**着手前に必読**
-- `docs/jump-spec.md` — ^G ジャンプ v2 の仕様草案(候補選抜アルゴリズム)
 - `docs/keys.md` — ユーザー向けキーマニュアル。**キー操作を変えたら必ず更新**
 
 ## ハマりどころ
@@ -116,17 +115,16 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 - ratatui は feature "tui"(bin 専用)。ライブラリ本体に TUI 依存を
   持ち込まない(wasm ビルドが壊れる)。
 - ratatui のイベントは `KeyEventKind::Press` のみ処理(Windows の重複対策)。
-- ジャンプ(Ctrl+G)・ブロック選択(Ctrl+B)・選択範囲は私用領域文字の
-  マーカー原子を表示用クローン AST に挿入する方式(editor/modes.rs `decorated`)。
+- 選択範囲・グリッド装飾は私用領域文字のマーカー原子を表示用クローン
+  AST に挿入する方式(editor/modes.rs `decorated`)。
   私用領域 **U+E000–F8FF 全域**が表示用予約(`glyphs::is_display_marker`):
-  E000+ ジャンプ/^B ラベル、E0F0–E0FF 選択・グリッドのセル/レーン対・
-  フレーム角・隙間ゴースト、E100+ ランク、F000+ 座標プローブ、
-  F8F0/F8F1 は tui のボックス囲み。**生のまま端末に出してはならない**
+  E0F0–E0FF 選択・グリッドのセル/レーン対・フレーム角・隙間ゴースト、
+  F000+ 座標プローブ、F8F0/F8F1 は tui のボックス囲み。**生のまま端末に出してはならない**
   (フォントが私用領域にロゴを持つ — decorate_line が描画前に必ず
   グリフへ解決する)。
   マーカー原子は**幅ゼロで描画**され
   `Block.marks` として伝搬(レイアウト不変)。TUI 側は marks から
-  ラベル重ね書きと背景ボックスを塗る(tui.rs `marker_boxes`)。
+  背景ボックスを塗る(tui.rs `marker_boxes`)。
   **例外**: グリッド編集の隙間カーソルだけは装飾 AST に幅1の
   ゴーストレーン(Spacer セル)を実体挿入する — 挿入プレビューを
   兼ねるための意図的なレイアウト変化で、クリック座標のプローブ描画も

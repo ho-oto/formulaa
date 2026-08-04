@@ -7,7 +7,7 @@
 //!   webviews (see editors/ in the repository).
 
 use mascii::ast::normalize;
-use mascii::editor::{Editor, JUMP_LABELS};
+use mascii::editor::Editor;
 use mascii::glyphs::Mark;
 use mascii::latex::row_to_latex;
 use mascii::parse::parse;
@@ -82,8 +82,7 @@ impl MasciiEditor {
         };
         let block = render_root(&root, cursor_ref, &ctx);
         // Caret and decorations are zero-width metadata; the text screen
-        // draws them over the glyphs (▌ caret, ⟦ ⟧ selection ends,
-        // a/s/d… jump and block labels).
+        // draws them over the glyphs (▌ caret, selection underlines).
         let mut lines: Vec<Vec<char>> = block.lines.clone();
         if lines.is_empty() {
             lines.push(Vec::new());
@@ -120,8 +119,7 @@ impl MasciiEditor {
                     Some(
                         Mark::Sel { open: false }
                         | Mark::Cells { open: false }
-                        | Mark::Lane { open: false, .. }
-                        | Mark::BlockClose,
+                        | Mark::Lane { open: false, .. },
                     ) => {
                         if let Some((r0, x0)) = open_at.pop()
                             && r0 == r
@@ -138,13 +136,6 @@ impl MasciiEditor {
                 // The lane-gap ghost: a visible insert cursor even on
                 // the colorless text screen.
                 Some(Mark::Gap { .. }) => '◇',
-                Some(Mark::Label { rank } | Mark::Rank { rank }) => {
-                    match JUMP_LABELS.chars().nth(rank) {
-                        Some(l) => l,
-                        // Beyond the label alphabet: no overlay.
-                        None => continue,
-                    }
-                }
                 // Ranges underline (above); frame corners have no
                 // colorless form.
                 _ => continue,
@@ -264,7 +255,7 @@ impl MasciiEditor {
     }
 
     /// Like `key`, with a ctrl flag for the editing chords (^C/^X/^V
-    /// copy/cut/paste, ^B block select, ^G jump, ^T italic, ^O structure). Host effects
+    /// copy/cut/paste, ^T italic, ^O structure). Host effects
     /// (save/copy-AA/quit) are ignored here.
     pub fn key_with(&mut self, key: &str, shift: bool, ctrl: bool) {
         use mascii::input::Key;

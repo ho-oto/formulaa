@@ -22,7 +22,7 @@ pub struct Block {
     /// so the layout is identical to the cursor-less render. None in
     /// canonical output (cursor = None).
     pub caret: Option<(usize, usize)>,
-    /// Display markers (row, col, char): jump/block labels, selection
+    /// Display markers (row, col, char): selection
     /// and block-end marks. Like the caret they are zero-width — the
     /// marker atoms the editor inserts render as empty blocks carrying
     /// these annotations, so decorations never move the layout. Always

@@ -217,6 +217,7 @@ impl Editor {
                 }
             }]),
             Edit::Mid
+            | Edit::Negate
             | Edit::AddRow
             | Edit::AddCol
             | Edit::DelRow
@@ -329,6 +330,7 @@ impl Editor {
             Edit::DelRow => self.del_lane(false),
             Edit::DelCol => self.del_lane(true),
             Edit::OpenBox(kind) => self.op_start(kind),
+            Edit::Negate => self.negate_prev(),
         }
     }
 }
@@ -366,6 +368,9 @@ pub enum Edit {
     },
     /// A │ middle added to the enclosing delimiter.
     Mid,
+    /// `\!`: replace the symbol atom left of the cursor with its
+    /// slashed negation (= → ≠), when the table has one.
+    Negate,
     AddRow,
     AddCol,
     DelRow,
@@ -409,6 +414,7 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
         "braket" => delim(Delim::Angle, Delim::Angle, 1),
         "set" => delim(Delim::Col(ColDelim::Brace), Delim::Col(ColDelim::Brace), 1),
         "mid" => Some(Edit::Mid),
+        "!" => Some(Edit::Negate),
         "addrow" => Some(Edit::AddRow),
         "addcol" => Some(Edit::AddCol),
         "delrow" => Some(Edit::DelRow),

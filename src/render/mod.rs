@@ -77,7 +77,7 @@ pub fn is_inline_script_row(row: &Row, superscript: bool) -> bool {
 /// Inline (superscript/subscript codepoint) form of a script row. A
 /// display marker inside the row forces the 2D form — labels overlaid
 /// on the tiny ¹²³ glyphs are unreadable, so a marked script expands
-/// while the marks are alive (jump mode and its ghosts).
+/// while the marks are alive (the free cursor and its ghosts).
 fn inline_script(row: &Row, map: fn(char) -> Option<char>) -> Option<Vec<char>> {
     if row.is_empty() {
         return None;
@@ -584,7 +584,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
         Node::Break => Block::empty(),
         // No automatic spacing anywhere (operators included): spacing is
         // the user's, via formatting Spacers or the semantic ␣ atom.
-        // Display markers (jump/block labels, selection ends) are
+        // Display markers (selection ends, grid decorations) are
         // zero-width annotations: no cells, only a position.
         Node::Sym(c) if is_display_marker(*c) => {
             let mut b = Block::empty();

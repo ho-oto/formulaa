@@ -5,7 +5,7 @@
 //! drift apart.
 
 use crate::ast::Node;
-use crate::editor::{BoxKind, Edit, Editor, JUMP_LABELS};
+use crate::editor::{BoxKind, Edit, Editor};
 use crate::symbols::{ColDelim, Delim};
 
 /// One keystroke, host-neutral. `Char` carries printable input
@@ -60,7 +60,7 @@ impl Editor {
         if self.root != before.0 {
             self.push_undo(before);
         }
-        // Whatever the key did (jump, snap, grid surgery), the grid
+        // Whatever the key did (snap, click, grid surgery), the grid
         // state must fit the tree it now points at.
         self.reclamp_grid();
         effect
@@ -71,12 +71,6 @@ impl Editor {
     /// adding one handler here.
     fn dispatch(&mut self, key: Key, shift: bool, ctrl: bool) -> Effect {
         if let Some(e) = self.free_keys(key, ctrl) {
-            return e;
-        }
-        if let Some(e) = self.jump_keys(key, ctrl) {
-            return e;
-        }
-        if let Some(e) = self.block_keys(key, shift, ctrl) {
             return e;
         }
         if let Some(e) = self.minibuffer_keys(key) {
@@ -91,70 +85,11 @@ impl Editor {
         self.base_keys(key, shift, ctrl)
     }
 
-    /// Jump mode: the next key picks a label (anything else cancels).
-    fn jump_keys(&mut self, key: Key, ctrl: bool) -> Option<Effect> {
-        self.jump.is_some().then(|| {
-            match key {
-                Key::Char(c) if !ctrl => self.jump_to(c),
-                Key::Left => self.jump_select(-1, 0),
-                Key::Right => self.jump_select(1, 0),
-                Key::Up => self.jump_select(0, -1),
-                Key::Down => self.jump_select(0, 1),
-                Key::Enter => self.jump_confirm(),
-                _ => {
-                    if let Some(targets) = self.jump.take() {
-                        self.keep_ghosts(&targets);
-                    }
-                    self.clear_message();
-                }
-            }
-            Effect::None
-        })
-    }
-
-    /// Block-select mode: arrows walk the ancestor chain (↑/→ wider,
-    /// ↓/← narrower), Enter or a label key selects, ^B/Esc cancels.
-    /// Shift+arrows leave the mode and start an ordinary selection
-    /// from the (unmoved) cursor.
-    fn block_keys(&mut self, key: Key, shift: bool, ctrl: bool) -> Option<Effect> {
-        self.block.as_ref()?;
-        if shift && matches!(key, Key::Up | Key::Down) {
-            self.block_cancel();
-            return None; // fall through to the normal selection keys
-        }
-        match key {
-            // Shift+←/→ leave the mode into a live selection: the
-            // highlighted block becomes the selection and the step
-            // already extends it.
-            Key::Left | Key::Right if shift && !ctrl => {
-                self.block_commit();
-                self.select_move(key == Key::Right);
-            }
-            Key::Up | Key::Right if !ctrl => self.block_move(true),
-            Key::Down | Key::Left if !ctrl => self.block_move(false),
-            Key::Enter => self.block_commit(),
-            Key::Char('b') if ctrl => self.block_cancel(),
-            Key::Char(c) if !ctrl => self.block_to(c),
-            _ => self.block_cancel(),
-        }
-        Some(Effect::None)
-    }
-
     /// Free-cursor mode: arrows move the cell cursor, Enter snaps.
-    /// ^G toggles jump markers; while they are up, a label letter or
-    /// the arrows+Enter jump there and free motion continues.
     fn free_keys(&mut self, key: Key, ctrl: bool) -> Option<Effect> {
         self.free.as_ref()?;
-        let markers = self.jump.is_some();
+        let _ = ctrl;
         match key {
-            Key::Char('g') if ctrl => self.free_toggle_markers(),
-            Key::Char(c) if markers && !ctrl && JUMP_LABELS.contains(c) => self.free_jump(c),
-            Key::Left if markers => self.jump_select(-1, 0),
-            Key::Right if markers => self.jump_select(1, 0),
-            Key::Up if markers => self.jump_select(0, -1),
-            Key::Down if markers => self.jump_select(0, 1),
-            Key::Enter if markers => self.free_goto_selected(),
-            Key::Esc if markers => self.free_markers_off(),
             Key::Left => self.free_move(-1, 0),
             Key::Right => self.free_move(1, 0),
             Key::Up => self.free_move(0, -1),
@@ -271,7 +206,7 @@ impl Editor {
     /// Grid edit mode (^O): a key layer for matrix surgery. The ctrl
     /// chords are handled ahead of it (grid mode swallows bare c/r for
     /// its column/row submodes), and the mode ends when the cursor
-    /// leaves the grid (jump, click, …).
+    /// leaves the grid (click, …).
     fn grid_keys(&mut self, key: Key, shift: bool, ctrl: bool) -> Option<Effect> {
         let gs = self.grid?;
         if ctrl {
@@ -339,19 +274,14 @@ impl Editor {
 
     /// Base layer: ctrl chords, then ordinary keys.
     fn base_keys(&mut self, key: Key, shift: bool, ctrl: bool) -> Effect {
-        // Ghost slots survive only until the next real input; ^G itself
-        // re-labels the identical picture.
-        if !(ctrl && key == Key::Char('g')) {
-            self.ghost.clear();
-        }
+        // Ghost slots survive only until the next real input.
+        self.ghost.clear();
         if ctrl {
             match key {
                 Key::Char('q') => return Effect::Quit,
                 Key::Char('y') => return Effect::CopyAa,
                 Key::Char('a') => self.document_start(),
                 Key::Char('f') => self.start_free(),
-                Key::Char('g') => self.start_jump(),
-                Key::Char('b') => self.start_block_select(),
                 Key::Char('t') => self.italic = !self.italic,
                 // In grid mode, copy/cut act on the cell rectangle;
                 // paste routes by clipboard shape inside `paste`.

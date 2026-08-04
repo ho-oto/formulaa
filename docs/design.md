@@ -1035,6 +1035,16 @@
     パース入口で明示エラー。Node::Cancel・Block.cancel チャンネル・
     Grid の flag 格子・Edit::Cancel・TUI/wasm の strike 描画は全て削除。
 
+68. **^G ジャンプ・^B ブロック選択・^F 内マーカーの全廃(ユーザー判断
+    2026-08)** — マーカー機能(EasyMotion 風ラベル・祖先チェーンの
+    ハイライト)を一旦完全撤去。ゴミを残さない方針で、モード本体・
+    キー割り当て・`Mark::Label/Rank/BlockClose`・ラベル描画(TUI/wasm)・
+    テーマのラベル/深度色・docs/jump-spec.md まで削除した。残るのは
+    ^F フリーカーソル(スナップ用の候補列挙 `jump_candidates` と
+    近接自動展開の ghost 機構はここが所有)・選択ボックス・^O グリッド
+    装飾・座標プローブ。`\!` は同時に「直前の Sym を否定形に置換」
+    コマンド(`Edit::Negate`、`NEGATIONS` 経由)として再定義。
+
 ## テスト戦略
 
 - `tests/roundtrip.rs`: 実式コーパス(MDN「三つの有名な数式」= カルダノ・

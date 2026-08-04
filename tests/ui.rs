@@ -274,37 +274,6 @@ fn ctrl_e_jumps_to_the_end_outside_grids() {
 }
 
 #[test]
-fn free_mode_marker_flow() {
-    // ^F starts plain free motion (no markers). ^G inside brings up the
-    // jump markers; a label letter or arrows+Enter jumps there and
-    // returns to plain free motion.
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"a+ \frac b Down c Tab +z C-f");
-    assert!(
-        ed.free.is_some() && ed.jump.is_none(),
-        "plain free at first"
-    );
-    type_script(&mut ed, "C-g");
-    assert!(ed.jump.is_some(), "markers on demand");
-    type_script(&mut ed, "a"); // best-ranked label
-    assert!(
-        ed.free.is_some() && ed.jump.is_none(),
-        "label jump lands back in plain free motion"
-    );
-    // Arrow-select path: markers on, arrows pick, Enter jumps.
-    type_script(&mut ed, "C-g Left Right Enter");
-    assert!(ed.free.is_some() && ed.jump.is_none());
-    // Esc drops the markers without leaving free mode; a second ^G
-    // toggles them off too.
-    type_script(&mut ed, "C-g Esc");
-    assert!(ed.free.is_some() && ed.jump.is_none());
-    type_script(&mut ed, "Enter");
-    assert!(ed.free.is_none(), "Enter snaps out");
-    // The formula was never modified by any of this.
-    assert_eq!(latex(&ed), "a+\\frac{b}{c}+z");
-}
-
-#[test]
 fn accent_wraps_selection_as_wide_accent() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"abc S-Left S-Left S-Left \hat");
@@ -464,16 +433,6 @@ fn plain_motions_shed_the_anchor() {
     assert_eq!(ed.selection(), None);
     type_script(&mut ed, r"Backspace");
     assert_eq!(latex(&ed), "\\left(ab\\right)");
-}
-
-#[test]
-fn jump_sheds_a_stale_selection() {
-    // ^G landing in the anchor's row must not resurrect a selection
-    // the user never chose (anchor -> landing), or the next selection
-    // consumer acts on the phantom range.
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"abcdef S-Left C-g a");
-    assert_eq!(ed.selection(), None);
 }
 
 #[test]
@@ -943,33 +902,28 @@ fn a_minibuffer_insert_clears_a_stale_selection() {
     assert_eq!(latex(&ed), "\\widehat{ab}");
 }
 
-/// Jump measures the picture it is about to label, which is the one
-/// without the grid's gap-lane preview (decorated dispatches jump
-/// ahead of grid). Probing the spliced frame instead put a probe into
-/// a cell that the splice had moved, and the render panicked.
-#[test]
-fn jump_from_a_grid_gap_measures_the_undecorated_picture() {
-    for script in [
-        r"\array C-o | Right C-g r C-g",
-        r"\matrix C-o - Up C-g w C-g",
-        r"\matrix C-o r Down C-g C-o C-g",
-    ] {
-        let mut ed = Editor::new();
-        type_script(&mut ed, script);
-        let _ = ed.decorated();
-        assert_roundtrip(&ed, &[]);
-    }
-    // The same shape through a click, which does measure the displayed
-    // frame — there the ghosts must shift past the gap lane.
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"\array C-o | Right C-g r");
-    ed.click(3, 1);
-    let _ = ed.decorated();
-    assert_roundtrip(&ed, &[]);
-}
-
 /// \mid is contextual: the divides atom ∣ in a plain row, the segment
 /// separator directly inside a delimiter block.
+/// Shift+↑ places a whole selection with the cursor on an end the
+/// user did not pick: the first Shift+←/→ flips to grow on that side,
+/// then plain shrink semantics resume.
+#[test]
+fn whole_selection_flip_then_plain_semantics() {
+    let mut ed = Editor::new();
+    // Cursor in the denominator: Shift+↑ selects the whole fraction.
+    type_script(&mut ed, r"1 // 2 Down 3 S-Up S-Left");
+    assert_eq!(ed.selection(), Some((0, 2)));
+    type_script(&mut ed, "S-Right");
+    assert_eq!(ed.selection(), Some((1, 2)), "shrinks back");
+    // A hand-made selection keeps the plain semantics: Shift+→ back
+    // onto the anchor clears it.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"abcde Left Left S-Left");
+    assert_eq!(ed.selection(), Some((2, 3)));
+    type_script(&mut ed, "S-Right");
+    assert_eq!(ed.selection(), None, "shrink collapses");
+}
+
 #[test]
 fn mid_is_divides_outside_a_delimiter() {
     let mut ed = Editor::new();
@@ -982,6 +936,28 @@ fn mid_is_divides_outside_a_delimiter() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"( x \mid P");
     assert_eq!(latex(&ed), "\\left(x\\middle|P\\right)");
+}
+
+/// `\!` right after a symbol replaces it with its slashed negation.
+#[test]
+fn bang_negates_the_preceding_symbol() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a = \! b");
+    assert_eq!(latex(&ed), "a\\ne b");
+    // ∈ → ∉ the same way; a second \! has no ∉-negation and errors.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"x \in \!");
+    assert_eq!(latex(&ed), "x\\notin ");
+    type_script(&mut ed, r"\!");
+    assert!(ed.message_error);
+    assert_eq!(latex(&ed), "x\\notin ");
+    // No negation for a letter; nothing left of the cursor at col 0.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a \!");
+    assert!(ed.message_error);
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\!");
+    assert!(ed.message_error);
 }
 
 /// `!`-prefixed (and `!`-suffixed) spellings are the slashed
@@ -1016,23 +992,6 @@ fn rm_of_a_digit_is_just_the_digit() {
     assert_eq!(latex(&ed), "1x");
 }
 
-/// A mode layer that consumes a key owes the same ghost clear the base
-/// layer does: a jump ghost path recorded before grid surgery outlives
-/// the array it points into, and the next render walks a dead index.
-#[test]
-fn grid_keys_clear_the_jump_ghosts() {
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"\matrix");
-    type_script(&mut ed, "C-o C-g Esc");
-    assert!(!ed.ghost.is_empty(), "cancelled jump keeps its ghosts");
-    type_script(&mut ed, "c");
-    assert!(ed.ghost.is_empty(), "a grid-mode key clears them");
-    // …and the sequence that used to panic on the next render.
-    type_script(&mut ed, "Delete Esc");
-    let _ = ed.decorated();
-    assert_roundtrip(&ed, &[]);
-}
-
 /// A formula line break lives only at the top level: a selection may
 /// not span one, so neither a wrap nor a copy can carry one into an
 /// inset (the picture would lose it, breaking the roundtrip).
@@ -1065,85 +1024,6 @@ fn a_line_break_stays_out_of_insets() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"a Enter b Left Left S-Right");
     assert_eq!(ed.selection(), None, "and stops before it too");
-}
-
-#[test]
-fn block_select_mode_selects_a_structure() {
-    let mut ed = Editor::new();
-    // Cursor inside the fraction's denominator: ^B highlights the
-    // fraction (innermost parent); Enter selects it.
-    type_script(&mut ed, r"1 // 2 Down 3 C-b");
-    // The label marker must actually appear in the decorated view
-    // (this display path once silently missed the block branch).
-    let (root, cursor) = ed.decorated();
-    assert!(cursor.is_some(), "cursor stays threaded during modes");
-    assert!(
-        root.iter().any(
-            |n| matches!(n, mascii::ast::Node::Sym(c) if (0xE000..0xE100).contains(&(*c as u32)))
-        ),
-        "label marker missing: {:?}",
-        root
-    );
-    type_script(&mut ed, "Enter");
-    assert_eq!(ed.selection(), Some((1, 2)));
-    // The cursor leaves on the right end; Shift+← must still grow the
-    // selection leftward (the ends flip instead of collapsing).
-    type_script(&mut ed, "S-Left");
-    assert_eq!(ed.selection(), Some((0, 2)));
-    type_script(&mut ed, "S-Right");
-    assert_eq!(ed.selection(), Some((1, 2)), "shrinks back");
-    type_script(&mut ed, "Backspace");
-    assert_eq!(latex(&ed), "1");
-    // Shift+←/→ inside the mode: select the highlighted block and move
-    // straight into the linear selection.
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"1 // 2 Down 3 C-b S-Left");
-    assert!(ed.block.is_none(), "mode exits");
-    assert_eq!(ed.selection(), Some((0, 2)));
-    // …and the flip is spent after one step: a second shrink collapses.
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"1 // 2 Down 3 C-b Enter S-Left S-Right S-Right");
-    assert_eq!(ed.selection(), None, "collapses like any selection");
-    // A hand-made selection keeps the plain semantics: Shift+←/→ back
-    // onto the anchor clears it (the flip is only for whole blocks).
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"abcde Left Left S-Left");
-    assert_eq!(ed.selection(), Some((2, 3)));
-    type_script(&mut ed, "S-Right");
-    assert_eq!(ed.selection(), None, "shrink collapses");
-    assert_eq!(ed.col, 3, "and the cursor stays put");
-    // At a row edge the collapsing step is still available.
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"1+2 S-Left");
-    assert_eq!(ed.selection(), Some((2, 3)));
-    type_script(&mut ed, "S-Right");
-    assert_eq!(ed.selection(), None, "edge selection collapses");
-    // ^B at the top level has no enclosing block: mode does not start.
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"x+y C-b");
-    assert!(ed.block.is_none());
-    // Walking the chain: from a cell of a matrix inside parens, ↑ moves
-    // outward Array -> Delim; a second ^B cancels without moving.
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"\pmatrix x");
-    let (path, col) = (ed.path.clone(), ed.col);
-    type_script(&mut ed, r"C-b");
-    assert_eq!(ed.block.as_ref().map(Vec::len), Some(2), "Array + Delim");
-    assert_eq!(ed.block_sel, 0, "innermost parent first");
-    type_script(&mut ed, "Up");
-    assert_eq!(ed.block_sel, 1);
-    type_script(&mut ed, "Down");
-    assert_eq!(ed.block_sel, 0);
-    type_script(&mut ed, "C-b");
-    assert!(ed.block.is_none());
-    assert_eq!((ed.path, ed.col), (path, col), "cursor untouched");
-    // Enter on the outer ancestor selects the delimiter block.
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"\pmatrix x C-b Up Enter \sqrt");
-    assert_eq!(
-        latex(&ed),
-        "\\sqrt{\\begin{pmatrix} x &  \\\\  &  \\end{pmatrix}}"
-    );
 }
 
 // ----- random key sequences: never panic, always roundtrip -----
@@ -1240,11 +1120,11 @@ fn property_random_key_sequences_roundtrip() {
                 // Selections.
                 (*rng.pick(&[Key::Left, Key::Right]), true, false)
             } else if r < 95 {
-                // Ctrl toggles/jump (host effects are inert here).
+                // Ctrl toggles (host effects are inert here).
                 (
-                    Key::Char(*rng.pick(&[
-                        'g', 't', 'b', 'e', 'y', 's', 'z', 'r', 'c', 'x', 'v', 'f', 'a', 'o',
-                    ])),
+                    Key::Char(
+                        *rng.pick(&['t', 'e', 'y', 's', 'z', 'r', 'c', 'x', 'v', 'f', 'a', 'o']),
+                    ),
                     false,
                     true,
                 )
