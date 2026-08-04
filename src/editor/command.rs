@@ -258,9 +258,14 @@ impl Editor {
     pub fn apply(&mut self, edit: Edit) {
         // An edit that does not consume the selection still shifts the
         // row under it, so a surviving anchor would designate a
-        // different range afterwards (the plain-key path clears it the
-        // same way). Only the two wrapping edits keep it.
-        let wraps = matches!(edit, Edit::Insert { wrap: true, .. } | Edit::Accent(_));
+        // different range afterwards. The two wrapping edits keep it
+        // (the selection lands inside the node); a plain symbol keeps
+        // it too, but to *replace* it — typing over a selection is the
+        // standard editor behavior. Everything else drops it.
+        let wraps = matches!(
+            edit,
+            Edit::Insert { wrap: true, .. } | Edit::Accent(_) | Edit::Sym(_)
+        );
         if !wraps {
             self.select_anchor = None;
         }

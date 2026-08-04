@@ -421,6 +421,10 @@ impl Editor {
     // ----- insertion -----
 
     pub fn insert_sym(&mut self, c: char) {
+        // Typing over an active selection replaces it.
+        if self.selection().is_some() {
+            self.take_selection();
+        }
         let col = self.col;
         self.cur_row_mut().insert(col, Node::Sym(c));
         self.col += 1;
@@ -439,7 +443,6 @@ impl Editor {
                 den: vec![],
             });
         } else {
-            self.select_anchor = None;
             self.insert_sym('/');
         }
     }

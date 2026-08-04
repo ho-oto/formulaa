@@ -460,7 +460,8 @@ impl Editor {
             // valid atom (`~` `^` `\`, or anything non-ASCII) would build
             // a formula that cannot be read back.
             Key::Char(c) if crate::symbols::is_atom(c) => {
-                self.select_anchor = None;
+                // The anchor survives into `apply`: a plain symbol
+                // replaces an active selection there.
                 self.apply(Edit::Sym(c));
             }
             _ => {}

@@ -880,22 +880,22 @@ fn selection_does_not_survive_leaving_the_row() {
 /// it: the insert shifts every index, so a surviving anchor would
 /// designate a different range and the next Backspace would eat it.
 #[test]
-fn a_minibuffer_insert_clears_a_stale_selection() {
+fn a_symbol_replaces_the_selection() {
+    // Typing a plain symbol over a selection replaces it (standard
+    // editor behavior) — typed directly or through the minibuffer.
     let mut ed = Editor::new();
     type_script(&mut ed, r"a b S-Left S-Left");
     assert_eq!(ed.selection(), Some((0, 2)));
     type_script(&mut ed, r"\alpha");
-    assert_eq!(
-        ed.selection(),
-        None,
-        "the anchor does not survive the insert"
-    );
-    type_script(&mut ed, "Backspace");
-    assert_eq!(
-        latex(&ed),
-        "ab",
-        "Backspace deletes the α, not the old range"
-    );
+    assert_eq!(ed.selection(), None, "the selection was consumed");
+    assert_eq!(latex(&ed), "\\alpha ");
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"abc S-Left S-Left x");
+    assert_eq!(latex(&ed), "ax");
+    // The / atom replaces too (its // fraction shortcut is untouched).
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"ab S-Left /");
+    assert_eq!(latex(&ed), "a/");
     // A wrapping command still consumes the selection it was given.
     let mut ed = Editor::new();
     type_script(&mut ed, r"a b S-Left S-Left \hat");
