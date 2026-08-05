@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "wasm"]
+members = [".", "demo/wasm"]
 
 [package]
 name = "mascii"

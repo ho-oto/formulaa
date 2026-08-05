@@ -114,15 +114,18 @@ Unicode 数式記号は多くの等幅フォントで欠けていたり等幅で
 
 ## エディタ統合(VSCode / Obsidian / Zed)
 
-Rust コアを WASM 化(`wasm/`)し、Markdown の ```math フェンス内の
-AA 数式を構造エディタで編集する拡張のプロトタイプを `editors/` に用意:
+Rust コアを WASM 化し、Markdown の ```math フェンス内の AA 数式を
+構造エディタで編集する拡張のプロトタイプが**別リポジトリ**にある
+(それぞれ自前の wasm クレートで `mascii` を git 依存する):
 
-- **VSCode**: `Ctrl+Alt+M` でカーソル位置の数式を webview エディタで開き、
+- **[mascii-vscode](https://github.com/ho-oto/mascii-vscode)**:
+  `Ctrl+Alt+M` でカーソル位置の数式を webview エディタで開き、
   `Ctrl+Enter` で書き戻し。選択 AA の LaTeX 変換コマンドも。
-- **Obsidian**: コマンド「Edit mascii formula at cursor」でモーダル編集。
+- **[mascii-obsidian](https://github.com/ho-oto/mascii-obsidian)**:
+  コマンド「Edit mascii formula at cursor」でモーダル編集。
 - **Zed**: 拡張 UI API 未提供のため CLI タスク連携(選択→aa2tex)。
 
-ビルド手順と「数式部分だけその場で構造編集」への段階的ロードマップは
+構成と「数式部分だけその場で構造編集」への段階的ロードマップは
 `docs/editors.md` 参照。
 
 ## 設計
@@ -141,13 +144,14 @@ normalize(strip_spacers(normalize(x)))`)を実式コーパスとランダム生�
 
 ```
 src/ast.rs      AST・カーソルパス・正規形
-src/render.rs   AST → 2D 文字ブロック(正準AA)
+src/render/     AST → 2D 文字ブロック(正準AA)
 src/parse.rs    AA → AST(逆変換)
-src/editor.rs   構造エディタ(LyX 型)
+src/editor/     構造エディタ(LyX 型)
 src/input.rs    共有キーマップ(TUI/wasm 共通)
 src/output/     AST → LaTeX
 src/symbols/    記号・関数・アクセント表(すべて手書きの phf テーブル)
 src/main.rs     ratatui TUI + CLI
+demo/wasm/      web デモ用の wasm-bindgen バインディング
 ```
 
 ## ロードマップ

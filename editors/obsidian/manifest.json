@@ -1,9 +1,0 @@
-{
-  "id": "mascii",
-  "name": "mascii math",
-  "version": "0.1.0",
-  "minAppVersion": "1.4.0",
-  "description": "Edit AA-format math formulas structurally (LyX-like) in fenced blocks",
-  "author": "mascii",
-  "isDesktopOnly": true
-}

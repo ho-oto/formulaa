@@ -6,7 +6,7 @@ LyX 風 TUI 数式エディタ + AA⇄AST 相互変換ツール。Rust / ratatui
 
 ```sh
 cargo test                      # 全テスト(ユニット + ラウンドトリップ)
-cargo check -p mascii-wasm --target wasm32-unknown-unknown  # wasm 側
+cargo check -p mascii-wasm --target wasm32-unknown-unknown  # wasm 側(demo/wasm)
 cargo clippy --all-targets     # 警告ゼロを維持
 cargo fmt                      # コミット前に必ず整形(リポジトリ全体が rustfmt 準拠)
 cargo run                      # TUI エディタ
@@ -71,8 +71,7 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 | `tests/roundtrip.rs` | 実式コーパス + ランダムプロパティテスト |
 | `tests/ui.rs` | キー駆動 UI テスト(キースクリプト DSL + ランダムキー列。`MASCII_UI_PROP_N`/`_SEED`) |
 | `tools/merge_math_font.py` | JuliaMono から不足数式グリフを補う合成フォント生成(fontTools) |
-| `wasm/` | wasm-bindgen バインディング(変換 API + キー駆動 `MasciiEditor`) |
-| `editors/` | VSCode / Obsidian / Zed 統合(docs/editors.md 参照) |
+| `demo/wasm/` | wasm-bindgen バインディング(変換 API + キー駆動 `MasciiEditor`)。web デモ用。**エディタ拡張は別リポジトリ**(mascii-vscode / mascii-obsidian)で自前の複製を持つ — docs/editors.md 参照 |
 | `SKILL.md` | AI が AA を直接読み書きするためのガイド |
 | `docs/examples.md` | コーパス対照表(examples/catalog.rs で再生成) |
 

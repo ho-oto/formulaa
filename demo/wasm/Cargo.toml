@@ -2,12 +2,12 @@
 name = "mascii-wasm"
 version = "0.1.0"
 edition = "2024"
-description = "WASM bindings for mascii: AA math <-> AST editor and converters"
+description = "WASM bindings for mascii, as used by the self-contained web demo"
 license = "MIT"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-mascii = { path = "..", default-features = false }
+mascii = { path = "../..", default-features = false }
 wasm-bindgen = "0.2"

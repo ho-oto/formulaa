@@ -7,7 +7,7 @@
 
 ```sh
 # 1. wasm コア
-cd wasm && wasm-pack build --target web --out-dir pkg && cd ..
+cd demo/wasm && wasm-pack build --target web --out-dir pkg && cd ../..
 
 # 2. JuliaMono のサブセット(数式レンジ + ASCII)を woff2 で作る
 pip install fonttools brotli

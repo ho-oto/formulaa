@@ -2,8 +2,8 @@
 """Assemble the self-contained web demo (demo/mascii-demo.html).
 
 Inlines into demo/template.html:
-- the wasm-bindgen JS glue and the .wasm binary (base64) from wasm/pkg
-  (build first: cd wasm && wasm-pack build --target web --out-dir pkg)
+- the wasm-bindgen JS glue and the .wasm binary (base64) from demo/wasm/pkg
+  (build first: cd demo/wasm && wasm-pack build --target web --out-dir pkg)
 - a JuliaMono woff2 subset (base64) covering ASCII + the math ranges
   (pass the subset with --font; create it with fontTools, see docs/editors.md)
 - example formulas extracted from docs/examples.md (always in sync with
@@ -61,7 +61,7 @@ def main() -> None:
                     help="also write a body-only fragment to this path")
     args = ap.parse_args()
 
-    pkg = ROOT / "wasm/pkg"
+    pkg = ROOT / "demo/wasm/pkg"
     glue = (pkg / "mascii_wasm.js").read_text()
     # The inline module never imports the glue, so drop its export statement
     # and expose the two names it would have exported.
