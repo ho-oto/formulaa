@@ -5,8 +5,10 @@
 //! The palette is deliberately small (docs/design.md カラーパレット):
 //!
 //! - **紫 (selection)** — one main purple for "this is selected / the
-//!   cursor itself", two softer purples for secondary selection info
-//!   (the ^F snap target, the ^B ancestor alternation).
+//!   cursor itself" and one softer purple for the secondary kind (the
+//!   ^F snap target, the ^B ancestors one step away). Two shades are
+//!   all the selection layer needs: nothing shows more than "this" and
+//!   "the next one over".
 //! - **緑 (OK / actionable)** — known commands, the grid
 //!   frame, insert ghosts, previews, normal messages.
 //! - **赤 (error)** — unknown commands, error messages.
@@ -24,8 +26,6 @@ use ratatui::style::Color;
 const PURPLE: Color = Color::Indexed(54);
 /// 紫サブ (明): secondary selection info.
 const PURPLE_SOFT: Color = Color::Indexed(97);
-/// 紫 (背景・淡2): the depth gradient's second shade.
-const PURPLE_DIM: Color = Color::Indexed(60);
 /// 緑 (背景): OK / actionable ground.
 const GREEN_BG: Color = Color::Indexed(22);
 /// 赤 (背景): errors.
@@ -50,13 +50,12 @@ pub const SPACE_FG: Color = Color::DarkGray;
 
 /// Selection background — every "this is selected" surface: the linear
 /// selection, grid cell rectangles and lanes (told apart by reach, not
-/// color), the arrow-selected marker.
+/// color), the delimiter pair armed for unwrapping, and ^B's
+/// highlighted ancestor. One color, because they are one idea.
 pub const SELECTION_BG: Color = PURPLE;
 
-/// ^B: the arrow-highlighted ancestor.
-pub const SELECTED_BG: Color = PURPLE;
-/// ^B: the ancestor-chain gradient (alternating, innermost first).
-pub const DEPTH_BG: [Color; 2] = [PURPLE_DIM, PURPLE_SOFT];
+/// ^B: the ancestors one arrow press away from the highlighted one.
+pub const BLOCK_STEP_BG: Color = PURPLE_SOFT;
 /// The free cursor cell itself (^F): tinted so the mode is obvious.
 pub const FREE_CURSOR_BG: Color = PURPLE;
 /// Glyph color on the free cursor cell.

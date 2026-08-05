@@ -1401,3 +1401,50 @@ fn tab_completion_with_no_matches_says_so() {
     // The minibuffer is untouched, so the typing can be fixed.
     assert_eq!(ed.minibuffer.as_deref(), Some("qqzz"));
 }
+
+/// ^B paints the highlighted ancestor and the one step each way, not
+/// the whole chain: the arrows move one step at a time, so that is all
+/// that has to be on screen (and two shades cover it).
+#[test]
+fn block_select_paints_only_a_step_in_each_direction() {
+    use mascii::glyphs::Mark;
+    let mut ed = Editor::new();
+    // Nest deeply: a matrix cell inside a fraction inside a bracket.
+    type_script(&mut ed, r"( 1 // \pmatrix x");
+    type_script(&mut ed, "C-b");
+    let depth = ed.block.as_ref().map(Vec::len).unwrap_or(0);
+    assert!(depth >= 4, "expected a deep chain, got {}", depth);
+
+    let painted = |ed: &Editor| -> Vec<usize> {
+        let (root, _) = ed.decorated();
+        fn walk(row: &mascii::ast::Row, out: &mut Vec<usize>) {
+            for n in row {
+                if let mascii::ast::Node::Sym(c) = n
+                    && let Some(Mark::BlockOpen { rank }) = Mark::decode(*c)
+                {
+                    out.push(rank);
+                }
+                for f in n.fields() {
+                    walk(n.field(f), out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&root, &mut out);
+        out.sort_unstable();
+        out
+    };
+
+    // Innermost: itself and the one outside it.
+    assert_eq!(painted(&ed), vec![0, 1]);
+    // One step out: the three around it — never the whole chain.
+    type_script(&mut ed, "Up");
+    assert_eq!(painted(&ed), vec![0, 1, 2]);
+    type_script(&mut ed, "Up");
+    assert_eq!(painted(&ed), vec![1, 2, 3]);
+    // Outermost: itself and the one inside it.
+    for _ in 0..depth {
+        type_script(&mut ed, "Up");
+    }
+    assert_eq!(painted(&ed), vec![depth - 2, depth - 1]);
+}

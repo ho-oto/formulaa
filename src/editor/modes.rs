@@ -281,6 +281,18 @@ impl Editor {
         self.info("block: ↑/→ wider  ↓/← narrower  Enter select  ^B/Esc cancel");
     }
 
+    /// The ancestor ranks ^B paints: the highlighted one and its
+    /// immediate neighbours (the innermost and outermost ends have one
+    /// neighbour each). Ranks stay absolute, so the display can still
+    /// tell which box is the selected one.
+    pub fn block_shown(&self) -> Vec<usize> {
+        let len = self.block.as_ref().map_or(0, Vec::len);
+        let sel = self.block_sel;
+        (sel.saturating_sub(1)..=sel + 1)
+            .filter(|&r| r < len)
+            .collect()
+    }
+
     pub fn block_cancel(&mut self) {
         self.block = None;
         self.clear_message();
@@ -351,7 +363,9 @@ impl Editor {
                             rel[0].0 = 0;
                             (rel, self.col)
                         });
-                    // The gradient ranks by ancestry (innermost first).
+                    // Ranked by ancestry (innermost first); the display
+                    // indexes this list by rank, so every target keeps an
+                    // entry whether or not it is painted.
                     extent(&row_at(&self.root, p)[i..i + 1], cur, rank)
                 })
                 .collect()
@@ -427,11 +441,20 @@ impl Editor {
 
         let mut path = self.path.clone();
         let mut col = self.col;
+        // Only the highlighted ancestor and its two neighbours are
+        // painted. The arrows walk the chain one step at a time, so one
+        // step in each direction is all that has to be visible — and
+        // three boxes need two shades where the whole chain needed a
+        // gradient nobody could read the depth off anyway.
+        let shown = self.block_shown();
         // The open mark sits immediately left of its block and a close
         // marker right after it, so the display can paint its extent.
         // Targets are innermost first = deepest first: inserting into
         // a deep row never shifts a shallower target's position.
         for (idx, (p, i)) in targets.iter().enumerate() {
+            if !shown.contains(&idx) {
+                continue;
+            }
             let mark = Mark::BlockOpen { rank: idx }.ch();
             let row = row_at_mut(&mut root, p);
             row.insert(i + 1, Node::Sym(Mark::BlockClose.ch()));

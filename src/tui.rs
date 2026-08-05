@@ -372,11 +372,15 @@ fn marker_boxes(
                     if let Some((o, oc)) = pop_matching(&mut stack, matches_opener) {
                         let (color, depth, t, b) = match oc {
                             Mark::BlockOpen { rank } => {
+                                // Only the highlighted ancestor and its
+                                // neighbours are marked at all, so two
+                                // shades say everything: this one, and
+                                // the step you can take from it.
                                 let (t, b, d) = extent(Some(rank));
                                 let color = if block_selected == Some(rank) {
-                                    theme::SELECTED_BG
+                                    theme::SELECTION_BG
                                 } else {
-                                    theme::DEPTH_BG[d % theme::DEPTH_BG.len()]
+                                    theme::BLOCK_STEP_BG
                                 };
                                 (color, d, t, b)
                             }
