@@ -18,13 +18,13 @@ TUI エディタ相当の構造編集ができる」。数式は Markdown の
 | Zed | (下記の CLI タスク) | 拡張 UI API 待ち |
 
 ```
-        mascii (このリポジトリ: ast/render/parse/editor + CLI)
-          │                         │
-          │ path 依存               │ git 依存
-          ▼                         ▼
-  demo/wasm (web デモ用)     mascii-vscode/wasm  mascii-obsidian/wasm
-                                    │                   │
-                             webview パネル        モーダル
+     mascii (このリポジトリ: ast/render/parse/editor + CLI)
+              │                          │
+              │ git 依存                 │ git 依存
+              ▼                          ▼
+     mascii-vscode/wasm         mascii-obsidian/wasm
+              │                          │
+       webview パネル                モーダル
 ```
 
 各拡張リポジトリは**自前の wasm-bindgen クレート**を持ち、`mascii` を

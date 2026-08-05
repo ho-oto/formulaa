@@ -151,7 +151,6 @@ src/input.rs    共有キーマップ(TUI/wasm 共通)
 src/output/     AST → LaTeX
 src/symbols/    記号・関数・アクセント表(すべて手書きの phf テーブル)
 src/main.rs     ratatui TUI + CLI
-demo/wasm/      web デモ用の wasm-bindgen バインディング
 ```
 
 ## ロードマップ
