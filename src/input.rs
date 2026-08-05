@@ -305,6 +305,10 @@ impl Editor {
     fn base_keys(&mut self, key: Key, shift: bool, ctrl: bool) -> Effect {
         // Ghost slots survive only until the next real input.
         self.ghost.clear();
+        // A delimiter armed for unwrapping survives exactly one
+        // keystroke: taking it here disarms on everything except the
+        // Backspace/^D that armed it, pressed again in the same place.
+        let armed = self.unwrap_armed.take().is_some_and(|p| p == self.path);
         if ctrl {
             match key {
                 Key::Char('q') => return Effect::Quit,
@@ -323,6 +327,10 @@ impl Editor {
                 Key::Char('e') => self.document_end(),
                 // ^T: grid edit mode (inside a matrix).
                 Key::Char('t') => self.grid_mode_toggle(),
+                // ^D: delete forward, the Emacs pairing for Backspace
+                // (and the only forward delete on keyboards without a
+                // Delete key).
+                Key::Char('d') => self.delete_forward(armed),
                 _ => {}
             }
             return Effect::None;
@@ -374,16 +382,15 @@ impl Editor {
             }
             Key::Home => self.home(),
             Key::End => self.end(),
+            // Deleting toward the delimiter you are standing just
+            // inside offers to unwrap it (arm, then lift the contents
+            // out) instead of stepping over it.
             Key::Backspace => {
-                if !self.delete_selection() {
+                if !self.delete_selection() && !self.delete_toward_delim(true, armed) {
                     self.backspace();
                 }
             }
-            Key::Delete => {
-                if !self.delete_selection() {
-                    self.delete();
-                }
-            }
+            Key::Delete => self.delete_forward(armed),
             Key::Char('\\') => self.minibuffer = Some(String::new()),
             // ^ / _ / ( { [ spell the same Edits the \commands resolve
             // to: an empty template enters its slot, a selection lands

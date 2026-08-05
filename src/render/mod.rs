@@ -285,26 +285,35 @@ pub fn render_row(
     // mode). The render owns the geometry, so the pair converts to the
     // node's exact corners here — the display reads the rectangle
     // straight off the two marks, whatever later compositions do.
-    let frame_open = Mark::Frame { open: true }.ch();
-    let frame_close = Mark::Frame { open: false }.ch();
-    for m in 0..row.len() {
-        if !matches!(&row[m], Node::Sym(c) if *c == frame_open) {
-            continue;
+    // A FRAME or DELIMS pair wraps a node whose own frame the display
+    // recolors (grid mode; a delimiter armed for unwrapping). The
+    // render owns the geometry, so the pair converts to the node's
+    // exact corners here — the display reads the rectangle straight off
+    // the two marks, whatever later compositions do.
+    for (open, close) in [
+        (Mark::Frame { open: true }, Mark::Frame { open: false }),
+        (Mark::Delims { open: true }, Mark::Delims { open: false }),
+    ] {
+        let (pair_open, pair_close) = (open.ch(), close.ch());
+        for m in 0..row.len() {
+            if !matches!(&row[m], Node::Sym(c) if *c == pair_open) {
+                continue;
+            }
+            let Some(t) = (m + 1..row.len()).find(|&t| !is_marker_node(&row[t])) else {
+                continue;
+            };
+            let close =
+                (t + 1..row.len()).find(|&c| matches!(&row[c], Node::Sym(ch) if *ch == pair_close));
+            let Some(close) = close else { continue };
+            let (h, w) = (blocks[t].0.height(), blocks[t].0.width());
+            blocks[m].0.marks.retain(|&(_, _, c)| c != pair_open);
+            blocks[close].0.marks.retain(|&(_, _, c)| c != pair_close);
+            blocks[t].0.marks.push((0, 0, pair_open));
+            blocks[t]
+                .0
+                .marks
+                .push((h.saturating_sub(1), w.saturating_sub(1), pair_close));
         }
-        let Some(t) = (m + 1..row.len()).find(|&t| !is_marker_node(&row[t])) else {
-            continue;
-        };
-        let close =
-            (t + 1..row.len()).find(|&c| matches!(&row[c], Node::Sym(ch) if *ch == frame_close));
-        let Some(close) = close else { continue };
-        let (h, w) = (blocks[t].0.height(), blocks[t].0.width());
-        blocks[m].0.marks.retain(|&(_, _, c)| c != frame_open);
-        blocks[close].0.marks.retain(|&(_, _, c)| c != frame_close);
-        blocks[t].0.marks.push((0, 0, frame_open));
-        blocks[t]
-            .0
-            .marks
-            .push((h.saturating_sub(1), w.saturating_sub(1), frame_close));
     }
     if let Some(col) = cursor_col {
         blocks.insert(

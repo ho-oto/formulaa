@@ -209,6 +209,8 @@ struct Decor {
     caret: Option<(usize, usize)>,
     /// The edited grid's frame rectangle (x0, x1, top, bottom).
     frame: Option<(usize, usize, usize, usize)>,
+    /// The rectangle of a delimiter armed for unwrapping, same shape.
+    armed: Option<(usize, usize, usize, usize)>,
 }
 
 impl Decor {
@@ -296,6 +298,19 @@ fn marker_boxes(
         (Some(&(t, x0, _)), Some(&(b, x1, _))) => Some((x0, x1, t, b)),
         _ => None,
     };
+    // Same corner geometry for a delimiter armed for unwrapping, read
+    // separately: only its two columns light up, not the lattice.
+    let armed: Option<(usize, usize, usize, usize)> = match (
+        marks
+            .iter()
+            .find(|&&(_, _, c)| Mark::decode(c) == Some(Mark::Delims { open: true })),
+        marks
+            .iter()
+            .find(|&&(_, _, c)| Mark::decode(c) == Some(Mark::Delims { open: false })),
+    ) {
+        (Some(&(t, x0, _)), Some(&(b, x1, _))) => Some((x0, x1, t, b)),
+        _ => None,
+    };
     for (y, mut row_marks) in by_row {
         row_marks.sort_unstable();
         let mut stack: Vec<(usize, Mark)> = Vec::new();
@@ -324,8 +339,8 @@ fn marker_boxes(
                 (t, b, e.map_or(0, |&(_, _, d)| d))
             };
             match mark {
-                // The frame corners are read by the scan above.
-                Mark::Frame { .. } => {}
+                // The corner pairs are read by the scans above.
+                Mark::Frame { .. } | Mark::Delims { .. } => {}
                 // A close pops its *matching* open — a standalone mark
                 // (a rank, a gap ghost) must never satisfy a pair.
                 Mark::Cells { open: false } | Mark::Lane { open: false, .. } => {
@@ -470,6 +485,7 @@ fn marker_boxes(
         bg,
         caret: None,
         frame,
+        armed,
     };
     // The caret cell (padded blank at the row end).
     if let Some((y, x)) = caret {
@@ -664,6 +680,19 @@ fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec
                 style = style.bg(color);
             }
             spans.push(Span::styled(cell, style));
+        } else if d.armed.is_some_and(|(o, close, t, b)| {
+            // A delimiter armed for unwrapping: its two columns take the
+            // selection ground, because they are exactly what the next
+            // Backspace/^D removes.
+            (t..=b).contains(&y) && is_delim_piece(c) && (i == o || i == close)
+        }) {
+            flush(&mut buf, buf_bg, &mut spans);
+            spans.push(Span::styled(
+                cell,
+                Style::default()
+                    .bg(theme::SELECTION_BG)
+                    .add_modifier(Modifier::BOLD),
+            ));
         } else if d.frame.is_some_and(|(o, close, t, b)| {
             // The edited grid's frame recolors while grid mode is on.
             // The rectangle is exact (render-placed corners): lattice
@@ -1226,6 +1255,7 @@ mod tests {
                 bg: vec![vec![None, None]],
                 caret: cursor.map(|x| (0, x)),
                 frame: None,
+                armed: None,
             };
             let spans = decorate_line(&d, 0, CaretStyle::Normal, 0);
             let painted: String = spans.iter().map(|s| s.content.as_ref()).collect();

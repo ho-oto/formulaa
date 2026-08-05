@@ -147,6 +147,10 @@ pub enum Mark {
     Lane { open: bool, cols: bool },
     /// The edited Array's frame corners: the grid-mode signal.
     Frame { open: bool },
+    /// A delimiter pair armed for unwrapping (Backspace/^D against it):
+    /// same corner geometry as `Frame`, but only the delimiter columns
+    /// light up — they are what the next press removes.
+    Delims { open: bool },
     /// The ghost lane previewing an insertion at a lane gap. The one
     /// decoration with real width.
     Gap { cols: bool },
@@ -175,6 +179,7 @@ impl Mark {
             Mark::Lane { open, cols: true } => SEL_BASE + 5 + u32::from(!open),
             Mark::Cells { open } => SEL_BASE + 7 + u32::from(!open),
             Mark::Frame { open } => SEL_BASE + 9 + u32::from(!open),
+            Mark::Delims { open } => SEL_BASE + 11 + u32::from(!open),
             Mark::Lane { open, cols: false } => SEL_BASE + 13 + u32::from(!open),
             Mark::Gap { cols: false } => SEL_BASE + 15,
             Mark::Probe { index } => PROBE_BASE + index as u32,
@@ -198,6 +203,7 @@ impl Mark {
                 },
                 n @ (7 | 8) => Mark::Cells { open: open(n - 7) },
                 n @ (9 | 10) => Mark::Frame { open: open(n - 9) },
+                n @ (11 | 12) => Mark::Delims { open: open(n - 11) },
                 n @ (13 | 14) => Mark::Lane {
                     open: open(n - 13),
                     cols: false,
@@ -223,6 +229,7 @@ impl Mark {
             Mark::Cells { open: false } => Some(Mark::Cells { open: true }),
             Mark::Lane { open: false, cols } => Some(Mark::Lane { open: true, cols }),
             Mark::Frame { open: false } => Some(Mark::Frame { open: true }),
+            Mark::Delims { open: false } => Some(Mark::Delims { open: true }),
             // A BlockOpen of any rank opens the box BlockClose ends;
             // which rank it is only matters to the paint.
             Mark::BlockClose => Some(Mark::BlockOpen { rank: 0 }),
@@ -254,6 +261,7 @@ mod tests {
             all.push(Mark::Sel { open });
             all.push(Mark::Cells { open });
             all.push(Mark::Frame { open });
+            all.push(Mark::Delims { open });
             for cols in [true, false] {
                 all.push(Mark::Lane { open, cols });
             }

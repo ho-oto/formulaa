@@ -78,6 +78,11 @@ pub struct Editor {
     /// Editor-internal clipboard (^C/^X/^V): a sibling-node slice, or
     /// a rectangle of grid cells.
     clip: Clip,
+    /// The cursor path at which Backspace/^D armed the enclosing
+    /// delimiter for unwrapping. While it matches the cursor, the pair
+    /// is highlighted and the next press removes it; every other key
+    /// disarms (the key layer takes it, like a one-shot anchor).
+    pub(crate) unwrap_armed: Option<Vec<(usize, Field)>>,
 }
 
 // The display markers live in `glyphs::Mark` — the one place their
@@ -387,6 +392,7 @@ impl Editor {
             select_path: Vec::new(),
             select_whole: false,
             clip: Clip::Nodes(Vec::new()),
+            unwrap_armed: None,
         }
     }
 
@@ -903,6 +909,77 @@ impl Editor {
             } else {
                 self.left();
             }
+        }
+    }
+
+    /// The enclosing delimiter the cursor is pressed against, if
+    /// deleting toward it should offer to unwrap rather than step out:
+    /// `at_start` means Backspace at the very start of the contents,
+    /// otherwise ^D/Delete at the very end. A pair with middles keeps
+    /// the old behaviour (there is no single "contents" to lift out),
+    /// and so does a fused grid (unwrapping would strand a lattice
+    /// with no delimiter to hang off). Returns the node's index in its
+    /// parent row.
+    fn unwrappable(&self, at_start: bool) -> Option<usize> {
+        let stop = if at_start { 0 } else { self.cur_row().len() };
+        if self.col != stop {
+            return None;
+        }
+        let &(i, Field::Seg(0)) = self.path.last()? else {
+            return None;
+        };
+        let parent = &self.path[..self.path.len() - 1];
+        match row_at(&self.root, parent).get(i)? {
+            Node::Delim { mids: 0, segs, .. }
+                if segs.len() == 1 && !matches!(segs[0][..], [Node::Array { .. }]) =>
+            {
+                Some(i)
+            }
+            _ => None,
+        }
+    }
+
+    /// Lift the enclosing delimiter's contents out of it, replacing the
+    /// pair, and select what came out — so pressing Backspace once more
+    /// deletes it, while an arrow key walks away leaving just the
+    /// unwrap. Empty contents leave nothing to select.
+    fn unwrap_delim(&mut self, i: usize) {
+        self.path.pop();
+        let Node::Delim { segs, .. } = self.cur_row_mut().remove(i) else {
+            return;
+        };
+        let content = segs.into_iter().next().unwrap_or_default();
+        let n = content.len();
+        self.cur_row_mut().splice(i..i, content);
+        self.col = i + n;
+        self.select_whole = false;
+        self.select_anchor = (n > 0).then_some(i);
+        self.select_path = self.path.clone();
+    }
+
+    /// Backspace/^D pressed against an enclosing delimiter: the first
+    /// press arms it (the display lights the pair up), the second
+    /// unwraps. `armed` is the arming this keystroke inherited.
+    /// Returns false when the cursor is not against such a pair, so the
+    /// caller falls back to ordinary deletion.
+    pub fn delete_toward_delim(&mut self, at_start: bool, armed: bool) -> bool {
+        let Some(i) = self.unwrappable(at_start) else {
+            return false;
+        };
+        if armed {
+            self.unwrap_delim(i);
+        } else {
+            self.unwrap_armed = Some(self.path.clone());
+        }
+        true
+    }
+
+    /// Forward delete (Delete / ^D): the selection if there is one,
+    /// else an unwrap against the closing delimiter, else the node
+    /// ahead of the cursor.
+    pub fn delete_forward(&mut self, armed: bool) {
+        if !self.delete_selection() && !self.delete_toward_delim(false, armed) {
+            self.delete();
         }
     }
 

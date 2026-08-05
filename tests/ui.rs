@@ -1255,3 +1255,83 @@ fn property_random_key_sequences_roundtrip() {
         }
     }
 }
+
+/// Backspace just inside a delimiter unwraps it in two steps, so the
+/// bracket can be shed without losing what it holds: the first press
+/// arms the pair (the display lights it up), the second lifts the
+/// contents out and selects them, a third deletes those — and an arrow
+/// key after the second leaves the unwrap standing.
+#[test]
+fn backspace_unwraps_a_delimiter() {
+    // ( f o o ) with the cursor just after the opening bracket.
+    let open = |ed: &mut Editor| {
+        type_script(ed, "( foo Home");
+    };
+    let mut ed = Editor::new();
+    open(&mut ed);
+    assert_eq!(latex(&ed), "\\left(foo\\right)");
+
+    // First press arms: nothing is deleted yet.
+    type_script(&mut ed, "Backspace");
+    assert_eq!(latex(&ed), "\\left(foo\\right)", "the first press deletes");
+    // Second press unwraps and selects what came out.
+    type_script(&mut ed, "Backspace");
+    assert_eq!(latex(&ed), "foo");
+    assert_eq!(ed.selection(), Some((0, 3)), "the contents are selected");
+    // Third press deletes the selection.
+    type_script(&mut ed, "Backspace");
+    assert_eq!(latex(&ed), "");
+
+    // …and an arrow key instead just walks away from the unwrap.
+    let mut ed = Editor::new();
+    open(&mut ed);
+    type_script(&mut ed, "Backspace Backspace Right");
+    assert_eq!(latex(&ed), "foo");
+    assert_eq!(ed.selection(), None);
+
+    // The arming is one-shot: a key in between disarms it, so the next
+    // Backspace starts over rather than unwrapping by surprise.
+    let mut ed = Editor::new();
+    open(&mut ed);
+    type_script(&mut ed, "Backspace Right Left Backspace");
+    assert_eq!(latex(&ed), "\\left(foo\\right)");
+}
+
+/// ^D deletes forward, and against the closing bracket it unwraps the
+/// same way Backspace does against the opening one.
+#[test]
+fn ctrl_d_deletes_forward_and_unwraps() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, "abc Home C-d");
+    assert_eq!(latex(&ed), "bc", "^D deletes the character ahead");
+
+    let mut ed = Editor::new();
+    type_script(&mut ed, "( foo");
+    // The cursor sits at the end of the contents, against the ')'.
+    type_script(&mut ed, "C-d");
+    assert_eq!(latex(&ed), "\\left(foo\\right)", "the first press deletes");
+    type_script(&mut ed, "C-d");
+    assert_eq!(latex(&ed), "foo");
+    assert_eq!(ed.selection(), Some((0, 3)));
+}
+
+/// A pair with │ middles, and a fused matrix, keep the old behaviour:
+/// there is no single "contents" to lift out of either.
+#[test]
+fn unwrap_leaves_middles_and_grids_alone() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\set x Home Backspace Backspace");
+    assert!(
+        latex(&ed).contains("\\middle|"),
+        "the set-builder bar survived: {}",
+        latex(&ed)
+    );
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\pmatrix x Home Backspace Backspace");
+    assert!(
+        latex(&ed).contains("pmatrix"),
+        "the matrix survived: {}",
+        latex(&ed)
+    );
+}
+
