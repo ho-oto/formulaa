@@ -142,8 +142,12 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
         d.caret = None;
     }
 
-    let width = (block.width() as u16).max(d.width() as u16);
-    let height = d.height() as u16;
+    // Centering and scrolling follow the *formula*, not the painted
+    // canvas: the floating layers (command preview, name-box fenders)
+    // may reach past it, and letting them size the canvas would slide
+    // the formula sideways or upward as they appear and disappear.
+    let width = block.width() as u16;
+    let height = (block.height() as u16).max(1);
     // A formula larger than the canvas scrolls, following the cursor
     // (the free cursor included) with a few cells of margin; one that
     // fits is centered on that axis and its scroll resets. `scroll`
@@ -216,25 +220,18 @@ impl Decor {
         }
     }
 
-    /// Open `n` blank rows at `at` (the preview box opens a gap rather
-    /// than covering the formula).
-    fn open_rows(&mut self, at: usize, n: usize) {
-        while self.lines.len() < at {
+    /// Make row `y` exist. Floating layers paint into rows the formula
+    /// does not have; growing the canvas downward is not a shift, so
+    /// this never moves anything already drawn.
+    fn ensure_row(&mut self, y: usize) {
+        while self.lines.len() <= y {
             self.lines.push(Vec::new());
             self.bg.push(Vec::new());
-        }
-        for _ in 0..n {
-            self.lines.insert(at, Vec::new());
-            self.bg.insert(at, Vec::new());
         }
     }
 
     fn height(&self) -> usize {
         self.lines.len()
-    }
-
-    fn width(&self) -> usize {
-        self.lines.iter().map(|l| l.len()).max().unwrap_or(0)
     }
 }
 
@@ -541,17 +538,18 @@ fn overlay_minibuffer(ed: &Editor, d: &mut Decor) {
     }
     // The command previews what committing would insert, as a small
     // box right under the typed name — a symbol as its one character,
-    // a structure (\frac, \pmatrix …) with its empty ⬚ slots. The box
-    // gets rows of its own: everything below the caret row shifts down
-    // by the preview's height (backgrounds ride along), so the preview
-    // never hides the formula it points into.
+    // a structure (\frac, \pmatrix …) with its empty ⬚ slots. It is a
+    // layer floating above the formula: it covers what is under it and
+    // never reflows anything, so the formula the user is aiming at
+    // stays put while they type (draw_canvas centers on the formula
+    // alone for the same reason).
     if let Some(row) = ed.command_preview_row() {
         use mascii::render::{RenderCtx, render_root};
         let block = render_root(&row, None, &RenderCtx::canonical());
         let at = cy + 1;
-        d.open_rows(at, block.height());
         for (dy, bline) in block.lines.iter().enumerate() {
             let y = at + dy;
+            d.ensure_row(y);
             if !bline.is_empty() {
                 d.widen(y, cx + bline.len() - 1);
             }
@@ -1122,39 +1120,94 @@ mod tests {
         assert!(previewed > 0, "preview box painted");
     }
 
-    /// A preview opened INSIDE a structure shifts the rows below it
-    /// instead of painting over them: the fraction bar survives.
+    /// The preview floats above the formula: opening one inside a
+    /// structure must not move a single formula row, because the user
+    /// is aiming at the layout underneath while they type.
     #[test]
-    fn preview_shifts_rows_instead_of_hiding_them() {
+    fn preview_floats_without_moving_the_formula() {
+        // 1/2 as a real fraction, cursor back up in the numerator: the
+        // preview lands on the bar row, with the denominator below it.
         let mut ed = Editor::new();
-        // 1/(2) with the cursor back in the numerator, then \alpha.
-        for c in "1/2".chars() {
-            ed.input(Key::Char(c), false, false);
-        }
-        ed.input(Key::Up, false, false); // into the numerator
-        let bars_before = {
-            let (root, cursor) = ed.decorated();
-            let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
-            let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
-            block.lines.iter().filter(|l| l.contains(&'─')).count()
-        };
+        type_script_keys(&mut ed, "//1");
+        ed.input(Key::Down, false, false);
+        ed.input(Key::Char('2'), false, false);
+        ed.input(Key::Up, false, false);
         for c in "\\alpha".chars() {
             ed.input(Key::Char(c), false, false);
         }
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
+        let rows = block.lines.len();
+        assert_eq!(rows, 3, "expected numerator/bar/denominator: {:?}", block);
         let mut d = marker_boxes(
             &block,
             &ed.marker_extents(),
             ed.block.is_some().then_some(ed.block_sel),
         );
         overlay_minibuffer(&ed, &mut d);
-        // The α preview is present AND every fraction bar still is.
         let all: String = d.lines.iter().flatten().collect();
-        assert!(all.contains('α'), "{}", all);
-        let bars_after = d.lines.iter().filter(|l| l.contains(&'─')).count();
-        assert_eq!(bars_after, bars_before, "the bar was not painted over");
+        assert!(all.contains('α'), "the preview is drawn: {}", all);
+        // No row was opened, and the denominator is where it was.
+        assert_eq!(d.lines.len(), rows, "rows were opened: {:?}", d.lines);
+        assert!(
+            d.lines[rows - 1].contains(&'2'),
+            "the denominator moved: {:?}",
+            d.lines
+        );
+    }
+
+    /// …and the same at canvas level: the formula keeps its screen
+    /// position when a preview appears, rather than being re-centered
+    /// around the overlay.
+    #[test]
+    fn preview_does_not_move_the_formula_on_screen() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let shot = |ed: &Editor| -> Vec<String> {
+            let mut view = View::default();
+            let mut term = Terminal::new(TestBackend::new(40, 14)).unwrap();
+            term.draw(|f| {
+                draw(f, ed, &mut view);
+            })
+            .unwrap();
+            let buf = term.backend().buffer().clone();
+            (0..buf.area.height)
+                .map(|y| {
+                    (0..buf.area.width)
+                        .map(|x| buf[(x, y)].symbol().to_string())
+                        .collect()
+                })
+                .collect()
+        };
+        // \frac is the demanding case: the typed name runs past the
+        // right edge of a one-row formula and its template is three
+        // rows tall, so a canvas sized from the painted cells would
+        // re-center on both axes.
+        let at = |shot: &[String], ch: char| -> Option<(usize, usize)> {
+            shot.iter()
+                .enumerate()
+                .find_map(|(y, l)| l.find(ch).map(|x| (y, x)))
+        };
+        let mut ed = Editor::new();
+        type_script_keys(&mut ed, "x+y");
+        let before = shot(&ed);
+        let anchor = at(&before, '𝑥').expect("the formula is on screen");
+        for c in "\\frac".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        let after = shot(&ed);
+        assert!(
+            after.iter().any(|l| l.contains('⬚')),
+            "the preview is drawn:\n{}",
+            after.join("\n")
+        );
+        assert_eq!(
+            at(&after, '𝑥'),
+            Some(anchor),
+            "the formula moved when the preview opened:\n{}\n---\n{}",
+            before.join("\n"),
+            after.join("\n")
+        );
     }
 
     /// A label cell under the caret prints its letter: private-use
