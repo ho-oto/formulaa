@@ -49,6 +49,7 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX(fmt も同様)
 | `src/editor/mod.rs` | 構造エディタ(LyX 型カーソル、挿入・移動・削除・選択) |
 | `src/editor/modes.rs` | ^F フリーカーソル・^B ブロック選択(矢印+Enter のみ、ラベル無し)・^T グリッド編集(セル矩形選択+行/列レーンモード `GridSel`)・表示装飾 |
 | `src/editor/command.rs` | **`Edit` enum + `resolve`/`apply`**(綴り→編集の純粋解決と適用の分離)、`\op` 名前ボックス |
+| `src/complete.rs` | **Tab 補完**(綴り列挙・スコア・同一 Edit でのグルーピング・表示)。**データ源(symbols/)には触らず**、テーブルの keys と `resolve`/`preview_row` から導出する — 丸ごと剥がせる単位 |
 | `src/input.rs` | **共有キーマップ**(`Key`/`Effect`/`Editor::input`)。TUI と wasm は変換だけ。木を変えるキーは `Edit` を組んで `apply` に流す(モード・ナビゲーション・文脈キー `// ) ] }` はキー層) |
 | `src/output/latex.rs` | AST → LaTeX(crate ルートの `mascii::latex` で再輸出)。スクリプトを吸収しうるノードは `{…}` で保護(往復のため) |
 | `src/from_latex.rs` | **LaTeX → AST**(第2経路)。自前出力は完全往復(roundtrip ハーネスが検証)、外部 LaTeX(KaTeX/MathJax 方言)は best-effort で不明要素をスキップ。`\tex` ボックス・`tex2aa`・wasm `latex_to_aa` が使う |

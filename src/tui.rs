@@ -22,7 +22,11 @@ const HELP: &str = "^F free move  ^B select block  \\cmd  ^/_ ( [ { // insets  T
 pub fn help_line(ed: &Editor) -> &'static str {
     use mascii::ast::Field;
     if ed.minibuffer.is_some() {
-        return "command: type at the cursor  Enter/Space execute  Esc cancel";
+        return if ed.completion.is_some() {
+            "completion: ↑↓/Tab pick  Enter insert  Esc close the list  (keep typing to narrow)"
+        } else {
+            "command: type at the cursor  Tab complete  Enter/Space execute  Esc cancel"
+        };
     }
     if let Some((kind, _)) = &ed.op_entry {
         return if *kind == mascii::editor::BoxKind::Tex {
@@ -552,6 +556,13 @@ fn overlay_minibuffer(ed: &Editor, d: &mut Decor) {
         d.lines[cy][cx + i] = ch;
         d.bg[cy][cx + i] = Some(color);
     }
+    // Tab opens the completion list, which replaces the preview: it
+    // already shows what each row inserts, next to the spellings.
+    if let Some(list) = &ed.completion {
+        overlay_completion(list, d, cy + 1, cx);
+        d.caret = Some((cy, end));
+        return;
+    }
     // The command previews what committing would insert, as a small
     // box right under the typed name — a symbol as its one character,
     // a structure (\frac, \pmatrix …) with its empty ⬚ slots. It is a
@@ -576,6 +587,46 @@ fn overlay_minibuffer(ed: &Editor, d: &mut Decor) {
         }
     }
     d.caret = Some((cy, end));
+}
+
+/// The completion list, as a box hanging under the typed name the way
+/// an editor's completion popup hangs under the cursor. Like every
+/// overlay here it floats: it covers the formula rather than moving
+/// it, and only grows the canvas downward.
+fn overlay_completion(list: &mascii::complete::Completion, d: &mut Decor, at: usize, cx: usize) {
+    // One column for the symbols, one for the spellings, so the rows
+    // line up into two readable columns.
+    let sym_w = list
+        .items
+        .iter()
+        .map(|i| i.symbol.chars().count())
+        .max()
+        .unwrap_or(0);
+    let rows: Vec<Vec<char>> = list
+        .items
+        .iter()
+        .map(|item| {
+            let pad = sym_w - item.symbol.chars().count();
+            format!(" {}{}  {} ", item.symbol, " ".repeat(pad), item.names)
+                .chars()
+                .collect()
+        })
+        .collect();
+    let width = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    for (i, row) in rows.iter().enumerate() {
+        let y = at + i;
+        d.ensure_row(y);
+        d.widen(y, cx + width.saturating_sub(1));
+        let bg = if i == list.sel {
+            theme::SELECTION_BG
+        } else {
+            theme::PREVIEW_BG
+        };
+        for dx in 0..width {
+            d.lines[y][cx + dx] = row.get(dx).copied().unwrap_or(' ');
+            d.bg[y][cx + dx] = Some(bg);
+        }
+    }
 }
 
 /// A close mark pops its *matching* open; standalone marks in between
@@ -1237,6 +1288,72 @@ mod tests {
             before.join("\n"),
             after.join("\n")
         );
+    }
+
+    /// Tab opens a completion list under the typed name: a symbol
+    /// column, the spellings next to it, and the highlighted row
+    /// picked out — and, like every overlay, the formula stays put.
+    #[test]
+    fn tab_opens_a_completion_popup() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let shot = |ed: &Editor| -> Vec<String> {
+            let mut view = View::default();
+            let mut term = Terminal::new(TestBackend::new(48, 16)).unwrap();
+            term.draw(|f| {
+                draw(f, ed, &mut view);
+            })
+            .unwrap();
+            let buf = term.backend().buffer().clone();
+            (0..buf.area.height)
+                .map(|y| {
+                    (0..buf.area.width)
+                        .map(|x| buf[(x, y)].symbol().to_string())
+                        .collect()
+                })
+                .collect()
+        };
+        let mut ed = Editor::new();
+        type_script_keys(&mut ed, "x+y");
+        let before = shot(&ed);
+        let anchor = before
+            .iter()
+            .enumerate()
+            .find_map(|(y, l)| l.find('𝑥').map(|x| (y, x)))
+            .expect("the formula is on screen");
+        for c in "\\al".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        ed.input(Key::Tab, false, false);
+        let after = shot(&ed);
+        let screen = after.join("\n");
+        assert!(
+            screen.contains("al/p/ha"),
+            "the α row is listed:\n{}",
+            screen
+        );
+        assert!(screen.contains('α'), "the symbol column:\n{}", screen);
+        assert_eq!(
+            after
+                .iter()
+                .enumerate()
+                .find_map(|(y, l)| l.find('𝑥').map(|x| (y, x))),
+            Some(anchor),
+            "the formula moved under the popup:\n{}",
+            screen
+        );
+        // The highlighted row is painted apart from the rest.
+        let mut view = View::default();
+        let mut term = Terminal::new(TestBackend::new(48, 16)).unwrap();
+        term.draw(|f| {
+            draw(f, &ed, &mut view);
+        })
+        .unwrap();
+        let buf = term.backend().buffer().clone();
+        let selected = (0..buf.area.height)
+            .flat_map(|y| (0..buf.area.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| buf[(x, y)].bg == theme::SELECTION_BG)
+            .count();
+        assert!(selected > 0, "no highlighted row:\n{}", screen);
     }
 
     /// A label cell under the caret prints its letter: private-use

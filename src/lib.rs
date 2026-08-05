@@ -1,4 +1,5 @@
 pub mod ast;
+pub mod complete;
 pub mod editor;
 pub mod from_latex;
 pub mod glyphs;

@@ -17,7 +17,7 @@ mod modes;
 
 use modes::gap_shift_cell as modes_gap_shift;
 
-pub use command::{Edit, resolve};
+pub use command::{Edit, preview_row, resolve};
 
 /// One undo step: the formula with the cursor that belonged to it.
 type Snapshot = (Row, Vec<(usize, Field)>, usize);
@@ -78,6 +78,10 @@ pub struct Editor {
     /// Editor-internal clipboard (^C/^X/^V): a sibling-node slice, or
     /// a rectangle of grid cells.
     clip: Clip,
+    /// The open Tab-completion popup (minibuffer only). Built and
+    /// navigated by the key layer; `complete` owns everything about
+    /// what it contains.
+    pub completion: Option<crate::complete::Completion>,
     /// The cursor path at which Backspace/^D armed the enclosing
     /// delimiter for unwrapping. While it matches the cursor, the pair
     /// is highlighted and the next press removes it; every other key
@@ -392,6 +396,7 @@ impl Editor {
             select_path: Vec::new(),
             select_whole: false,
             clip: Clip::Nodes(Vec::new()),
+            completion: None,
             unwrap_armed: None,
         }
     }

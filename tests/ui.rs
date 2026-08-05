@@ -1335,3 +1335,69 @@ fn unwrap_leaves_middles_and_grids_alone() {
     );
 }
 
+/// Tab opens the completion list, the arrows pick a row and Enter
+/// takes it — and the row that lands is the one that was highlighted,
+/// not whatever was typed.
+#[test]
+fn tab_completion_picks_a_row() {
+    // \al + Tab + Enter commits the first row: α.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ a l Tab Enter");
+    assert_eq!(latex(&ed), "\\alpha ");
+    assert!(ed.completion.is_none(), "the popup outlived the pick");
+    assert!(ed.minibuffer.is_none());
+
+    // ↓ moves to the next row, and that row is what Enter inserts.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ a l Tab");
+    let second = ed.completion.as_ref().unwrap().items[1].commit.clone();
+    type_script(&mut ed, "Down Enter");
+    let mut expected = Editor::new();
+    expected.execute(&second);
+    assert_eq!(latex(&ed), latex(&expected), "picked \\{}", second);
+
+    // ↑ from the first row wraps to the last: the list cycles.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ a l Tab Up");
+    let list = ed.completion.as_ref().unwrap();
+    assert_eq!(list.sel, list.items.len() - 1);
+}
+
+/// The popup tracks what is typed, and Esc peels it before the
+/// minibuffer so a stray Tab is one keypress to undo.
+#[test]
+fn tab_completion_follows_the_query() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ a l Tab");
+    assert_eq!(
+        ed.completion.as_ref().unwrap().items[0].symbol,
+        "α",
+        "the α row leads \\al"
+    );
+    // Typing on narrows the list without closing it.
+    type_script(&mut ed, "e p h");
+    let list = ed.completion.as_ref().expect("the popup stayed open");
+    assert_eq!(list.items[0].commit, "aleph");
+    // Backspace widens it again.
+    type_script(&mut ed, "Backspace Backspace Backspace");
+    assert_eq!(ed.completion.as_ref().unwrap().items[0].symbol, "α");
+    // Esc closes the popup, keeping what was typed.
+    type_script(&mut ed, "Esc");
+    assert!(ed.completion.is_none());
+    assert_eq!(ed.minibuffer.as_deref(), Some("al"));
+    // …and a second Esc closes the minibuffer.
+    type_script(&mut ed, "Esc");
+    assert!(ed.minibuffer.is_none());
+}
+
+/// A query nothing matches leaves the popup closed and says so,
+/// rather than opening an empty box.
+#[test]
+fn tab_completion_with_no_matches_says_so() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ q q z z Tab");
+    assert!(ed.completion.is_none());
+    assert!(!ed.message.is_empty(), "no message");
+    // The minibuffer is untouched, so the typing can be fixed.
+    assert_eq!(ed.minibuffer.as_deref(), Some("qqzz"));
+}

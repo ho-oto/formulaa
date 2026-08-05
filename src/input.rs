@@ -129,19 +129,56 @@ impl Editor {
         Some(Effect::None)
     }
 
-    /// Minibuffer (`\command`) mode captures most keys.
+    /// Minibuffer (`\command`) mode captures most keys. Tab opens the
+    /// completion popup; while it is open the arrows pick a row and
+    /// Enter takes it, so the list behaves like any editor's.
     fn minibuffer_keys(&mut self, key: Key) -> Option<Effect> {
         self.minibuffer.is_some().then(|| {
             match key {
-                Key::Esc => self.minibuffer = None,
+                // Esc peels the popup first, then the minibuffer.
+                Key::Esc => {
+                    if self.completion.take().is_none() {
+                        self.minibuffer = None;
+                    }
+                }
+                Key::Tab => match &mut self.completion {
+                    // A second Tab walks the list, like a shell's.
+                    Some(list) => list.step(true),
+                    None => {
+                        let query = self.minibuffer.clone().unwrap_or_default();
+                        match crate::complete::Completion::build(&query) {
+                            Some(list) => self.completion = Some(list),
+                            None => self.info(format!("no completion for \\{}", query)),
+                        }
+                    }
+                },
+                Key::Down | Key::Up if self.completion.is_some() => {
+                    if let Some(list) = &mut self.completion {
+                        list.step(key == Key::Down);
+                    }
+                }
                 Key::Backspace => {
                     let buf = self.minibuffer.as_mut().unwrap();
                     if buf.pop().is_none() {
                         self.minibuffer = None;
                     }
+                    self.refresh_completion();
+                }
+                // With the popup open Enter takes the highlighted row
+                // — the whole point of having picked one.
+                Key::Enter if self.completion.is_some() => {
+                    let picked = self
+                        .completion
+                        .take()
+                        .and_then(|l| l.selected().map(|i| i.commit.clone()));
+                    if let Some(cmd) = picked {
+                        self.minibuffer = None;
+                        self.execute(&cmd);
+                    }
                 }
                 Key::Enter | Key::Char(' ') => {
                     let cmd = self.minibuffer.take().unwrap();
+                    self.completion = None;
                     if cmd.is_empty() && key == Key::Char(' ') {
                         // \ followed by Space: the meaningful space ␣.
                         self.execute("space");
@@ -153,11 +190,25 @@ impl Editor {
                 // table has names like "->", "+-", "oo".
                 Key::Char(c) if c.is_ascii_graphic() => {
                     self.minibuffer.as_mut().unwrap().push(c);
+                    self.refresh_completion();
                 }
                 _ => {}
             }
             Effect::None
         })
+    }
+
+    /// Keep an open popup in step with what has been typed. A query
+    /// that matches nothing closes it rather than leaving a stale list
+    /// under the cursor.
+    fn refresh_completion(&mut self) {
+        if self.completion.is_none() {
+            return;
+        }
+        self.completion = self
+            .minibuffer
+            .clone()
+            .and_then(|q| crate::complete::Completion::build(&q));
     }
 
     /// \op name box: printable keys build the name; any key that is not
