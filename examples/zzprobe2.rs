@@ -26,17 +26,24 @@ fn main() {
         "after click: minibuffer={:?} completion query={:?} items={:?}",
         ed.minibuffer,
         ed.completion.as_ref().map(|c| c.query.clone()),
-        ed.completion.as_ref().map(|c| c.items[c.sel].commit.clone())
+        ed.completion
+            .as_ref()
+            .map(|c| c.items[c.sel].commit.clone())
     );
     // Re-open the minibuffer and press Enter immediately.
     k(&mut ed, Key::Char('\\'));
     println!(
         "after \\: minibuffer={:?} popup={:?}",
         ed.minibuffer,
-        ed.completion.as_ref().map(|c| c.items[c.sel].commit.clone())
+        ed.completion
+            .as_ref()
+            .map(|c| c.items[c.sel].commit.clone())
     );
     k(&mut ed, Key::Enter);
-    println!("after Enter: latex={:?}", mascii::latex::row_to_latex(&mascii::ast::normalize(&ed.root)));
+    println!(
+        "after Enter: latex={:?}",
+        mascii::latex::row_to_latex(&mascii::ast::normalize(&ed.root))
+    );
 
     // ---- Esc, then reopen
     let mut ed2 = Editor::new();
@@ -47,7 +54,11 @@ fn main() {
     k(&mut ed2, Key::Tab);
     k(&mut ed2, Key::Esc);
     k(&mut ed2, Key::Esc);
-    println!("after 2x Esc: mb={:?} popup={:?}", ed2.minibuffer, ed2.completion.is_some());
+    println!(
+        "after 2x Esc: mb={:?} popup={:?}",
+        ed2.minibuffer,
+        ed2.completion.is_some()
+    );
 
     // ---- Tab with an empty query
     let mut ed3 = Editor::new();
@@ -55,10 +66,15 @@ fn main() {
     k(&mut ed3, Key::Tab);
     println!(
         "empty query popup: {:?}",
-        ed3.completion.as_ref().map(|c| (c.query.clone(), c.items.len()))
+        ed3.completion
+            .as_ref()
+            .map(|c| (c.query.clone(), c.items.len()))
     );
     k(&mut ed3, Key::Enter);
-    println!("empty-query Enter: latex={:?}", mascii::latex::row_to_latex(&mascii::ast::normalize(&ed3.root)));
+    println!(
+        "empty-query Enter: latex={:?}",
+        mascii::latex::row_to_latex(&mascii::ast::normalize(&ed3.root))
+    );
 
     // ---- backspace to empty
     let mut ed4 = Editor::new();

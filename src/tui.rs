@@ -1708,5 +1708,4 @@ mod tests {
         let s = shot_at(&ed, 30, 20);
         println!("--- narrow-ish 30x20 ---\n{}\n---", s.join("\n"));
     }
-
 }

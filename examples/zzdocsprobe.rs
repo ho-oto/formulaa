@@ -71,18 +71,31 @@ fn main() {
     );
     trace(
         "pmatrix",
-        &[r"\pmatrix", "x", "Home", "Backspace", "Backspace", "Backspace"],
+        &[
+            r"\pmatrix",
+            "x",
+            "Home",
+            "Backspace",
+            "Backspace",
+            "Backspace",
+        ],
     );
     trace("paren", &["(", "foo", "Home", "Backspace", "Backspace"]);
     trace("paren-ctrl-d", &["(", "foo", "C-d", "C-d"]);
 
     println!("\n== complete(\"al\") ==");
     for (i, it) in mascii::complete::complete("al").iter().enumerate() {
-        println!("  {} sym={:6} names={}  commit={}", i, it.symbol, it.names, it.commit);
+        println!(
+            "  {} sym={:6} names={}  commit={}",
+            i, it.symbol, it.names, it.commit
+        );
     }
     println!("== complete(\"in\") ==");
     for (i, it) in mascii::complete::complete("in").iter().enumerate() {
-        println!("  {} sym={:6} names={}  commit={}", i, it.symbol, it.names, it.commit);
+        println!(
+            "  {} sym={:6} names={}  commit={}",
+            i, it.symbol, it.names, it.commit
+        );
     }
     println!("== complete(\"m\") ==");
     for it in mascii::complete::complete("m").iter() {

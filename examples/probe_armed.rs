@@ -51,7 +51,13 @@ fn dump(label: &str, ed: &Editor) {
     for (y, line) in b.lines.iter().enumerate() {
         let s: String = line
             .iter()
-            .map(|&c| if (c as u32) >= 0xE000 && (c as u32) <= 0xF8FF { '.' } else { c })
+            .map(|&c| {
+                if (c as u32) >= 0xE000 && (c as u32) <= 0xF8FF {
+                    '.'
+                } else {
+                    c
+                }
+            })
             .collect();
         println!("{:>2}| {}", y, s);
     }
@@ -64,7 +70,10 @@ fn dump(label: &str, ed: &Editor) {
     for (y, x, m) in ms {
         println!("   mark ({},{}) {:?}", y, x, m);
     }
-    println!("   cursor path {:?}", cursor.as_ref().map(|(p, c)| (p.clone(), *c)));
+    println!(
+        "   cursor path {:?}",
+        cursor.as_ref().map(|(p, c)| (p.clone(), *c))
+    );
 }
 
 fn main() {

@@ -56,10 +56,7 @@ fn main() {
     println!("names: {}", names.len());
     let nonascii: Vec<&String> = names.iter().filter(|n| !n.is_ascii()).collect();
     println!("non-ascii names: {:?}", nonascii);
-    let unresolved: Vec<&String> = names
-        .iter()
-        .filter(|n| resolve(n).is_none())
-        .collect();
+    let unresolved: Vec<&String> = names.iter().filter(|n| resolve(n).is_none()).collect();
     println!("unresolved ({}): {:?}", unresolved.len(), unresolved);
 
     // Debug-string collisions between genuinely different edits.
@@ -103,7 +100,10 @@ fn main() {
     for q in ["bb", "cal", "frak", "hat", "op", "matrix", "sqrt", "lr"] {
         println!("== {:?} resolve={:?}", q, resolve(q).is_some());
         for it in complete(q).iter().take(4) {
-            println!("   {:>6} | {:<40} commit={}", it.symbol, it.names, it.commit);
+            println!(
+                "   {:>6} | {:<40} commit={}",
+                it.symbol, it.names, it.commit
+            );
         }
     }
     // Look at some real popups.
@@ -112,7 +112,10 @@ fn main() {
     ] {
         println!("--- query {:?}", q);
         for it in complete(q) {
-            println!("   {:>6} | {:<40} commit={}", it.symbol, it.names, it.commit);
+            println!(
+                "   {:>6} | {:<40} commit={}",
+                it.symbol, it.names, it.commit
+            );
         }
     }
 }
