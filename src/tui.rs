@@ -1641,4 +1641,72 @@ mod tests {
             }
         }
     }
+    fn shot_at(ed: &Editor, w: u16, h: u16) -> Vec<String> {
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut view = View::default();
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| {
+            draw(f, ed, &mut view);
+        })
+        .unwrap();
+        let buf = term.backend().buffer().clone();
+        (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn probe_popup_clipped_at_bottom() {
+        let mut ed = Editor::new();
+        type_script_keys(&mut ed, "x+y");
+        for c in "\\a".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        ed.input(Key::Tab, false, false);
+        let n = ed.completion.as_ref().unwrap().items.len();
+        let s = shot_at(&ed, 40, 14);
+        println!("items = {}", n);
+        println!("--- 40x14 ---\n{}\n---", s.join("\n"));
+        // now step the selection to the last item and see if it is visible
+        for _ in 0..n - 1 {
+            ed.input(Key::Down, false, false);
+        }
+        println!("sel = {}", ed.completion.as_ref().unwrap().sel);
+        let s = shot_at(&ed, 40, 14);
+        println!("--- after Down x{} ---\n{}\n---", n - 1, s.join("\n"));
+        let s = shot_at(&ed, 40, 30);
+        println!("--- 40x30 ---\n{}\n---", s.join("\n"));
+    }
+
+    #[test]
+    fn probe_wide_formula_minibuffer() {
+        let mut ed = Editor::new();
+        type_script_keys(&mut ed, &"a+".repeat(20));
+        for c in "\\alpha".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        let s = shot_at(&ed, 24, 10);
+        println!("--- wide 24x10 ---\n{}\n---", s.join("\n"));
+        // and with the completion popup
+        ed.input(Key::Tab, false, false);
+        let s = shot_at(&ed, 24, 10);
+        println!("--- wide + popup ---\n{}\n---", s.join("\n"));
+    }
+
+    #[test]
+    fn probe_popup_right_edge() {
+        let mut ed = Editor::new();
+        type_script_keys(&mut ed, "x+y+z+w+q+r+s+t");
+        for c in "\\al".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        ed.input(Key::Tab, false, false);
+        let s = shot_at(&ed, 30, 20);
+        println!("--- narrow-ish 30x20 ---\n{}\n---", s.join("\n"));
+    }
+
 }
