@@ -19,8 +19,6 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
-      # The library is what the editor extensions build against, so
-      # that is what gets checked (the wasm crates live in their repos).
       - run: cargo check --no-default-features --target wasm32-unknown-unknown
 
   fuzz-nightly:

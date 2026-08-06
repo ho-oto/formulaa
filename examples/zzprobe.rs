@@ -84,7 +84,7 @@ fn main() {
 
     // commit spelling must resolve to the group's edit
     let mut bad_commit = 0;
-    for (_, v) in &by_key {
+    for v in by_key.values() {
         let commit = v
             .iter()
             .map(|(n, _)| n)
