@@ -652,23 +652,26 @@ fn overlay_minibuffer(ed: &Editor, d: &mut Decor, view: Viewport) {
     if let Some(row) = ed.command_preview_row() {
         use mascii::render::{RenderCtx, render_root};
         let block = render_root(&row, None, &RenderCtx::canonical());
-        // …and like the popup it has to land somewhere visible: a
-        // caret on the last screen row (which the scroll clamp makes
-        // ordinary for a tall formula) leaves nothing below it, so the
-        // box goes above instead of off the bottom.
-        let at = match place_below(&view, cy, block.height()) {
+        // The preview is the completion popup with one row, so it is
+        // drawn as one: the same ground, the same blank column each
+        // side, on the same side of the caret. A box that jumped as
+        // Tab was pressed read as two features.
+        let at = match place_below(&view, cy) {
             true => cy + 1,
             false => cy.saturating_sub(block.height()),
         };
+        let box_w = block.lines.iter().map(Vec::len).max().unwrap_or(0) + 2;
         for (dy, bline) in block.lines.iter().enumerate() {
             let y = at + dy;
             d.ensure_row(y);
-            if !bline.is_empty() {
-                d.widen(y, cx + bline.len() - 1);
-            }
-            for (dx, &ch) in bline.iter().enumerate() {
+            d.widen(y, cx + box_w - 1);
+            for dx in 0..box_w {
+                let ch = dx
+                    .checked_sub(1)
+                    .and_then(|i| bline.get(i).copied())
+                    .unwrap_or(' ');
                 d.lines[y][cx + dx] = ch;
-                d.bg[y][cx + dx] = Some(theme::PREVIEW_BG);
+                d.bg[y][cx + dx] = Some(theme::POPUP_BG);
             }
         }
     }
@@ -683,15 +686,20 @@ fn overlay_minibuffer(ed: &Editor, d: &mut Decor, view: Viewport) {
 /// and scrolls its own window so the highlighted row is always drawn.
 /// Without that last part the arrows are silent once the selection
 /// passes the bottom of the box, which is worse than no popup.
-/// Does a floating box of `rows` rows fit below the caret? Room is
-/// whichever is smaller — the screen rows on that side, or the canvas
-/// rows, since the canvas is painted below a centering pad the Decor
-/// cannot address. Below wins ties: that is where a reader looks.
-fn place_below(view: &Viewport, cy: usize, rows: usize) -> bool {
+/// Which side of the caret a floating box opens on. Room is whichever
+/// is smaller — the screen rows on that side, or the canvas rows, since
+/// the canvas is painted below a centering pad the Decor cannot
+/// address. Below wins ties: that is where a reader looks.
+///
+/// The box's own height is deliberately not an input. The preview and
+/// the completion list are the same box at different sizes — one
+/// replaces the other as Tab is pressed — so letting height decide
+/// would flip the box to the other side of the caret mid-thought.
+fn place_below(view: &Viewport, cy: usize) -> bool {
     let caret_row = view.row_on_screen(cy).unwrap_or(0);
     let below = view.height.saturating_sub(caret_row + 1);
     let above = caret_row.min(cy);
-    below >= rows || below >= above || above == 0
+    below >= above || above == 0
 }
 
 fn overlay_completion(
@@ -730,7 +738,7 @@ fn overlay_completion(
     let caret_row = view.row_on_screen(cy).unwrap_or(0);
     let below = view.height.saturating_sub(caret_row + 1);
     let above = caret_row.min(cy);
-    let downward = place_below(&view, cy, rows.len());
+    let downward = place_below(&view, cy);
     let room = if downward { below } else { above }.max(1);
     let shown = rows.len().min(room);
     // Scroll the window so the selection is inside it.
@@ -764,9 +772,9 @@ fn overlay_completion(
         d.ensure_row(y);
         d.widen(y, x0 + box_w.saturating_sub(1));
         let bg = if start + i == list.sel {
-            theme::SELECTION_BG
+            theme::POPUP_SEL_BG
         } else {
-            theme::PREVIEW_BG
+            theme::POPUP_BG
         };
         for dx in 0..box_w {
             let trimmed = dx + 1 == box_w && row.len() > box_w;
@@ -1315,7 +1323,7 @@ mod tests {
         let painted = d.bg[cy + 1..]
             .iter()
             .flatten()
-            .filter(|c| **c == Some(theme::PREVIEW_BG))
+            .filter(|c| **c == Some(theme::POPUP_BG))
             .count();
         assert!(painted > 0, "preview cell painted");
         // Structural command: the template floats below the caret.
@@ -1346,7 +1354,7 @@ mod tests {
         let previewed = d.bg[1..]
             .iter()
             .flatten()
-            .filter(|c| **c == Some(theme::PREVIEW_BG))
+            .filter(|c| **c == Some(theme::POPUP_BG))
             .count();
         assert!(previewed > 0, "preview box painted");
     }
@@ -1502,7 +1510,7 @@ mod tests {
         let buf = term.backend().buffer().clone();
         let selected = (0..buf.area.height)
             .flat_map(|y| (0..buf.area.width).map(move |x| (x, y)))
-            .filter(|&(x, y)| buf[(x, y)].bg == theme::SELECTION_BG)
+            .filter(|&(x, y)| buf[(x, y)].bg == theme::POPUP_SEL_BG)
             .count();
         assert!(selected > 0, "no highlighted row:\n{}", screen);
     }
@@ -1572,6 +1580,57 @@ mod tests {
             first,
             screen
         );
+    }
+
+    /// The preview and the completion list are one box at two sizes:
+    /// same neutral ground, same blank column each side, same side of
+    /// the caret and same starting column — pressing Tab must not make
+    /// the box jump. (The list's highlighted row is the one thing
+    /// colored, because it is the one thing that is a choice.)
+    #[test]
+    fn the_preview_and_the_popup_are_the_same_box() {
+        let where_is = |ed: &Editor, w: u16, h: u16, ch: char| -> Option<(usize, usize)> {
+            let mut view = View::default();
+            let mut term =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
+            term.draw(|f| {
+                draw(f, ed, &mut view);
+            })
+            .unwrap();
+            let buf = term.backend().buffer().clone();
+            (0..buf.area.height).find_map(|y| {
+                (0..buf.area.width).find_map(|x| {
+                    let cell = &buf[(x, y)];
+                    (cell.symbol() == ch.to_string()
+                        && (cell.bg == theme::POPUP_BG || cell.bg == theme::POPUP_SEL_BG))
+                        .then_some((y as usize, x as usize))
+                })
+            })
+        };
+        // Same place, same ground, opening downward…
+        let mut ed = Editor::new();
+        type_script_keys(&mut ed, "x+y");
+        for c in "\\alpha".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        let preview = where_is(&ed, 34, 12, 'α').expect("the preview is drawn on its own ground");
+        ed.input(Key::Tab, false, false);
+        let popup = where_is(&ed, 34, 12, 'α').expect("the popup row is drawn");
+        assert_eq!(preview, popup, "Tab moved the box");
+
+        // …and the same when there is no room below, so both flip up.
+        let mut ed = Editor::new();
+        for _ in 0..8 {
+            ed.input(Key::Char('x'), false, false);
+            ed.input(Key::Enter, false, false);
+        }
+        for c in "\\alpha".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        let preview = where_is(&ed, 34, 8, 'α').expect("the preview lands on screen");
+        ed.input(Key::Tab, false, false);
+        let popup = where_is(&ed, 34, 8, 'α').expect("the popup lands on screen");
+        assert_eq!(preview, popup, "Tab flipped the box to the other side");
     }
 
     /// A typed overlay is content, not decoration: centering it off the

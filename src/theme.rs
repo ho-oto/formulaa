@@ -13,7 +13,7 @@
 //!   frame, insert ghosts, previews, normal messages.
 //! - **赤 (error)** — unknown commands, error messages.
 //! - **中立灰 (chrome)** — help line, borders, the ␣ glyph, unlabeled
-//!   markers; never carries meaning.
+//!   markers, the ground under a floating box; never carries meaning.
 //!
 //! Label glyphs are black on the bright green marker background.
 
@@ -84,8 +84,13 @@ pub const BOX_CURSOR_BG: Color = Color::Green;
 /// The minibuffer overlay while the typed name is not a known command.
 pub const MINIBUF_BAD_BG: Color = RED_BG;
 
-// ----- 中立灰 -----
+// ----- floating boxes (preview / completion) -----
 
-/// The live preview of what committing the command would insert —
-/// neutral ground: it is information, not yet an action.
-pub const PREVIEW_BG: Color = GRAY_BG;
+/// The ground a floating box sits on — the command preview and the
+/// completion list alike. Neutral: the box is information, and the
+/// formula underneath is what the user is working on.
+pub const POPUP_BG: Color = GRAY_BG;
+
+/// …with the list's highlighted row picked out of it. The only thing
+/// on that ground that is a choice, so the only thing colored.
+pub const POPUP_SEL_BG: Color = PURPLE;
