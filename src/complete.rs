@@ -98,6 +98,18 @@ const STRUCTURAL: &[&str] = &[
     "text",
     "tex",
     "array",
+    // The negation toggle, and the alternative spellings `resolve`
+    // accepts as extra patterns on an arm. A spelling that resolves
+    // but is missing here is worse than one nobody can complete: the
+    // popup offers a *different* command under it, and Enter takes
+    // that one.
+    "!",
+    "Vert",
+    "delim",
+    "operatorname",
+    "operatorname*",
+    "limits",
+    "latex",
 ];
 
 /// Every spelling the command layer knows, straight from the tables'
@@ -225,6 +237,15 @@ fn shape(cmd: &str) -> String {
         }
         // The name boxes have nothing to insert until they are filled.
         Some(Edit::OpenBox(_)) => return "…".into(),
+        // Commands that act on what is already there rather than
+        // inserting something: the cell shows what they do to it,
+        // because an empty cell reads as "this row is broken".
+        Some(Edit::Mid) => return crate::glyphs::MID.to_string(),
+        Some(Edit::Negate) => return "≠".into(),
+        Some(Edit::AddRow) => return "+─".into(),
+        Some(Edit::AddCol) => return "+│".into(),
+        Some(Edit::DelRow) => return "−─".into(),
+        Some(Edit::DelCol) => return "−│".into(),
         _ => {}
     }
     if let Some(row) = preview_row(cmd) {
@@ -240,7 +261,6 @@ fn shape(cmd: &str) -> String {
             }
         }
     }
-    // Grid surgery (\addrow …) changes a grid rather than inserting.
     String::new()
 }
 
@@ -314,11 +334,70 @@ mod tests {
     use super::*;
 
     /// The structural list is the only hand-written part of the
-    /// vocabulary: every entry must still be a command.
+    /// vocabulary, so it is checked in both directions. List -> resolve
+    /// keeps dead entries out. Resolve -> list is the one that matters
+    /// to a user: completing a command must never change which command
+    /// it is, and a spelling the popup does not know gets silently
+    /// replaced by whatever ranked first.
     #[test]
     fn structural_commands_all_resolve() {
         for &cmd in STRUCTURAL {
-            assert!(resolve(cmd).is_some(), "\\{} no longer resolves", cmd);
+            let edit = resolve(cmd);
+            assert!(edit.is_some(), "\\{} no longer resolves", cmd);
+            let offered = complete(cmd);
+            let first = offered
+                .first()
+                .unwrap_or_else(|| panic!("\\{} completes to nothing", cmd));
+            assert_eq!(
+                resolve(&first.commit),
+                edit,
+                "\\{} + Tab + Enter would run \\{}",
+                cmd,
+                first.commit
+            );
+        }
+    }
+
+    /// Completing a command must never change which command it is.
+    /// The spellings here are written out rather than read from
+    /// `STRUCTURAL`, because a list that checks itself cannot notice
+    /// one of its own entries going missing — which is exactly how
+    /// `\\!` came to offer ∄.
+    #[test]
+    fn completing_a_command_keeps_its_meaning() {
+        for cmd in [
+            "!",
+            "Vert",
+            "delim",
+            "operatorname",
+            "operatorname*",
+            "limits",
+            "latex",
+            "frac",
+            "sqrt",
+            "cbrt",
+            "norm",
+            "mid",
+            "op*",
+            "text",
+            "pmatrix",
+            "alpha",
+            "int",
+            "xto",
+        ] {
+            let edit = resolve(cmd);
+            assert!(edit.is_some(), "\\{} is not a command", cmd);
+            let first = complete(cmd)
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| panic!("\\{} completes to nothing", cmd));
+            assert_eq!(
+                resolve(&first.commit),
+                edit,
+                "\\{} + Tab + Enter would run \\{} instead",
+                cmd,
+                first.commit
+            );
         }
     }
 
@@ -337,9 +416,16 @@ mod tests {
         // and the prefix match outranks the substring one.
         let items = complete("in");
         let names: Vec<&str> = items.iter().map(|i| i.names.as_str()).collect();
-        let notin = items.iter().position(|i| i.symbol == "∉");
-        let int = items.iter().position(|i| i.commit == "int");
-        assert!(notin.is_some(), "no ∉ among {:?}", names);
+        // `None < Some(_)` in Rust, so both positions must be pinned
+        // before they are compared — otherwise a missing \int passes.
+        let notin = items
+            .iter()
+            .position(|i| i.symbol == "∉")
+            .unwrap_or_else(|| panic!("no ∉ among {:?}", names));
+        let int = items
+            .iter()
+            .position(|i| i.commit == "int")
+            .unwrap_or_else(|| panic!("no \\int among {:?}", names));
         assert!(int < notin, "\\int should outrank \\!in: {:?}", names);
     }
 
@@ -359,9 +445,10 @@ mod tests {
         assert!(frac.symbol.contains('─'), "frac shape: {:?}", frac.symbol);
         let sqrt = complete("sqrt").into_iter().next().unwrap();
         assert!(sqrt.symbol.contains('√'), "sqrt shape: {:?}", sqrt.symbol);
-        // Every row says something.
+        // Every row shows what it inserts — `names` can never be
+        // empty, so asserting on it would pin nothing.
         for item in complete("m") {
-            assert!(!item.names.is_empty(), "{:?}", item);
+            assert!(!item.symbol.is_empty(), "{:?}", item);
         }
     }
 

@@ -462,24 +462,28 @@ impl Editor {
         self.free = None;
         self.block = None;
         self.select_anchor = None;
+        // Every transient the key layer would have cleared: a click is
+        // an exit from all of them. The completion popup in particular
+        // is invisible while the minibuffer is closed, so an orphaned
+        // one would spring back — with its old query — the next time
+        // `\` is pressed, and Enter would commit a row for a query the
+        // user can no longer see.
+        self.completion = None;
+        self.unwrap_armed = None;
         // Clicking away from an open name box commits it, like the
         // edge-exit does — the box must not follow the cursor to the
         // clicked position.
         if self.op_entry.is_some() {
             self.op_commit();
         }
-        // A command preview opens rows the coordinate probe knows
-        // nothing about, so a click during one cannot be mapped: the
-        // first click dismisses the minibuffer, the next one lands.
-        // (Without a preview the overlay is layout-neutral and the
-        // click can proceed.)
+        // The minibuffer closes on a click. It used to swallow the
+        // click as well whenever a preview was open, because the
+        // preview opened rows the coordinate probe knew nothing about
+        // — the preview floats now, so the coordinates are sound and
+        // the click lands where it was aimed.
         if self.minibuffer.is_some() {
-            let shifted = self.command_preview_row().is_some();
             self.minibuffer = None;
             self.clear_message();
-            if shifted {
-                return;
-            }
         }
         if let Some((pos, _)) = self.nearest_position(x, y) {
             self.path = pos.0;
@@ -935,8 +939,13 @@ impl Editor {
         };
         let parent = &self.path[..self.path.len() - 1];
         match row_at(&self.root, parent).get(i)? {
+            // An empty pair has nothing to lift out, and Backspace
+            // already deletes it whole in one press — arming would only
+            // add a keystroke.
             Node::Delim { mids: 0, segs, .. }
-                if segs.len() == 1 && !matches!(segs[0][..], [Node::Array { .. }]) =>
+                if segs.len() == 1
+                    && !segs[0].is_empty()
+                    && !matches!(segs[0][..], [Node::Array { .. }]) =>
             {
                 Some(i)
             }

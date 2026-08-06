@@ -134,6 +134,10 @@ impl Editor {
     /// Enter takes it, so the list behaves like any editor's.
     fn minibuffer_keys(&mut self, key: Key) -> Option<Effect> {
         self.minibuffer.is_some().then(|| {
+            // Every other key layer clears the status line first; this
+            // one used to keep a "no completion for \x" notice up while
+            // the very next keystroke opened a populated list.
+            self.clear_message();
             match key {
                 // Esc peels the popup first, then the minibuffer.
                 Key::Esc => {
@@ -164,9 +168,16 @@ impl Editor {
                     }
                     self.refresh_completion();
                 }
-                // With the popup open Enter takes the highlighted row
-                // — the whole point of having picked one.
-                Key::Enter if self.completion.is_some() => {
+                // With a row highlighted, both commit keys take it —
+                // the whole point of having picked one. An empty list
+                // falls through to the ordinary commit below.
+                Key::Enter | Key::Char(' ')
+                    if self
+                        .completion
+                        .as_ref()
+                        .and_then(|l| l.selected())
+                        .is_some() =>
+                {
                     let picked = self
                         .completion
                         .take()
@@ -199,16 +210,21 @@ impl Editor {
     }
 
     /// Keep an open popup in step with what has been typed. A query
-    /// that matches nothing closes it rather than leaving a stale list
-    /// under the cursor.
+    /// that matches nothing leaves the popup open but empty rather than
+    /// closing it: the list was asked for, and typing a letter too many
+    /// should not mean Tab has to be pressed again after backspacing.
+    /// An empty list draws nothing and commits nothing.
     fn refresh_completion(&mut self) {
         if self.completion.is_none() {
             return;
         }
-        self.completion = self
-            .minibuffer
-            .clone()
-            .and_then(|q| crate::complete::Completion::build(&q));
+        self.completion = self.minibuffer.clone().map(|q| {
+            crate::complete::Completion::build(&q).unwrap_or(crate::complete::Completion {
+                query: q,
+                items: Vec::new(),
+                sel: 0,
+            })
+        });
     }
 
     /// \op name box: printable keys build the name; any key that is not
@@ -290,7 +306,18 @@ impl Editor {
     fn grid_keys(&mut self, key: Key, shift: bool, ctrl: bool) -> Option<Effect> {
         let gs = self.grid?;
         if ctrl {
-            return None;
+            // Ctrl chords are the base layer's (^C/^X/^V act on cells
+            // through `paste`'s shape routing). ^D is the exception:
+            // it is a delete, and a node-level delete inside a grid
+            // would edit a cell's contents while the selection on
+            // screen is a rectangle of cells.
+            return match key {
+                Key::Char('d') => {
+                    self.grid_clear_cells();
+                    Some(Effect::None)
+                }
+                _ => None,
+            };
         }
         if self.enclosing_array().is_none() {
             self.grid = None;

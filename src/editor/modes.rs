@@ -803,6 +803,10 @@ impl Editor {
     }
 
     pub fn undo(&mut self) {
+        // The pending unwrap belongs to the tree that is being
+        // replaced: `input` returns before the key layer's one-shot
+        // take, so it would otherwise survive onto a different tree.
+        self.unwrap_armed = None;
         let Some((root, path, col)) = self.undo.pop() else {
             self.info("nothing to undo");
             return;
@@ -820,6 +824,10 @@ impl Editor {
     }
 
     pub fn redo(&mut self) {
+        // The pending unwrap belongs to the tree that is being
+        // replaced: `input` returns before the key layer's one-shot
+        // take, so it would otherwise survive onto a different tree.
+        self.unwrap_armed = None;
         let Some((root, path, col)) = self.redo.pop() else {
             self.info("nothing to redo");
             return;

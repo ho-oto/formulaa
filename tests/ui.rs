@@ -1319,20 +1319,47 @@ fn ctrl_d_deletes_forward_and_unwraps() {
 /// there is no single "contents" to lift out of either.
 #[test]
 fn unwrap_leaves_middles_and_grids_alone() {
+    // Both halves must actually reach the guard: the cursor has to sit
+    // at the start of the delimiter's own segment, or the presses never
+    // consult `unwrappable` and the assertions pin nothing. The
+    // outcome that separates guarded from armed is the SECOND press —
+    // an armed pair unwraps on it.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\set x Home Backspace Backspace");
+    type_script(&mut ed, r"\set x Home");
+    assert_eq!(ed.col, 0, "cursor is against the opening brace");
+    assert!(
+        matches!(ed.path.last(), Some((_, mascii::ast::Field::Seg(0)))),
+        "cursor is in the delimiter's segment: {:?}",
+        ed.path
+    );
+    type_script(&mut ed, "Backspace Backspace");
     assert!(
         latex(&ed).contains("\\middle|"),
         "the set-builder bar survived: {}",
         latex(&ed)
     );
+
+    // A fused grid: the cursor starts in the first cell, so step out
+    // to the segment before pressing — otherwise Backspace never
+    // reaches the delimiter at all.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\pmatrix x Home Backspace Backspace");
+    type_script(&mut ed, r"\pmatrix x Tab Home");
+    assert!(
+        matches!(ed.path.last(), Some((_, mascii::ast::Field::Seg(0)))),
+        "cursor is in the delimiter's segment: {:?}",
+        ed.path
+    );
+    type_script(&mut ed, "Backspace Backspace");
     assert!(
         latex(&ed).contains("pmatrix"),
         "the matrix survived: {}",
         latex(&ed)
     );
+
+    // …and the empty pair still goes in one press, as it always did.
+    let mut ed = Editor::new();
+    type_script(&mut ed, "x ( Backspace");
+    assert_eq!(latex(&ed), "x", "an empty pair needs one Backspace");
 }
 
 /// Tab opens the completion list, the arrows pick a row and Enter
@@ -1447,4 +1474,124 @@ fn block_select_paints_only_a_step_in_each_direction() {
         type_script(&mut ed, "Up");
     }
     assert_eq!(painted(&ed), vec![depth - 2, depth - 1]);
+}
+
+/// The pending unwrap is a one-shot that belongs to the tree and the
+/// place it was armed in. Anything that walks away from either must
+/// disarm it, or the display keeps promising an unwrap that the next
+/// Backspace performs on a tree the user never armed.
+#[test]
+fn arming_does_not_survive_undo_or_a_click() {
+    // ^Z returns from `input` before the key layer's one-shot take, so
+    // it has to clear the arming itself. The undo has to land back on
+    // the armed spot for the staleness to bite: same path, column 0,
+    // and a pair that still has contents to lift out.
+    let mut ed = Editor::new();
+    type_script(&mut ed, "( a Home x Home Backspace C-z Backspace");
+    assert!(
+        latex(&ed).contains("\\left("),
+        "undo left the pair armed, so one Backspace unwrapped it: {}",
+        latex(&ed)
+    );
+
+    // A mouse click moves the cursor without passing through the key
+    // layer at all. The arming must go with it — otherwise the pair
+    // stays lit while Backspace does something else entirely.
+    let lit = |ed: &Editor| {
+        use mascii::glyphs::Mark;
+        fn walk(row: &mascii::ast::Row, out: &mut bool) {
+            for n in row {
+                if let mascii::ast::Node::Sym(c) = n
+                    && matches!(Mark::decode(*c), Some(Mark::Delims { .. }))
+                {
+                    *out = true;
+                }
+                for f in n.fields() {
+                    walk(n.field(f), out);
+                }
+            }
+        }
+        let (root, _) = ed.decorated();
+        let mut found = false;
+        walk(&root, &mut found);
+        found
+    };
+    // The click has to land INSIDE the same segment: a click that
+    // leaves the path makes decorate_plain's path test fail on its own,
+    // so it would pass whether or not the arming was cleared.
+    let mut ed = Editor::new();
+    type_script(&mut ed, "( foo Home Backspace");
+    let armed_path = ed.path.clone();
+    assert!(lit(&ed), "the pair should be lit after arming");
+    ed.click(3, 0); // still inside (foo), one cell along
+    assert_eq!(ed.path, armed_path, "the click stayed in the segment");
+    assert_ne!(ed.col, 0, "…but moved off the armed column");
+    assert!(!lit(&ed), "a click left the pair lit up as armed");
+}
+
+/// A click also closes the completion popup. It is invisible while the
+/// minibuffer is shut, so an orphaned one springs back on the next `\`
+/// — with the old query — and Enter commits a row for something the
+/// user can no longer see.
+#[test]
+fn a_click_closes_the_completion_popup() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ a l Tab");
+    assert!(ed.completion.is_some());
+    ed.click(0, 0);
+    assert!(ed.completion.is_none(), "the popup outlived the click");
+    // …so `\` + Enter is an empty command again, not a stale pick.
+    type_script(&mut ed, r"\ Enter");
+    assert_eq!(latex(&ed), "");
+}
+
+/// The popup is a live list, not a snapshot: both commit keys take the
+/// highlighted row, a query that matches nothing leaves it open so
+/// backspacing brings the list back, and the status line does not keep
+/// a notice from a keystroke ago.
+#[test]
+fn the_popup_tracks_the_query_and_both_commit_keys_take_it() {
+    // Space commits the highlighted row, exactly as Enter does.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ a l Tab Down");
+    let picked = ed
+        .completion
+        .as_ref()
+        .unwrap()
+        .selected()
+        .unwrap()
+        .commit
+        .clone();
+    type_script(&mut ed, "Space");
+    let mut expected = Editor::new();
+    expected.execute(&picked);
+    assert_eq!(latex(&ed), latex(&expected), "Space took \\{}", picked);
+
+    // Typing past every match keeps the popup open (empty), so
+    // backspacing restores the list instead of needing another Tab.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ a l Tab");
+    assert!(!ed.completion.as_ref().unwrap().items.is_empty());
+    type_script(&mut ed, "q q z");
+    assert!(
+        ed.completion.as_ref().is_some_and(|l| l.items.is_empty()),
+        "the popup closed on a non-matching query"
+    );
+    type_script(&mut ed, "Backspace Backspace Backspace");
+    assert!(
+        ed.completion.as_ref().is_some_and(|l| !l.items.is_empty()),
+        "backspacing did not bring the list back"
+    );
+
+    // An empty list commits the typed text rather than nothing.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ a l Tab q q z Enter");
+    assert!(ed.message.contains("unknown command"), "{:?}", ed.message);
+
+    // …and the "no completion" notice does not outlive its keystroke.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ q q z z Tab");
+    assert!(!ed.message.is_empty(), "no notice");
+    type_script(&mut ed, "Backspace");
+    assert!(ed.message.is_empty(), "stale notice: {:?}", ed.message);
 }

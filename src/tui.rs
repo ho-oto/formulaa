@@ -135,23 +135,31 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
         }
     }
 
-    overlay_minibuffer(ed, &mut d);
-    // With a selection active the caret cell is not drawn: the colored
-    // range alone says what is selected (a reverse-video cell at one
-    // end reads as "maybe included"). Scrolling still follows the
-    // moving end, and the minibuffer/name-box overlays keep the caret
-    // they anchor on.
-    let follow = d.caret;
-    if ed.selection().is_some() && ed.minibuffer.is_none() && ed.op_entry.is_none() {
-        d.caret = None;
-    }
-
     // Centering and scrolling follow the *formula*, not the painted
-    // canvas: the floating layers (command preview, name-box fenders)
-    // may reach past it, and letting them size the canvas would slide
-    // the formula sideways or upward as they appear and disappear.
+    // canvas: the floating layers (command preview, completion popup,
+    // name-box fenders) may reach past it, and letting them size the
+    // canvas would slide the formula sideways or upward as they appear
+    // and disappear.
+    //
+    // They are settled *before* the overlays are painted, because the
+    // completion popup has to know where on screen it is about to sit
+    // to decide which way to open. Nothing an overlay does moves them:
+    // the caret's row never changes, and the column it ends at is
+    // predictable (the minibuffer draws `\name` from the caret).
     let width = block.width() as u16;
     let height = (block.height() as u16).max(1);
+    let follow = d.caret;
+    // The *typed* overlays — the `\command` minibuffer and the \op name
+    // box — are content the user is reading as they type it, so the
+    // view has to reach them. The floating ones (preview, completion
+    // popup) deliberately do not count: letting them size the canvas is
+    // what used to slide the formula about while typing.
+    let typed_end = follow.map(|(_, cx)| match (&ed.minibuffer, &ed.op_entry) {
+        (Some(buf), _) => cx + 1 + buf.chars().count(),
+        // The box draws its content between [ ] fenders.
+        (_, Some((_, buf))) => cx + buf.chars().count() + 2,
+        _ => cx,
+    });
     // A formula larger than the canvas scrolls, following the cursor
     // (the free cursor included) with a few cells of margin; one that
     // fits is centered on that axis and its scroll resets. `scroll`
@@ -172,18 +180,46 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
         *off = (*off).min(size as usize - vis);
         0
     };
-    let left = scroll(
-        width,
-        inner.width,
-        follow.map(|(_, cx)| cx),
-        &mut view.scroll_x,
-    );
+    // Horizontally the two roles split: the formula alone is what gets
+    // centered, but the reach that has to stay on screen includes the
+    // typed overlay — otherwise a long \text box runs off the right
+    // edge with no keystroke able to bring it back. Centering it away
+    // is the same bug as scrolling it away: every canvas column is
+    // painted at `left + col`, so the pad has to leave room for the
+    // reach, not just for the formula.
+    let reach = typed_end.map_or(width, |e| width.max(e as u16 + 1));
+    let left = if reach <= inner.width {
+        view.scroll_x = 0;
+        (inner.width.saturating_sub(width) / 2).min(inner.width.saturating_sub(reach))
+    } else {
+        scroll(reach, inner.width, typed_end, &mut view.scroll_x)
+    };
     let top = scroll(
         height,
         inner.height,
         follow.map(|(cy, _)| cy),
         &mut view.scroll_y,
     );
+
+    overlay_minibuffer(
+        ed,
+        &mut d,
+        Viewport {
+            left,
+            top,
+            scroll_x: view.scroll_x,
+            scroll_y: view.scroll_y,
+            width: inner.width as usize,
+            height: inner.height as usize,
+        },
+    );
+    // With a selection active the caret cell is not drawn: the colored
+    // range alone says what is selected (a reverse-video cell at one
+    // end reads as "maybe included"). The minibuffer/name-box overlays
+    // keep the caret they anchor on.
+    if ed.selection().is_some() && ed.minibuffer.is_none() && ed.op_entry.is_none() {
+        d.caret = None;
+    }
 
     let mut text: Vec<Line> = Vec::with_capacity(top as usize + d.height());
     for _ in 0..top {
@@ -508,7 +544,46 @@ fn marker_boxes(
 /// moving them (zero layout shift — the eye stays on the formula), and
 /// the caret sits after the text. With a selection active the caret is
 /// at the selection's moving end, so the overlay shows next to it.
-fn overlay_minibuffer(ed: &Editor, d: &mut Decor) {
+/// Where the canvas sits on screen, so a floating layer can tell how
+/// much room it has: canvas cell (y, x) is drawn at screen
+/// (top + y - scroll_y, left + x - scroll_x), inside `width`x`height`.
+#[derive(Clone, Copy)]
+struct Viewport {
+    left: u16,
+    top: u16,
+    scroll_x: usize,
+    scroll_y: usize,
+    width: usize,
+    height: usize,
+}
+
+impl Viewport {
+    /// A viewport with room to spare, for tests that are about what an
+    /// overlay draws rather than where it fits.
+    #[cfg(test)]
+    fn unbounded() -> Viewport {
+        Viewport {
+            left: 0,
+            top: 0,
+            scroll_x: 0,
+            scroll_y: 0,
+            width: 200,
+            height: 200,
+        }
+    }
+
+    /// The screen row a canvas row lands on (None when scrolled off).
+    fn row_on_screen(&self, y: usize) -> Option<usize> {
+        y.checked_sub(self.scroll_y).map(|r| r + self.top as usize)
+    }
+
+    /// The screen column a canvas column lands on.
+    fn col_on_screen(&self, x: usize) -> usize {
+        x.saturating_sub(self.scroll_x) + self.left as usize
+    }
+}
+
+fn overlay_minibuffer(ed: &Editor, d: &mut Decor, view: Viewport) {
     // The in-place name box (\op \rm \text \tex) overlays exactly
     // like the minibuffer: content cells at the cursor, caret at the
     // box's own cursor. Drawing it as cells (not AST nodes) keeps the
@@ -563,7 +638,7 @@ fn overlay_minibuffer(ed: &Editor, d: &mut Decor) {
     // Tab opens the completion list, which replaces the preview: it
     // already shows what each row inserts, next to the spellings.
     if let Some(list) = &ed.completion {
-        overlay_completion(list, d, cy + 1, cx);
+        overlay_completion(list, d, (cy, cx), view);
         d.caret = Some((cy, end));
         return;
     }
@@ -577,7 +652,14 @@ fn overlay_minibuffer(ed: &Editor, d: &mut Decor) {
     if let Some(row) = ed.command_preview_row() {
         use mascii::render::{RenderCtx, render_root};
         let block = render_root(&row, None, &RenderCtx::canonical());
-        let at = cy + 1;
+        // …and like the popup it has to land somewhere visible: a
+        // caret on the last screen row (which the scroll clamp makes
+        // ordinary for a tall formula) leaves nothing below it, so the
+        // box goes above instead of off the bottom.
+        let at = match place_below(&view, cy, block.height()) {
+            true => cy + 1,
+            false => cy.saturating_sub(block.height()),
+        };
         for (dy, bline) in block.lines.iter().enumerate() {
             let y = at + dy;
             d.ensure_row(y);
@@ -593,11 +675,35 @@ fn overlay_minibuffer(ed: &Editor, d: &mut Decor) {
     d.caret = Some((cy, end));
 }
 
-/// The completion list, as a box hanging under the typed name the way
-/// an editor's completion popup hangs under the cursor. Like every
-/// overlay here it floats: it covers the formula rather than moving
-/// it, and only grows the canvas downward.
-fn overlay_completion(list: &mascii::complete::Completion, d: &mut Decor, at: usize, cx: usize) {
+/// The completion list, as a box hanging off the typed name the way an
+/// editor's completion popup hangs off the cursor. Like every overlay
+/// here it floats — it covers the formula rather than moving it — and
+/// it places itself to stay on screen: it opens upward when there is
+/// more room above, shifts left rather than run off the right edge,
+/// and scrolls its own window so the highlighted row is always drawn.
+/// Without that last part the arrows are silent once the selection
+/// passes the bottom of the box, which is worse than no popup.
+/// Does a floating box of `rows` rows fit below the caret? Room is
+/// whichever is smaller — the screen rows on that side, or the canvas
+/// rows, since the canvas is painted below a centering pad the Decor
+/// cannot address. Below wins ties: that is where a reader looks.
+fn place_below(view: &Viewport, cy: usize, rows: usize) -> bool {
+    let caret_row = view.row_on_screen(cy).unwrap_or(0);
+    let below = view.height.saturating_sub(caret_row + 1);
+    let above = caret_row.min(cy);
+    below >= rows || below >= above || above == 0
+}
+
+fn overlay_completion(
+    list: &mascii::complete::Completion,
+    d: &mut Decor,
+    caret: (usize, usize),
+    view: Viewport,
+) {
+    let (cy, cx) = caret;
+    if list.items.is_empty() {
+        return;
+    }
     // One column for the symbols, one for the spellings, so the rows
     // line up into two readable columns.
     let sym_w = list
@@ -616,19 +722,60 @@ fn overlay_completion(list: &mascii::complete::Completion, d: &mut Decor, at: us
                 .collect()
         })
         .collect();
-    let width = rows.iter().map(|r| r.len()).max().unwrap_or(0);
-    for (i, row) in rows.iter().enumerate() {
-        let y = at + i;
+    let box_w = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+
+    // Vertical: how many rows are free on each side of the caret's own
+    // screen row. A caret scrolled out of view leaves the popup where
+    // it would have been.
+    let caret_row = view.row_on_screen(cy).unwrap_or(0);
+    let below = view.height.saturating_sub(caret_row + 1);
+    let above = caret_row.min(cy);
+    let downward = place_below(&view, cy, rows.len());
+    let room = if downward { below } else { above }.max(1);
+    let shown = rows.len().min(room);
+    // Scroll the window so the selection is inside it.
+    let start = list
+        .sel
+        .saturating_sub(shown - 1)
+        .min(rows.len() - shown)
+        .min(list.sel);
+    let top = if downward {
+        cy + 1
+    } else {
+        // Opening upward: the last drawn row sits just above the caret.
+        cy.saturating_sub(shown)
+    };
+
+    // Horizontal: shift left so the box fits. It can only travel as far
+    // as the canvas's own left edge — the centering pad left of that is
+    // screen space the Decor cannot address — so whatever still hangs
+    // over the right edge is trimmed, ending in an ellipsis. A row cut
+    // by the border reads as a rendering fault; one that ends in `…`
+    // reads as "there is more".
+    let overflow = (view.col_on_screen(cx) + box_w).saturating_sub(view.width);
+    let x0 = cx.saturating_sub(overflow).max(view.scroll_x);
+    let box_w = box_w.min(view.width.saturating_sub(view.col_on_screen(x0)));
+    if box_w == 0 {
+        return;
+    }
+
+    for (i, row) in rows[start..start + shown].iter().enumerate() {
+        let y = top + i;
         d.ensure_row(y);
-        d.widen(y, cx + width.saturating_sub(1));
-        let bg = if i == list.sel {
+        d.widen(y, x0 + box_w.saturating_sub(1));
+        let bg = if start + i == list.sel {
             theme::SELECTION_BG
         } else {
             theme::PREVIEW_BG
         };
-        for dx in 0..width {
-            d.lines[y][cx + dx] = row.get(dx).copied().unwrap_or(' ');
-            d.bg[y][cx + dx] = Some(bg);
+        for dx in 0..box_w {
+            let trimmed = dx + 1 == box_w && row.len() > box_w;
+            d.lines[y][x0 + dx] = if trimmed {
+                '…'
+            } else {
+                row.get(dx).copied().unwrap_or(' ')
+            };
+            d.bg[y][x0 + dx] = Some(bg);
         }
     }
 }
@@ -1161,7 +1308,7 @@ mod tests {
             &ed.marker_extents(),
             ed.block.is_some().then_some(ed.block_sel),
         );
-        overlay_minibuffer(&ed, &mut d);
+        overlay_minibuffer(&ed, &mut d, Viewport::unbounded());
         let (cy, _) = d.caret.unwrap();
         let below: String = d.lines[cy + 1..].iter().flatten().collect();
         assert!(below.contains('α'), "symbol previews below: {:?}", below);
@@ -1184,7 +1331,7 @@ mod tests {
             &ed.marker_extents(),
             ed.block.is_some().then_some(ed.block_sel),
         );
-        overlay_minibuffer(&ed, &mut d);
+        overlay_minibuffer(&ed, &mut d, Viewport::unbounded());
         let below: String = d.lines[1..].iter().flatten().collect();
         assert!(
             below.contains('─'),
@@ -1229,7 +1376,7 @@ mod tests {
             &ed.marker_extents(),
             ed.block.is_some().then_some(ed.block_sel),
         );
-        overlay_minibuffer(&ed, &mut d);
+        overlay_minibuffer(&ed, &mut d, Viewport::unbounded());
         let all: String = d.lines.iter().flatten().collect();
         assert!(all.contains('α'), "the preview is drawn: {}", all);
         // No row was opened, and the denominator is where it was.
@@ -1360,6 +1507,119 @@ mod tests {
         assert!(selected > 0, "no highlighted row:\n{}", screen);
     }
 
+    /// The popup places itself to stay on screen: it scrolls its own
+    /// window so the highlighted row is drawn (arrows must never go
+    /// silent), opens upward when there is more room there, and shifts
+    /// left rather than running off the right edge.
+    #[test]
+    fn completion_popup_stays_on_screen() {
+        let open = |ed: &mut Editor, q: &str| {
+            for c in format!("\\{}", q).chars() {
+                ed.input(Key::Char(c), false, false);
+            }
+            ed.input(Key::Tab, false, false);
+        };
+        // A short terminal cannot show all 12 rows: stepping to the
+        // last one must still show it highlighted somewhere.
+        let mut ed = Editor::new();
+        type_script_keys(&mut ed, "x+y");
+        open(&mut ed, "a");
+        let n = ed.completion.as_ref().unwrap().items.len();
+        assert!(n > 5, "need a list taller than the terminal: {}", n);
+        for _ in 0..n - 1 {
+            ed.input(Key::Down, false, false);
+        }
+        let last = ed.completion.as_ref().unwrap().items[n - 1].names.clone();
+        let screen = shot_at(&ed, 40, 14).join("\n");
+        assert!(
+            screen.contains(last.split(',').next().unwrap()),
+            "the selected row is off screen:\n{}",
+            screen
+        );
+
+        // Opening upward must not land on the formula: a multi-row
+        // formula with the caret low in it has more screen rows above
+        // the caret than below, but only as many *canvas* rows as the
+        // formula is tall — counting the centering pad as room is what
+        // used to clamp the box down onto the formula itself.
+        let mut ed = Editor::new();
+        type_script_keys(&mut ed, "//1");
+        ed.input(Key::Down, false, false);
+        ed.input(Key::Char('2'), false, false);
+        open(&mut ed, "al");
+        let screen = shot_at(&ed, 60, 20).join("\n");
+        assert!(
+            screen.contains('─') && screen.contains('2'),
+            "the popup covered the formula:\n{}",
+            screen
+        );
+        assert!(
+            screen.contains("\\al"),
+            "the popup covered the name being typed:\n{}",
+            screen
+        );
+
+        // Anchored near the right edge, the box shifts left instead of
+        // being cut off: a full row must survive intact.
+        let mut ed = Editor::new();
+        type_script_keys(&mut ed, "x+y+z+w+q+r+s+t");
+        open(&mut ed, "al");
+        let first = ed.completion.as_ref().unwrap().items[0].names.clone();
+        let screen = shot_at(&ed, 30, 20).join("\n");
+        assert!(
+            screen.contains(&first),
+            "row {:?} was clipped at the right edge:\n{}",
+            first,
+            screen
+        );
+    }
+
+    /// A typed overlay is content, not decoration: centering it off the
+    /// right edge is the same failure as scrolling it off. The
+    /// centering pad has to leave room for it.
+    #[test]
+    fn a_typed_overlay_is_never_centered_off_screen() {
+        let mut ed = Editor::new();
+        type_script_keys(&mut ed, "x+y");
+        ed.input(Key::Char('\\'), false, false);
+        for c in "text".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        ed.input(Key::Enter, false, false);
+        for c in "the quick brown fox jumps".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        let screen = shot_at(&ed, 50, 10).join("\n");
+        assert!(
+            screen.contains("jumps"),
+            "the box was clipped off the right edge:\n{}",
+            screen
+        );
+    }
+
+    /// The preview is a floating box like the popup, so it has to make
+    /// the same choice: a caret with no screen rows under it puts the
+    /// box above rather than off the bottom.
+    #[test]
+    fn the_preview_lands_on_screen_when_there_is_no_room_below() {
+        let mut ed = Editor::new();
+        // A formula taller than the canvas pins the caret to the last
+        // visible row once it is scrolled to the bottom.
+        for _ in 0..8 {
+            ed.input(Key::Char('x'), false, false);
+            ed.input(Key::Enter, false, false);
+        }
+        for c in "\\alpha".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        let screen = shot_at(&ed, 40, 8).join("\n");
+        assert!(
+            screen.contains('α'),
+            "the preview fell off the bottom:\n{}",
+            screen
+        );
+    }
+
     /// A label cell under the caret prints its letter: private-use
     /// codepoints must never reach the terminal (fonts map that page
     /// to logos, so a leak shows as a random glyph).
@@ -1408,7 +1668,7 @@ mod tests {
             &ed.marker_extents(),
             ed.block.is_some().then_some(ed.block_sel),
         );
-        overlay_minibuffer(&ed, &mut d);
+        overlay_minibuffer(&ed, &mut d, Viewport::unbounded());
         let all: String = d.lines.iter().flatten().collect();
         assert!(
             all.contains(&format!("{}a{}", FENDER_L, FENDER_R)),
@@ -1440,7 +1700,7 @@ mod tests {
             &ed.marker_extents(),
             ed.block.is_some().then_some(ed.block_sel),
         );
-        overlay_minibuffer(&ed, &mut d2);
+        overlay_minibuffer(&ed, &mut d2, Viewport::unbounded());
         let (cy2, cx2) = d2.caret.unwrap();
         assert_eq!(cy2, cy);
         assert_eq!(cx2 + 1, cx, "caret stepped left inside the box");
@@ -1464,7 +1724,7 @@ mod tests {
             ed.block.is_some().then_some(ed.block_sel),
         );
         let (cy, cx) = d.caret.unwrap();
-        overlay_minibuffer(&ed, &mut d);
+        overlay_minibuffer(&ed, &mut d, Viewport::unbounded());
         // The overlay covers the glyphs to the right of the cursor in
         // place: same height, and the cells left of the cursor are
         // untouched.
@@ -1657,55 +1917,5 @@ mod tests {
                     .collect()
             })
             .collect()
-    }
-
-    #[test]
-    fn probe_popup_clipped_at_bottom() {
-        let mut ed = Editor::new();
-        type_script_keys(&mut ed, "x+y");
-        for c in "\\a".chars() {
-            ed.input(Key::Char(c), false, false);
-        }
-        ed.input(Key::Tab, false, false);
-        let n = ed.completion.as_ref().unwrap().items.len();
-        let s = shot_at(&ed, 40, 14);
-        println!("items = {}", n);
-        println!("--- 40x14 ---\n{}\n---", s.join("\n"));
-        // now step the selection to the last item and see if it is visible
-        for _ in 0..n - 1 {
-            ed.input(Key::Down, false, false);
-        }
-        println!("sel = {}", ed.completion.as_ref().unwrap().sel);
-        let s = shot_at(&ed, 40, 14);
-        println!("--- after Down x{} ---\n{}\n---", n - 1, s.join("\n"));
-        let s = shot_at(&ed, 40, 30);
-        println!("--- 40x30 ---\n{}\n---", s.join("\n"));
-    }
-
-    #[test]
-    fn probe_wide_formula_minibuffer() {
-        let mut ed = Editor::new();
-        type_script_keys(&mut ed, &"a+".repeat(20));
-        for c in "\\alpha".chars() {
-            ed.input(Key::Char(c), false, false);
-        }
-        let s = shot_at(&ed, 24, 10);
-        println!("--- wide 24x10 ---\n{}\n---", s.join("\n"));
-        // and with the completion popup
-        ed.input(Key::Tab, false, false);
-        let s = shot_at(&ed, 24, 10);
-        println!("--- wide + popup ---\n{}\n---", s.join("\n"));
-    }
-
-    #[test]
-    fn probe_popup_right_edge() {
-        let mut ed = Editor::new();
-        type_script_keys(&mut ed, "x+y+z+w+q+r+s+t");
-        for c in "\\al".chars() {
-            ed.input(Key::Char(c), false, false);
-        }
-        ed.input(Key::Tab, false, false);
-        let s = shot_at(&ed, 30, 20);
-        println!("--- narrow-ish 30x20 ---\n{}\n---", s.join("\n"));
     }
 }
