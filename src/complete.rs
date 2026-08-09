@@ -12,7 +12,6 @@
 //! resolving every entry.
 
 use crate::editor::{Edit, preview_row, resolve};
-use crate::glyphs;
 use crate::render::{RenderCtx, render_root};
 use crate::symbols;
 
@@ -315,16 +314,20 @@ fn shape(cmd: &str) -> String {
     }
     if let Some(row) = preview_row(cmd) {
         let block = render_root(&row, None, &RenderCtx::canonical());
-        if let Some(line) = block
-            .lines
-            .get(block.baseline.min(block.height().saturating_sub(1)))
-        {
+        // The column is one line tall, so a taller preview cannot be
+        // shown — and its baseline row alone is a fragment (`\frac`'s
+        // bare ───, one strip of a matrix) that reads as if it were
+        // the whole result. Those rows show nothing; the shape appears
+        // in full once the command is the one being previewed.
+        if block.height() > 1 {
+            return String::new();
+        }
+        if let Some(line) = block.lines.first() {
             let s: String = line.iter().collect();
             let s = s.trim();
             if !s.is_empty() {
-                // One wide shape (a 3x4 grid's baseline row) would set
-                // the symbol column's width for every other row, so it
-                // is cut instead.
+                // A wide one-liner would set the symbol column's width
+                // for every other row, so it is cut instead.
                 return match s.chars().count() > SHAPE_MAX {
                     true => s.chars().take(SHAPE_MAX - 1).chain(['…']).collect(),
                     false => s.to_string(),
@@ -516,32 +519,12 @@ fn delim_hints(query: &str) -> Vec<(u32, Item)> {
 /// are found. Only a whole name does — plain substring matching would
 /// answer `\a` with every environment there is.
 fn grid_hints(query: &str) -> Vec<(u32, Item)> {
-    // A one-line grid wearing its pair, which is the only thing that
-    // tells the members of this family apart. The arms are the same
-    // glyphs the editor will draw (`short`), not the spec characters.
-    fn wrapped(wrap: symbols::GridWrap) -> String {
-        let arm = |d: symbols::Delim, left: bool| match d.col() {
-            Some(c) => {
-                let (l, r) = c.info().short;
-                if left { l } else { r }
-            }
-            // The angles have no column arms; their spec char is the
-            // glyph. (No grid env uses them today.)
-            None => d.spec(left),
-        };
-        match wrap {
-            symbols::GridWrap::Bare => glyphs::PLACEHOLDER.to_string(),
-            symbols::GridWrap::Norm => {
-                format!("{0}{1}{0}", glyphs::NORM, glyphs::PLACEHOLDER)
-            }
-            symbols::GridWrap::Pair(l, r) => {
-                format!("{}{}{}", arm(l, true), glyphs::PLACEHOLDER, arm(r, false))
-            }
-        }
-    }
+    // No symbol column: a grid is lines tall, so anything one line
+    // could show would be a fragment, and the env names already tell
+    // the family apart.
     symbols::GRID_ENVS
-        .entries()
-        .filter_map(|(env, &wrap)| {
+        .keys()
+        .filter_map(|env| {
             // A name with half its size typed keeps its row up: the
             // rows digit is chosen, the columns one still owed, and
             // the moment between them must not read as "unknown
@@ -552,7 +535,7 @@ fn grid_hints(query: &str) -> Vec<(u32, Item)> {
                 return Some((
                     1,
                     Item {
-                        symbol: wrapped(wrap),
+                        symbol: String::new(),
                         names: format!("{}{{1…9}}  (columns)", query),
                         action: Action::Step(query.to_string()),
                     },
@@ -565,7 +548,7 @@ fn grid_hints(query: &str) -> Vec<(u32, Item)> {
             Some((
                 score + 1,
                 Item {
-                    symbol: wrapped(wrap),
+                    symbol: String::new(),
                     names: format!("{}{{1…9}}{{1…9}}  (rows, columns)", env),
                     action: Action::Step(env.to_string()),
                 },
@@ -852,13 +835,19 @@ mod tests {
         assert_eq!(collapse(vec!["xto", "xrightarrow"]), "xrightarrow, xto");
     }
 
-    /// A structural command shows its shape, not an empty cell.
+    /// A one-line command shows its shape; a taller one shows nothing,
+    /// because one strip of it (`\frac`'s bare ───, `\sqrt` without
+    /// its overline) reads as if it were the whole result.
     #[test]
     fn rows_show_what_they_insert() {
-        let frac = complete("frac").into_iter().next().unwrap();
-        assert!(frac.symbol.contains('─'), "frac shape: {:?}", frac.symbol);
-        let sqrt = complete("sqrt").into_iter().next().unwrap();
-        assert!(sqrt.symbol.contains('√'), "sqrt shape: {:?}", sqrt.symbol);
+        for tall in ["frac", "sqrt", "matrix34"] {
+            let row = complete(tall).into_iter().next().unwrap();
+            assert_eq!(row.symbol, "", "\\\\{} is taller than the column", tall);
+        }
+        let abs = complete("abs").into_iter().next().unwrap();
+        assert_eq!(abs.symbol, "⎢⬚⎥");
+        let braket = complete("braket").into_iter().next().unwrap();
+        assert!(braket.symbol.contains('⟨'), "{:?}", braket.symbol);
         // A row's symbol may be blank — the grid surgery and \mid
         // depend on the cursor, so `resolve` cannot know — but a row
         // that inserts something must show it.
@@ -901,17 +890,16 @@ mod tests {
     }
 
     /// The delimited grids are found by typing the part of the name
-    /// they share, so a substring match offers the whole family — each
-    /// wearing the pair that tells it from the others.
+    /// they share: a whole env name offers the whole family.
     #[test]
     fn the_grid_family_is_found_through_its_shared_name() {
         let rows = complete("matrix");
-        for (env, symbol) in [("pmatrix", "(⬚)"), ("bmatrix", "[⬚]"), ("Bmatrix", "{⬚}")] {
+        for env in ["pmatrix", "bmatrix", "Bmatrix"] {
             let row = rows
                 .iter()
                 .find(|r| r.names.starts_with(env))
                 .unwrap_or_else(|| panic!("no {} row: {:?}", env, rows));
-            assert_eq!(row.symbol, symbol);
+            assert!(row.is_step() && row.symbol.is_empty(), "{:?}", row);
         }
     }
     /// A spec that can no longer become one is offered nothing. `\lr)`
