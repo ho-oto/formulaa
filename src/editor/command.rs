@@ -214,7 +214,10 @@ impl Editor {
         // (typing over a selection, the standard editor behavior); the
         // structural rest just drops the anchor (the row shifts under
         // it, so a survivor would designate a different range).
-        let wraps = matches!(edit, Edit::Insert { wrap: true, .. } | Edit::Accent(_));
+        let wraps = matches!(
+            edit,
+            Edit::Insert { wrap: true, .. } | Edit::Accent(_) | Edit::Delim { .. }
+        );
         let replaces = matches!(
             edit,
             Edit::Sym(_)
@@ -280,7 +283,18 @@ impl Editor {
             }
             Edit::Sym(c) => self.insert_sym(c),
             Edit::Accent(mark) => self.apply_accent(mark),
-            Edit::Delim { left, right, mids } => self.insert_delim(left, right, mids),
+            // A delimiter wraps like `(` does: the selection becomes
+            // its first segment (the Insert machinery owns that
+            // reading, and \braket then enters the second segment).
+            Edit::Delim { left, right, mids } => self.apply(Edit::Insert {
+                node: Node::Delim {
+                    left,
+                    right,
+                    mids,
+                    segs: vec![vec![]; mids + 1],
+                },
+                wrap: true,
+            }),
             Edit::Grid { wrap, rows, cols } => match wrap {
                 GridWrap::Pair(l, r) => self.insert_grid(l, r, rows, cols),
                 // A bare grid is a self-delimiting lattice: an Array
@@ -429,7 +443,7 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
             num: vec![],
             den: vec![],
         }),
-        "norm" | "Vert" => ins(Node::Norm { arg: vec![] }),
+        "norm" | "Vert" => wrap(Node::Norm { arg: vec![] }),
         "overbrace" | "underbrace" => wrap(Node::Brace {
             over: cmd == "overbrace",
             arg: vec![],

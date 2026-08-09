@@ -577,10 +577,13 @@ impl Editor {
                 col
             };
         }
-        // A delimiter armed for unwrapping: the pair around its node in
-        // the *parent* row, which the render turns into the block's
-        // corners so only the delimiter columns light up. The cursor is
-        // inside the node, so its own path shifts by the open mark.
+        // A wrapper armed for unwrapping: the pair around its node,
+        // which the render turns into the block's corners so only the
+        // delimiter columns (a radical's root) light up. Armed from
+        // inside, the node is in the *parent* row and the cursor's own
+        // path shifts by the open mark; armed from outside (a
+        // Shift-selection), it sits beside the cursor in the current
+        // row and the column shifts instead.
         if self.unwrap_armed.as_deref() == Some(&self.path[..])
             && let Some(&(i, _)) = self.path.last()
         {
@@ -589,6 +592,18 @@ impl Editor {
             prow.insert(i + 1, Node::Sym(Mark::Delims { open: false }.ch()));
             prow.insert(i, Node::Sym(Mark::Delims { open: true }.ch()));
             path[k].0 += 1;
+        } else if let Some((&(i, _), parent)) =
+            self.unwrap_armed.as_deref().and_then(|p| p.split_last())
+            && parent == &self.path[..]
+        {
+            let row = row_at_mut(&mut root, &path);
+            if i < row.len() {
+                row.insert(i + 1, Node::Sym(Mark::Delims { open: false }.ch()));
+                row.insert(i, Node::Sym(Mark::Delims { open: true }.ch()));
+                if col > i {
+                    col += 2;
+                }
+            }
         }
         (root, Some((path, col)))
     }

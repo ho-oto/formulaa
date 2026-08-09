@@ -442,10 +442,13 @@ impl Editor {
     fn base_keys(&mut self, key: Key, shift: bool, ctrl: bool) -> Effect {
         // Ghost slots survive only until the next real input.
         self.ghost.clear();
-        // A delimiter armed for unwrapping survives exactly one
+        // A wrapper armed for unwrapping survives exactly one
         // keystroke: taking it here disarms on everything except the
-        // Backspace/^D that armed it, pressed again in the same place.
-        let armed = self.unwrap_armed.take().is_some_and(|p| p == self.path);
+        // key that continues the armed gesture — Backspace/^D pressed
+        // again in the same place, a delete on a pair armed by
+        // Shift-selection, or the Shift+arrow that moves past it.
+        let armed_at = self.unwrap_armed.take();
+        let armed = armed_at.as_deref() == Some(&self.path[..]);
         if ctrl {
             match key {
                 Key::Char('q') => return Effect::Quit,
@@ -467,7 +470,9 @@ impl Editor {
                 // ^D: delete forward, the Emacs pairing for Backspace
                 // (and the only forward delete on keyboards without a
                 // Delete key).
-                Key::Char('d') => self.delete_forward(armed),
+                Key::Char('d') if !self.unwrap_armed_outside(&armed_at) => {
+                    self.delete_forward(armed)
+                }
                 _ => {}
             }
             return Effect::None;
@@ -475,8 +480,18 @@ impl Editor {
 
         self.clear_message();
         match key {
-            Key::Left if shift => self.select_move(false),
-            Key::Right if shift => self.select_move(true),
+            // Shift onto a wrapper arms its pair first (see
+            // `select_arm`); the ordinary step is everything else.
+            Key::Left if shift => {
+                if !self.select_arm(false, &armed_at) {
+                    self.select_move(false)
+                }
+            }
+            Key::Right if shift => {
+                if !self.select_arm(true, &armed_at) {
+                    self.select_move(true)
+                }
+            }
             Key::Up if shift => self.select_parent(),
             // With an active selection, ←/→ collapse onto its ends.
             Key::Left => match self.selection() {
@@ -523,11 +538,18 @@ impl Editor {
             // inside offers to unwrap it (arm, then lift the contents
             // out) instead of stepping over it.
             Key::Backspace => {
-                if !self.delete_selection() && !self.delete_toward_delim(true, armed) {
+                if !self.delete_selection()
+                    && !self.unwrap_armed_outside(&armed_at)
+                    && !self.delete_toward_delim(true, armed)
+                {
                     self.backspace();
                 }
             }
-            Key::Delete => self.delete_forward(armed),
+            Key::Delete => {
+                if !self.unwrap_armed_outside(&armed_at) {
+                    self.delete_forward(armed)
+                }
+            }
             Key::Char('\\') => self.minibuffer = Some(String::new()),
             // ^ / _ / ( { [ spell the same Edits the \commands resolve
             // to: an empty template enters its slot, a selection lands

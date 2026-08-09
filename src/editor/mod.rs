@@ -428,6 +428,23 @@ fn grid_command(cmd: &str) -> Option<(GridWrap, usize, usize)> {
     None
 }
 
+/// What a node would give up if unwrapped, and the field its contents
+/// live in: a delimiter pair around one plain segment, the ‖ ‖ norm,
+/// or a radical. None for anything else — a pair with middles has no
+/// single contents, and a fused grid would strand its lattice.
+fn unwrap_contents(node: &Node) -> Option<(Field, &Row)> {
+    match node {
+        Node::Delim { mids: 0, segs, .. }
+            if segs.len() == 1 && !matches!(segs[0][..], [Node::Array { .. }]) =>
+        {
+            Some((Field::Seg(0), &segs[0]))
+        }
+        Node::Norm { arg } => Some((Field::Seg(0), arg)),
+        Node::Sqrt { arg, .. } => Some((Field::SqrtArg, arg)),
+        _ => None,
+    }
+}
+
 impl Editor {
     pub fn new() -> Self {
         Editor {
@@ -950,13 +967,13 @@ impl Editor {
         if self.col > 0 {
             let target = &self.cur_row()[self.col - 1];
             if !target.fields().is_empty() && !target.is_empty_structure() {
-                // Non-empty structure: step inside (LyX behaviour) so the
-                // user deletes its content first instead of losing it
-                // all. The internal `left` bypasses the key layer's
-                // anchor clearing, so shed it here — landing inside
-                // could re-arm a dormant selection.
-                self.select_anchor = None;
-                self.left();
+                // Non-empty structure: select it whole, so the delete
+                // stays an announced two-step (the next press removes
+                // it) instead of the cursor silently stepping inside.
+                // Entering to edit is what the arrow keys are for.
+                self.select_anchor = Some(self.col - 1);
+                self.select_path = self.path.clone();
+                self.select_whole = true;
             } else {
                 self.col -= 1;
                 let col = self.col;
@@ -976,54 +993,70 @@ impl Editor {
         }
     }
 
-    /// The enclosing delimiter the cursor is pressed against, if
+    /// The enclosing wrapper the cursor is pressed against, if
     /// deleting toward it should offer to unwrap rather than step out:
     /// `at_start` means Backspace at the very start of the contents,
     /// otherwise ^D/Delete at the very end. A pair with middles keeps
     /// the old behaviour (there is no single "contents" to lift out),
     /// and so does a fused grid (unwrapping would strand a lattice
-    /// with no delimiter to hang off). Returns the node's index in its
+    /// with no delimiter to hang off). A radical arms only from the
+    /// start — that is the side its root glyph is on; its far end has
+    /// nothing to delete toward. Returns the node's index in its
     /// parent row.
     fn unwrappable(&self, at_start: bool) -> Option<usize> {
         let stop = if at_start { 0 } else { self.cur_row().len() };
         if self.col != stop {
             return None;
         }
-        let &(i, Field::Seg(0)) = self.path.last()? else {
-            return None;
-        };
+        let &(i, field) = self.path.last()?;
         let parent = &self.path[..self.path.len() - 1];
-        match row_at(&self.root, parent).get(i)? {
-            // An empty pair has nothing to lift out, and Backspace
-            // already deletes it whole in one press — arming would only
-            // add a keystroke.
-            Node::Delim { mids: 0, segs, .. }
-                if segs.len() == 1
-                    && !segs[0].is_empty()
-                    && !matches!(segs[0][..], [Node::Array { .. }]) =>
-            {
-                Some(i)
-            }
-            _ => None,
-        }
+        let node = row_at(&self.root, parent).get(i)?;
+        let (slot, contents) = unwrap_contents(node)?;
+        // An empty wrapper has nothing to lift out, and Backspace
+        // already deletes it whole in one press — arming would only
+        // add a keystroke.
+        (field == slot && !contents.is_empty() && (at_start || !matches!(node, Node::Sqrt { .. })))
+            .then_some(i)
     }
 
-    /// Lift the enclosing delimiter's contents out of it, replacing the
-    /// pair, and select what came out — so pressing Backspace once more
+    /// Lift the enclosing wrapper's contents out of it, replacing it,
+    /// and select what came out — so pressing Backspace once more
     /// deletes it, while an arrow key walks away leaving just the
     /// unwrap. Empty contents leave nothing to select.
     fn unwrap_delim(&mut self, i: usize) {
         self.path.pop();
-        let Node::Delim { segs, .. } = self.cur_row_mut().remove(i) else {
-            return;
+        self.unwrap_at(i, true);
+    }
+
+    /// Replace the node at `i` in the current row with its contents.
+    /// `select` leaves them selected — the staged Backspace flow wants
+    /// its third press to delete them; an unwrap asked for by
+    /// Shift-selecting the bracket does not, because that gesture
+    /// already said all it wanted (the bracket gone, the contents
+    /// kept).
+    fn unwrap_at(&mut self, i: usize, select: bool) {
+        let node = self.cur_row_mut().remove(i);
+        let content: Row = match node {
+            Node::Delim { segs, .. } => segs.into_iter().next().unwrap_or_default(),
+            Node::Norm { arg } | Node::Sqrt { arg, .. } => arg,
+            other => {
+                self.cur_row_mut().insert(i, other);
+                return;
+            }
         };
-        let content = segs.into_iter().next().unwrap_or_default();
         let n = content.len();
+        let from_left = self.col <= i;
         self.cur_row_mut().splice(i..i, content);
-        self.col = i + n;
         self.select_whole = false;
-        self.select_anchor = (n > 0).then_some(i);
-        self.select_path = self.path.clone();
+        if select {
+            self.col = i + n;
+            self.select_anchor = (n > 0).then_some(i);
+            self.select_path = self.path.clone();
+        } else {
+            // The cursor keeps its side of what was unwrapped.
+            self.col = if from_left { i } else { i + n };
+            self.select_anchor = None;
+        }
     }
 
     /// Backspace/^D pressed against an enclosing delimiter: the first
@@ -1032,7 +1065,14 @@ impl Editor {
     /// Returns false when the cursor is not against such a pair, so the
     /// caller falls back to ordinary deletion.
     pub fn delete_toward_delim(&mut self, at_start: bool, armed: bool) -> bool {
-        let Some(i) = self.unwrappable(at_start) else {
+        // Once armed, either delete key finishes the job from either
+        // edge: the arming already named the wrapper, and making the
+        // second press match the first key's direction would turn
+        // Backspace after a ^D arming into an ordinary deletion.
+        let Some(i) = self
+            .unwrappable(at_start)
+            .or_else(|| armed.then(|| self.unwrappable(!at_start)).flatten())
+        else {
             return false;
         };
         if armed {
@@ -1040,6 +1080,76 @@ impl Editor {
         } else {
             self.unwrap_armed = Some(self.path.clone());
         }
+        true
+    }
+
+    /// Shift-selecting *onto* a wrapper arms it instead of taking it:
+    /// the selection asked for "just the bracket", and a bracket's
+    /// meaning is its pair — so both delimiters light up (a radical
+    /// its root) and the next Backspace unwraps. A second step selects
+    /// the node whole, and extending an existing selection swallows
+    /// the node in one step as before. Returns true when it armed
+    /// (the caller then skips the ordinary selection step).
+    pub fn select_arm(&mut self, right: bool, armed: &Option<Vec<(usize, Field)>>) -> bool {
+        if self.selection().is_some() {
+            return false;
+        }
+        // At the row's edge the touch lands on the enclosing wrapper's
+        // own glyph — the same place Backspace/^D against it reaches —
+        // so it arms from inside too. Pressing again keeps it armed
+        // (there is no node here for a second step to select).
+        let edge = if right {
+            self.col == self.cur_row().len()
+        } else {
+            self.col == 0
+        };
+        if edge {
+            if self.unwrappable(!right).is_none() {
+                return false;
+            }
+            self.unwrap_armed = Some(self.path.clone());
+            return true;
+        }
+        let Some(crossed) = (if right {
+            Some(self.col)
+        } else {
+            self.col.checked_sub(1)
+        }) else {
+            return false;
+        };
+        let Some(node) = self.cur_row().get(crossed) else {
+            return false;
+        };
+        let Some((slot, contents)) = unwrap_contents(node) else {
+            return false;
+        };
+        if contents.is_empty() {
+            return false;
+        }
+        let mut p = self.path.clone();
+        p.push((crossed, slot));
+        if armed.as_deref() == Some(&p[..]) {
+            // The second press means "the node, then": select it.
+            return false;
+        }
+        self.unwrap_armed = Some(p);
+        true
+    }
+
+    /// A wrapper armed from the outside (`select_arm`): Backspace or
+    /// Delete unwraps it in place. The armed path reaches one step
+    /// below the cursor's — into the slot of a node beside it.
+    pub fn unwrap_armed_outside(&mut self, armed: &Option<Vec<(usize, Field)>>) -> bool {
+        let Some((&(i, _), parent)) = armed.as_deref().and_then(|p| p.split_last()) else {
+            return false;
+        };
+        if parent != &self.path[..] || (self.col != i && self.col != i + 1) {
+            return false;
+        }
+        if self.cur_row().get(i).and_then(unwrap_contents).is_none() {
+            return false;
+        }
+        self.unwrap_at(i, false);
         true
     }
 
@@ -1057,9 +1167,11 @@ impl Editor {
         if self.col < row.len() {
             let target = &row[self.col];
             if !target.fields().is_empty() && !target.is_empty_structure() {
-                // Same anchor shedding as backspace's step-inside.
-                self.select_anchor = None;
-                self.right();
+                // Mirror of backspace: select the structure whole and
+                // let the next press delete it.
+                self.select_anchor = Some(self.col + 1);
+                self.select_path = self.path.clone();
+                self.select_whole = true;
             } else {
                 let col = self.col;
                 self.cur_row_mut().remove(col);

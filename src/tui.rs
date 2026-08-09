@@ -815,6 +815,14 @@ fn is_delim_piece(c: char) -> bool {
         || is_brace_corner(c)
 }
 
+/// The pieces a radical shows on its left column: the root glyph and
+/// the overline's corner above it (its stem is the shared │, already a
+/// delim piece). An armed radical lights these the way an armed pair
+/// lights its delimiters.
+fn is_radical_piece(c: char) -> bool {
+    matches!(c, '√' | '∛' | '∜' | mascii::glyphs::OVERLINE_CORNER)
+}
+
 /// Turn a rendered cell row into spans: private-use marker chars become
 /// their glyphs, the cursor glyph blinks, and box
 /// backgrounds from `marker_boxes` are applied to plain glyphs.
@@ -894,7 +902,9 @@ fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec
             // A delimiter armed for unwrapping: its two columns take the
             // selection ground, because they are exactly what the next
             // Backspace/^D removes.
-            (t..=b).contains(&y) && is_delim_piece(c) && (i == o || i == close)
+            (t..=b).contains(&y)
+                && (is_delim_piece(c) || is_radical_piece(c))
+                && (i == o || i == close)
         }) {
             flush(&mut buf, buf_bg, &mut spans);
             spans.push(Span::styled(

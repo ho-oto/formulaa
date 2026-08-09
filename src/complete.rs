@@ -11,6 +11,7 @@
 //! match rather than in a table; a test keeps that list honest by
 //! resolving every entry.
 
+use crate::ast::Node;
 use crate::editor::{Edit, preview_row, resolve};
 use crate::render::{RenderCtx, render_root};
 use crate::symbols;
@@ -314,15 +315,19 @@ fn shape(cmd: &str) -> String {
     }
     if let Some(row) = preview_row(cmd) {
         let block = render_root(&row, None, &RenderCtx::canonical());
-        // The column is one line tall, so a taller preview cannot be
-        // shown — and its baseline row alone is a fragment (`\frac`'s
-        // bare ───, one strip of a matrix) that reads as if it were
-        // the whole result. Those rows show nothing; the shape appears
-        // in full once the command is the one being previewed.
-        if block.height() > 1 {
-            return String::new();
-        }
-        if let Some(line) = block.lines.first() {
+        // The column is one line tall. A radical still reads whole
+        // from its baseline row alone (√⬚ — the overline is the only
+        // thing above it), so it gets that row; anything else must fit
+        // the line in full, because a fragment (`\frac`'s bare ───,
+        // one strip of a matrix) reads as if it were the result. Those
+        // rows show nothing — the preview under the minibuffer shows
+        // the real shape.
+        let at = if matches!(row[..], [Node::Sqrt { .. }]) {
+            Some(block.baseline)
+        } else {
+            (block.height() == 1).then_some(0)
+        };
+        if let Some(line) = at.and_then(|y| block.lines.get(y)) {
             let s: String = line.iter().collect();
             let s = s.trim();
             if !s.is_empty() {
@@ -836,14 +841,19 @@ mod tests {
     }
 
     /// A one-line command shows its shape; a taller one shows nothing,
-    /// because one strip of it (`\frac`'s bare ───, `\sqrt` without
-    /// its overline) reads as if it were the whole result.
+    /// unless a natural one-line form exists (a radical's √⬚).
     #[test]
     fn rows_show_what_they_insert() {
-        for tall in ["frac", "sqrt", "matrix34"] {
+        for tall in ["frac", "matrix34"] {
             let row = complete(tall).into_iter().next().unwrap();
             assert_eq!(row.symbol, "", "\\\\{} is taller than the column", tall);
         }
+        // A radical sheds only its overline: √⬚ is still the whole
+        // shape, where ─── without its numerator is not.
+        let sqrt = complete("sqrt").into_iter().next().unwrap();
+        assert_eq!(sqrt.symbol, "√⬚");
+        let cbrt = complete("cbrt").into_iter().next().unwrap();
+        assert_eq!(cbrt.symbol, "∛⬚");
         let abs = complete("abs").into_iter().next().unwrap();
         assert_eq!(abs.symbol, "⎢⬚⎥");
         let braket = complete("braket").into_iter().next().unwrap();

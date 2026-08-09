@@ -454,18 +454,19 @@ fn plain_motions_shed_the_anchor() {
     type_script(&mut ed, r"a+b Left S-Left End");
     assert_eq!(ed.selection(), None);
     // A dormant anchor inside an inset must not resurrect when
-    // Backspace steps back in (Tab out, then Backspace).
+    // Backspace lands beside it: the press selects the inset whole
+    // (the announced two-step delete), never the stale inner range.
     let mut ed = Editor::new();
     type_script(&mut ed, r"x ^ abc Left Left S-Right Tab Backspace");
-    assert_eq!(ed.selection(), None);
+    assert_eq!(ed.selection(), Some((1, 2)), "the sup is selected whole");
     type_script(&mut ed, r"Backspace");
-    assert_eq!(latex(&ed), "x^{ab}", "only one char deleted");
+    assert_eq!(latex(&ed), "x", "the second press deletes the sup");
     // Same via the contextual close key.
     let mut ed = Editor::new();
     type_script(&mut ed, r"( abc Left Left S-Right ) Backspace");
-    assert_eq!(ed.selection(), None);
+    assert_eq!(ed.selection(), Some((0, 1)), "the pair is selected whole");
     type_script(&mut ed, r"Backspace");
-    assert_eq!(latex(&ed), "\\left(ab\\right)");
+    assert_eq!(latex(&ed), "");
 }
 
 #[test]
@@ -1348,6 +1349,116 @@ fn ctrl_d_deletes_forward_and_unwraps() {
     assert_eq!(ed.selection(), Some((0, 3)));
 }
 
+/// Shift-selecting *onto* a bracket arms the pair — the selection
+/// asked for "just the bracket", and a bracket's meaning is its pair —
+/// so the next Backspace/Delete unwraps. A second shift step selects
+/// the node whole, and extending an existing selection swallows it in
+/// one step, as before.
+#[test]
+fn shift_selecting_a_bracket_arms_the_pair() {
+    // From the left: arm (nothing selected, nothing deleted), unwrap.
+    // The gesture named the bracket, so the unwrap selects nothing —
+    // the contents just stay, with the cursor keeping its side.
+    let mut ed = Editor::new();
+    type_script(&mut ed, "( foo ) Home S-Right");
+    assert_eq!(latex(&ed), "\\left(foo\\right)");
+    assert_eq!(ed.selection(), None, "arming made a selection");
+    type_script(&mut ed, "Backspace");
+    assert_eq!(latex(&ed), "foo");
+    assert_eq!(ed.selection(), None, "the shift unwrap selected something");
+    assert_eq!(ed.col, 0, "the cursor left its side");
+
+    // From the right, with Delete.
+    let mut ed = Editor::new();
+    type_script(&mut ed, "( foo ) S-Left Delete");
+    assert_eq!(latex(&ed), "foo");
+    assert_eq!((ed.selection(), ed.col), (None, 3));
+
+    // While armed, the display lights the pair up.
+    let mut ed = Editor::new();
+    type_script(&mut ed, "( foo ) Home S-Right");
+    let (root, _) = ed.decorated();
+    let has_mark = root.iter().any(|n| {
+        matches!(n, mascii::ast::Node::Sym(c)
+            if mascii::glyphs::Mark::decode(*c) == Some(mascii::glyphs::Mark::Delims { open: true }))
+    });
+    assert!(has_mark, "no armed marks in {:?}", root);
+
+    // The second step takes the node whole, as before.
+    let mut ed = Editor::new();
+    type_script(&mut ed, "( foo ) Home S-Right S-Right");
+    assert_eq!(ed.selection(), Some((0, 1)));
+    type_script(&mut ed, "Backspace");
+    assert_eq!(latex(&ed), "");
+
+    // Extending an existing selection swallows the pair in one step.
+    let mut ed = Editor::new();
+    type_script(&mut ed, "x ( foo ) Home S-Right S-Right Backspace");
+    assert_eq!(latex(&ed), "");
+
+    // A pair with middles has no single contents: the first shift
+    // step selects it whole rather than arming.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\lr(|) a ) Home S-Right");
+    assert_eq!(ed.selection(), Some((0, 1)));
+
+    // From inside, the row's edge is the bracket too: Shift there
+    // arms the same way, and either delete key then unwraps (the
+    // staged flow, contents selected).
+    let mut ed = Editor::new();
+    type_script(&mut ed, "( foo Home S-Left Backspace");
+    assert_eq!(latex(&ed), "foo");
+    assert_eq!(ed.selection(), Some((0, 3)));
+    let mut ed = Editor::new();
+    type_script(&mut ed, "( foo S-Right Backspace");
+    assert_eq!(latex(&ed), "foo");
+}
+
+/// A radical unwraps like a pair: Backspace at the start of its
+/// argument — the side its root glyph is on — arms it, and
+/// shift-selecting the root does the same from outside. The far end
+/// has nothing to delete toward, so ^D there keeps its old no-op.
+#[test]
+fn a_radical_unwraps_like_a_pair() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\sqrt foo Home Backspace");
+    assert_eq!(latex(&ed), "\\sqrt{foo}", "the first press deletes");
+    type_script(&mut ed, "Backspace");
+    assert_eq!(latex(&ed), "foo");
+    assert_eq!(ed.selection(), Some((0, 3)));
+
+    // From outside, selecting the root arms the radical.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\sqrt foo Right S-Left Backspace");
+    assert_eq!(latex(&ed), "foo");
+
+    // The argument's end arms nothing — there is nothing ahead — for
+    // ^D and Shift+→ alike (the Backspace then deletes a char).
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\sqrt foo C-d C-d");
+    assert_eq!(latex(&ed), "\\sqrt{foo}");
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\sqrt foo S-Right Backspace");
+    assert_eq!(latex(&ed), "\\sqrt{fo}");
+}
+
+/// `\norm` unwraps like the pair it is: from either edge inside, and
+/// from a shift-selection outside.
+#[test]
+fn norm_unwraps_like_a_delimiter() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\norm x Home Backspace Backspace");
+    assert_eq!(latex(&ed), "x");
+
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\norm x C-d C-d");
+    assert_eq!(latex(&ed), "x");
+
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\norm x Right S-Left Backspace");
+    assert_eq!(latex(&ed), "x");
+}
+
 /// A pair with │ middles, and a fused matrix, keep the old behaviour:
 /// there is no single "contents" to lift out of either.
 #[test]
@@ -1822,4 +1933,30 @@ fn tab_does_not_commit_a_half_written_spec() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"\ a l p h a Tab");
     assert_eq!(latex(&ed), "\\alpha ");
+}
+
+#[test]
+fn container_commands_wrap_the_selection() {
+    // \norm used to *replace* the selection — ‖ ‖ is a container, and
+    // its contents were being typed over like a symbol would be.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"ab S-Left S-Left \norm");
+    assert_eq!(latex(&ed), "\\left\\|ab\\right\\|");
+
+    // The named delimiter pairs wrap the way `(` does…
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"ab S-Left S-Left \abs");
+    assert_eq!(latex(&ed), "\\left|ab\\right|");
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"ab S-Left S-Left \lr(]");
+    assert_eq!(latex(&ed), "\\left(ab\\right]");
+
+    // …and a pair with a middle lands the selection in its first
+    // segment with the cursor in the next, ready for the other half.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a S-Left \braket b");
+    assert_eq!(latex(&ed), "\\left\\langle a\\middle|b\\right\\rangle ");
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a S-Left \set b");
+    assert_eq!(latex(&ed), "\\left\\{a\\middle|b\\right\\}");
 }
