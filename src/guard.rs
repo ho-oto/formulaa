@@ -1,7 +1,10 @@
 //! The live roundtrip check: after every edit the canonical AA is
 //! re-parsed and compared with the formula it came from. A mismatch is
-//! a renderer/parser bug, so it is dumped to a report rather than
-//! merely flagged.
+//! a renderer/parser bug. By default the edit that caused it is simply
+//! refused (undone) — a formula that cannot survive its own file
+//! format must not be handed to the user as if it could. With
+//! `--debug` the broken state stands and a report is dumped instead,
+//! which is the mode for fixing the toolchain.
 
 use std::fs;
 
@@ -9,10 +12,13 @@ use mascii::editor::Editor;
 use mascii::render::{RenderCtx, render_root};
 use mascii::{ast, latex, parse};
 
-/// The checker; reports land in mascii_debug/roundtrip-N.txt so an AI
-/// (or human) can load one later and fix the toolchain.
+/// The checker; with `debug`, reports land in
+/// mascii_debug/roundtrip-N.txt so an AI (or human) can load one later
+/// and fix the toolchain.
 #[derive(Default)]
 pub struct RoundtripGuard {
+    /// `--debug`: keep the broken state and write the report.
+    pub debug: bool,
     /// Last AA already reported (avoid one file per keystroke).
     reported: Option<String>,
     /// The tree the last check ran on. The full re-render + re-parse
@@ -22,6 +28,13 @@ pub struct RoundtripGuard {
 }
 
 impl RoundtripGuard {
+    pub fn new(debug: bool) -> Self {
+        RoundtripGuard {
+            debug,
+            ..Default::default()
+        }
+    }
+
     pub fn check(&mut self, ed: &mut Editor) {
         if self.checked.as_ref() == Some(&ed.root) {
             return;
@@ -46,6 +59,17 @@ impl RoundtripGuard {
                 ("re-render mismatch".into(), Some(p))
             }
         };
+        if !self.debug {
+            // Refuse the edit: the state before it is the last one
+            // whose picture reads back, so it is the one to stand on.
+            ed.undo();
+            self.checked = Some(ed.root.clone());
+            ed.error(format!(
+                "⚠ edit refused — it would break the AA roundtrip ({}); --debug captures a report",
+                kind
+            ));
+            return;
+        }
         if self.reported.as_deref() == Some(&aa) {
             return;
         }
@@ -104,4 +128,33 @@ fn write_report(
     }
     fs::write(&path, report)?;
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mascii::input::Key;
+
+    /// Without --debug a roundtrip-breaking edit is refused: the guard
+    /// undoes it and says so, and no report file is involved. The
+    /// broken tree is fabricated directly (every real edit path is
+    /// supposed to keep the roundtrip — that is the point), sitting on
+    /// top of a real undo point the guard can fall back to.
+    #[test]
+    fn a_breaking_edit_is_refused() {
+        let mut ed = Editor::new();
+        ed.input(Key::Char('a'), false, false);
+        ed.input(Key::Char('b'), false, false);
+        // A bare Roman '(' cannot roundtrip: it renders as the one
+        // character every parser must read as a delimiter.
+        ed.root = vec![mascii::ast::Node::Roman('(')];
+        let mut guard = RoundtripGuard::default();
+        guard.check(&mut ed);
+        assert_ne!(
+            ed.root,
+            vec![mascii::ast::Node::Roman('(')],
+            "the broken edit stood"
+        );
+        assert!(ed.message.contains("refused"), "{:?}", ed.message);
+    }
 }

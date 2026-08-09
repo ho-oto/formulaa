@@ -16,13 +16,18 @@ use mascii::render::{RenderCtx, render_root};
 use mascii::{ast, latex, parse};
 
 const USAGE: &str = "\
-usage: mascii                 interactive TUI editor
+usage: mascii [--debug]       interactive TUI editor
        mascii aa2tex   [FILE] AA formula (file or stdin) -> LaTeX
        mascii tex2aa   [FILE] LaTeX math (file or stdin) -> AA, best effort
-       mascii fmt      [FILE] AA formula -> canonical AA (normalize)";
+       mascii fmt      [FILE] AA formula -> canonical AA (normalize)
+
+--debug: on a roundtrip failure, keep the state and dump a report to
+mascii_debug/ (default: refuse the edit)";
 
 fn main() -> std::io::Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let debug = args.iter().any(|a| a == "--debug");
+    args.retain(|a| a != "--debug");
     match args.first().map(String::as_str) {
         Some(m @ ("aa2tex" | "tex2aa" | "fmt")) => {
             return convert(m, args.get(1).map(String::as_str));
@@ -38,7 +43,7 @@ fn main() -> std::io::Result<()> {
     let mut ed = Editor::new();
     ed.info("mascii — LyX-like math editor");
 
-    let mut guard = guard::RoundtripGuard::default();
+    let mut guard = guard::RoundtripGuard::new(debug);
     let mut origin = (0u16, 0u16);
     let mut view = tui::View::default();
     let result = loop {

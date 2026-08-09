@@ -562,6 +562,35 @@ fn grid_hints(query: &str) -> Vec<(u32, Item)> {
         .collect()
 }
 
+/// The mode commands (^F, ^B, ^T, ^Y, ^Q) have minibuffer spellings
+/// for terminals that steal those chords; the popup lists them like
+/// anything else, told apart by the symbol column: `[^F]`, drawn
+/// bold — a chord where the edits show a glyph. (A row tint was
+/// tried and dropped: a tinted row under the selection highlight
+/// stops reading as either.)
+fn mode_hints(query: &str) -> Vec<(u32, Item)> {
+    crate::editor::MODE_COMMANDS
+        .iter()
+        .filter_map(|(names, _, chord, gloss)| {
+            let best = names.iter().filter_map(|n| score(n, query)).min()?;
+            let commit = names
+                .iter()
+                .max_by_key(|n| (n.len(), **n))
+                .expect("no spellings");
+            let mut shown = collapse(names.to_vec());
+            shown.push_str(&format!(" ({})", gloss));
+            Some((
+                best,
+                Item {
+                    symbol: format!("[{}]", chord),
+                    names: shown,
+                    action: Action::Run(commit.to_string()),
+                },
+            ))
+        })
+        .collect()
+}
+
 /// The rows for `query`, best first. A row is offered when any of its
 /// spellings matches, and ranks by its best one — so `\al` finds the
 /// α row and the row still shows every way to spell it.
@@ -583,6 +612,7 @@ pub fn complete(query: &str) -> Vec<Item> {
     let mut hits: Vec<(u32, Item)> = hits
         .into_iter()
         .map(|(s, i)| (s, i.clone()))
+        .chain(mode_hints(query))
         .chain(family_hints(query))
         .chain(delim_hints(query))
         .chain(grid_hints(query))
@@ -981,5 +1011,21 @@ mod tests {
         assert_eq!(rows[0].action, Action::Step("matrix3".into()));
         // A zero row count can never become a command; no bridge.
         assert!(complete("matrix0").is_empty());
+    }
+    /// The mode commands are listed, glossed, and lead their exact
+    /// spellings — a chord-less terminal has to be able to *find*
+    /// them, not just know them.
+    #[test]
+    fn mode_commands_are_listed() {
+        let rows = complete("f");
+        assert_eq!(rows[0].names, "f[ree], F (free cursor)");
+        assert_eq!(rows[0].symbol, "[^F]");
+        assert_eq!(rows[0].commit(), Some("free"));
+        let rows = complete("blocksel");
+        assert!(
+            rows.iter().any(|r| r.commit() == Some("blockselect")),
+            "{:?}",
+            rows
+        );
     }
 }

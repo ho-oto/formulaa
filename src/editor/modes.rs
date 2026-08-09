@@ -608,6 +608,21 @@ impl Editor {
         (root, Some((path, col)))
     }
 
+    /// Leave grid mode through Enter: the highlighted cell stays
+    /// meaningful — its contents become the ordinary selection, so a
+    /// wrap (\norm), a delete, or typing-over can act on the cell at
+    /// once. An empty cell has nothing to select and just exits.
+    pub fn grid_commit_cell(&mut self) {
+        self.grid = None;
+        let n = self.cur_row().len();
+        if n > 0 {
+            self.select_anchor = Some(0);
+            self.select_path = self.path.clone();
+            self.col = n;
+            self.select_whole = false;
+        }
+    }
+
     /// Toggle grid edit mode (^T; only meaningful inside a matrix).
     pub fn grid_mode_toggle(&mut self) {
         if self.grid.is_some() {

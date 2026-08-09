@@ -421,6 +421,58 @@ pub enum Edit {
     OpenBox(BoxKind),
 }
 
+/// The mode and system commands: minibuffer spellings for what
+/// normally lives on a ctrl chord (^F, ^B, ^T, ^C, ^Q), so the
+/// editor still works in a terminal that steals those chords. They
+/// are not `Edit`s — they move a mode, the clipboard, or the app
+/// itself — so `resolve` never sees them; the input layer runs them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModeCmd {
+    Free,
+    BlockSelect,
+    GridEdit,
+    /// Put the canonical AA on the *system* clipboard (^Y) — the copy
+    /// that leaves the program, which is what a clipboard spelling
+    /// means; the editor-internal ^C/^X have selection semantics of
+    /// their own.
+    CopyAa,
+    Quit,
+}
+
+/// One row per mode command — its spellings, the chord it stands in
+/// for, and a one-line gloss — for the completion list. `mode_command`
+/// is the dispatch; a test keeps the two agreeing spelling by
+/// spelling.
+pub const MODE_COMMANDS: &[(&[&str], ModeCmd, &str, &str)] = &[
+    (&["f", "F", "free"], ModeCmd::Free, "^F", "free cursor"),
+    (
+        &["b", "B", "bs", "blockselect"],
+        ModeCmd::BlockSelect,
+        "^B",
+        "block select",
+    ),
+    (
+        &["t", "T", "g", "G", "tableedit", "gridedit"],
+        ModeCmd::GridEdit,
+        "^T",
+        "grid edit",
+    ),
+    // Only the full word: \c beside ^C (the *internal* copy) would
+    // read as the same thing, and it is not.
+    (&["clipboard"], ModeCmd::CopyAa, "^Y", "AA to clipboard"),
+    // Quit alone has no one-letter spelling: \q is one typo from
+    // quitting, and nothing else here is that irreversible.
+    (&["quit"], ModeCmd::Quit, "^Q", "quit"),
+];
+
+/// The mode command a spelling names, if any.
+pub fn mode_command(cmd: &str) -> Option<ModeCmd> {
+    MODE_COMMANDS
+        .iter()
+        .find(|(names, ..)| names.contains(&cmd))
+        .map(|&(_, mode, ..)| mode)
+}
+
 /// Resolve a command spelling to the edit it performs. Pure: this is
 /// the whole input side of the command layer, so "is it valid" and
 /// "what would it do" (the preview) come for free. Order matters and
@@ -545,5 +597,27 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A mode spelling must never shadow an edit: `\t` is grid mode
+    /// only because no symbol answers to it, and the moment one does
+    /// this fails instead of a command silently changing meaning. The
+    /// walk the docs promise — \t (mode) -> \ta (edit) — is pinned
+    /// too.
+    #[test]
+    fn mode_spellings_shadow_nothing() {
+        for (names, mode, ..) in MODE_COMMANDS {
+            for n in *names {
+                assert_eq!(mode_command(n), Some(*mode), "\\{} dispatches elsewhere", n);
+                assert!(resolve(n).is_none(), "\\{} is also an edit", n);
+            }
+        }
+        assert!(mode_command("t").is_some() && resolve("ta").is_some());
+        assert!(mode_command("ta").is_none());
     }
 }

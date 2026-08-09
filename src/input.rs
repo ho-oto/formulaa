@@ -129,6 +129,23 @@ impl Editor {
         Some(Effect::None)
     }
 
+    /// Run a committed minibuffer spelling. The mode commands are
+    /// the input layer's own — they move a mode, the clipboard, or
+    /// the app itself, which no `Edit` can say — and everything else
+    /// is the editor's `execute`.
+    fn run_command(&mut self, cmd: &str) -> Effect {
+        use crate::editor::ModeCmd;
+        match crate::editor::mode_command(cmd) {
+            Some(ModeCmd::Free) => self.start_free(),
+            Some(ModeCmd::BlockSelect) => self.start_block_select(),
+            Some(ModeCmd::GridEdit) => self.grid_mode_toggle(),
+            Some(ModeCmd::CopyAa) => return Effect::CopyAa,
+            Some(ModeCmd::Quit) => return Effect::Quit,
+            None => self.execute(cmd),
+        }
+        Effect::None
+    }
+
     /// Minibuffer (`\command`) mode captures most keys. Tab opens the
     /// completion popup; while it is open the arrows pick a row and
     /// Enter takes it, so the list behaves like any editor's.
@@ -138,6 +155,7 @@ impl Editor {
             // one used to keep a "no completion for \x" notice up while
             // the very next keystroke opened a populated list.
             self.clear_message();
+            let mut fx = Effect::None;
             match key {
                 // Esc peels the popup first, then the minibuffer.
                 Key::Esc => {
@@ -181,11 +199,15 @@ impl Editor {
                 // finishing what you started is what Tab is for. Only
                 // when it is *not* a command does Tab ask for help.
                 Key::Tab => {
+                    // Tab never runs a mode command — leaving the
+                    // formula (or the program) must be an explicit
+                    // Enter, not a completion reflex.
                     let picked = self
                         .completion
                         .as_ref()
                         .and_then(|l| l.selected())
-                        .and_then(|i| i.commit().map(str::to_string));
+                        .and_then(|i| i.commit().map(str::to_string))
+                        .filter(|c| crate::editor::mode_command(c).is_none());
                     let query = self.minibuffer.clone().unwrap_or_default();
                     // Only a spelling that runs something: `\lr` and
                     // `\matrix` print their usage instead, and Tab
@@ -195,7 +217,7 @@ impl Editor {
                         Some(cmd) => {
                             self.completion = None;
                             self.minibuffer = None;
-                            self.execute(&cmd);
+                            fx = self.run_command(&cmd);
                         }
                         None => match crate::complete::Completion::build(&query) {
                             Some(list) => self.completion = Some(list),
@@ -246,7 +268,7 @@ impl Editor {
                         .and_then(|l| l.selected().and_then(|i| i.commit()).map(str::to_string));
                     if let Some(cmd) = picked {
                         self.minibuffer = None;
-                        self.execute(&cmd);
+                        fx = self.run_command(&cmd);
                     }
                 }
                 Key::Enter | Key::Char(' ') => {
@@ -256,7 +278,7 @@ impl Editor {
                         // \ followed by Space: the meaningful space ␣.
                         self.execute("space");
                     } else {
-                        self.execute(&cmd);
+                        fx = self.run_command(&cmd);
                     }
                 }
                 // Graphic chars (not just alphanumerics): the symbol
@@ -267,7 +289,7 @@ impl Editor {
                 }
                 _ => {}
             }
-            Effect::None
+            fx
         })
     }
 
@@ -401,8 +423,25 @@ impl Editor {
                 Key::Char('c') | Key::Char('|') => self.grid_lanes(true),
                 Key::Char('r') | Key::Char('-') => self.grid_lanes(false),
                 Key::Backspace | Key::Delete => self.grid_clear_cells(),
-                // Enter: leave the mode and edit this cell.
-                Key::Enter | Key::Esc | Key::Tab => self.grid = None,
+                // Enter: leave the mode with the highlighted cell as
+                // the selection (a multi-cell rectangle has no linear
+                // equivalent and just leaves).
+                Key::Enter => {
+                    let single = match gs {
+                        crate::editor::GridSel::Cells { anchor } => {
+                            anchor.is_none() || anchor == self.grid_info().map(|(.., c)| c)
+                        }
+                        _ => false,
+                    };
+                    if single {
+                        self.grid_commit_cell();
+                    } else {
+                        self.grid = None;
+                    }
+                }
+                // `\` leaves the mode the way it leaves ^F and ^B —
+                // reaching for a command is reaching for the editor.
+                Key::Esc | Key::Tab | Key::Char('\\') => self.grid = None,
                 // Any other key: the help line already spells
                 // the mode's keys (the key layer does not
                 // author user-facing text).
@@ -425,9 +464,10 @@ impl Editor {
                     Key::Backspace | Key::Delete | Key::Char('d') => self.lane_delete_sel(),
                     Key::Char('c') | Key::Char('|') if !cols => self.grid_lanes(true),
                     Key::Char('r') | Key::Char('-') if cols => self.grid_lanes(false),
-                    // Esc leaves grid mode altogether; the
-                    // same-axis letter drops back to cells.
-                    Key::Esc | Key::Tab => self.grid = None,
+                    // Esc (and `\`, like ^F/^B) leaves grid mode
+                    // altogether; the same-axis letter drops back to
+                    // cells.
+                    Key::Esc | Key::Tab | Key::Char('\\') => self.grid = None,
                     Key::Char('c') | Key::Char('|') | Key::Char('r') | Key::Char('-') => {
                         self.grid = Some(crate::editor::GridSel::Cells { anchor: None })
                     }

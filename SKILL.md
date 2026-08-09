@@ -7,160 +7,186 @@ description: >
   mascii AA form, or to embed re-editable math in plain-text documents.
 ---
 
-# mascii AA 数式の読み書き
+# Reading and writing mascii AA math
 
-mascii の AA 形式は「見た目が数式そのもの」でありながら、機械的に
-LaTeX へ変換できるプレーンテキスト表現である。この文書だけで
-正しい AA を書けるように規則をまとめる。
+The mascii AA format looks like the formula itself while converting
+mechanically to LaTeX. This document alone should let you write correct
+AA.
 
-## 検証コマンド(利用可能なら必ず使う)
+## Verification commands (always use them when available)
 
 ```sh
-echo '<AA>' | mascii fmt      # パースして正準形に整形(エラーなら不正)
-echo '<AA>' | mascii aa2tex   # LaTeX に変換して意味を確認
+echo '<AA>' | mascii fmt      # parse and canonicalize (an error means invalid)
+echo '<AA>' | mascii aa2tex   # convert to LaTeX to confirm the meaning
 ```
 
-書いた AA は `mascii fmt` に通り、出力が自分の意図と一致すれば正しい。
-手書きでは **寛容モード**が使える: 単独の ASCII 1文字は
-イタリック変数(`x+1` → 𝑥+1)。ただし **2文字以上のランはローマン体**
-(`asiny` → \operatorname{asiny}、`sin` → \sin)なので、変数の積は `a b` と
-空白で切るか `𝑎𝑏` とイタリック体で書く。
+Your AA is correct when `mascii fmt` accepts it and the output matches
+your intent. Hand-written input is **lenient**: a lone ASCII letter is
+an italic variable (`x+1` → 𝑥+1), but a **run of 2+ letters is
+upright** (`asiny` → \operatorname{asiny}, `sin` → \sin), so write a
+product of variables as `a b` (spaced) or `𝑎𝑏` (italic code points).
 
-## 基本原則
+## Principles
 
-1. 数式は文字グリッド。**各部分式は矩形領域+基線行**を持ち、兄弟は
-   互いに素な列範囲を占める。
-2. 上下に重なる位置関係(分子/分母、極限、スクリプト)は空白でなく
-   **構造グリフ**(罫線・バンド・括弧列)で範囲を示す。
-3. 迷ったら1行で書く: `x²+1` のような1行表現はほぼ常に安全。
+1. A formula is a character grid. **Every subexpression owns a
+   rectangle plus a baseline row**; siblings occupy disjoint column
+   ranges.
+2. Vertical relationships (numerator/denominator, limits, scripts) are
+   marked by **structural glyphs** (bars, bands, delimiter columns),
+   never by whitespace alone.
+3. When unsure, write on one line: `x²+1`-style one-liners are almost
+   always safe.
 
-## 構造の書き方
+## Structures
 
-### 分数 — 罫線 `─` (U+2500)
-罫線は分子・分母より広く(最大幅+2)、罫線行が基線。
-```
+### Fractions — the bar `─` (U+2500)
+
+The bar is wider than either half (max width + 2); the bar row is the
+baseline.
+
+```plain
  1        a+b
 ───   ─────────
  2      c + d
 ```
-マイナスは ASCII の `-` のまま(罫線 `─` とは別字なので衝突しない)。
 
-### 上付き・下付き — 可能ならインライン文字
-`x²` `aᵢ` `e⁻ⁱ`(対応文字: ⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿⁱ /
-₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ)。
-インライン化できない内容は 2D 配置(基底の**右上/右下**に置く):
-```
+Minus stays ASCII `-` (a different character from the bar).
+
+### Scripts — inline characters when possible
+
+`x²` `aᵢ` `e⁻ⁱ` (available: ⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿⁱ /
+₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ). Anything else becomes a 2D block at
+the base's **upper/lower right**:
+
+```plain
  α+1
 𝑥        ← x^(α+1)     𝑥      ← x_(α+1)
-          α+1
+                        α+1
 ```
-行頭にスクリプトだけを置く場合は基底 `⬚` を明示: `⬚²`。
 
-### 累乗根 — `√ ∛ ∜` + 罫線オーバーライン `┌──`
-```
+A script at the start of a row needs the explicit base `⬚`: `⬚²`.
+
+### Radicals — `√ ∛ ∜` plus the overline `┌──`
+
+```plain
 ┌────       ┌───
 √x+12       │ 1
-            │───    ← 茎 │ が内容の全行を覆い、最下行が根号(例は3乗根)
+            │───    ← the stem │ covers every content row; the bottom is the root glyph
             ∛ 2
 ```
-上端行は `┌`(茎の列)+ `─` の連続で、`─` の長さ=引数の幅。
-1行内容なら `√` の右に直接。
 
-### 上下極限 — バンド `┈` (U+2508)
-**空白なしで `┈` に挟まれた列**は何であれ上下に極限を取る(∑ も lim も
-同じ記法)。バンドと隣は空白1で区切る。極限なしは裸の `∫` でよい。
-```
+Top row: `┌` (the stem's column) + a `─` run as long as the argument.
+One-line content sits directly right of `√`.
+
+### Limits — the band `┈` (U+2508)
+
+**Anything sandwiched by `┈` without spaces** takes limits above and
+below (∑ and lim use the same notation). One space separates a band
+from its neighbors. No limits → the bare `∫` is fine.
+
+```plain
   ∞
-┈┈∑┈┈ aₙ      ┈lim┈ f(x)      ┈argmax┈ f(x)   ← 中身は1語(空白なし)
+┈┈∑┈┈ aₙ      ┈lim┈ f(x)      ┈argmax┈ f(x)   ← one word, no spaces
  n=1           x→0                x∈S
 ```
 
-### デリミタ — 1行は `( ) [ ] { } ⟨ ⟩ ⎢ ⎥ ⌈ ⌉ ⌊ ⌋ ‖ ┆ ┊`、複数行は列グリフ
-```
+### Delimiters — `( ) [ ] { } ⟨ ⟩ ⎢ ⎥ ⌈ ⌉ ⌊ ⌋ ‖ ┆ ┊` on one line, columns when tall
+
+```plain
 ⎛    1 ⎞    ⎧ 1 ⎫     ╱    1 ╲
 ⎜1 + ─ ⎟    ⎨───⎬    ╱ 𝑥+─── ╲    ⎢𝑥⎥ = |x|
 ⎝    x ⎠    ⎩ 2 ⎭    ╲    2  ╱
                       ╲     ╱
 ```
-- 丸括弧 `⎛⎜⎝`、角括弧 `⎡⎢⎣`、波括弧 `⎧⎪⎨⎩`(**頂点 ⎨ は必ず基線行**)、
-  山括弧は**罫線の腕 `╱ ╲` のみ**(高さは常に偶数、`⟨ ⟩` を使うのは1行の
-  ときだけ)。折り返しは同一列の縦ペア — 左は `╱` の直下に `╲`、右は
-  `╲` の直下に `╱` — で、**ペアの上側の行が基線**。
-- 縦棒(絶対値)は左 `⎢` / 右 `⎥`(角括弧の延長片 U+23A2/23A5 の流用。
-  列に角 ⎡⎣/⎤⎦ が無ければ縦棒と読む。`|` は原子、`│` は根号の茎)。
-- **middle**(braket や集合の内包表記): 全高の `│` 列で区切る:
-  `⟨ψ│H│ψ⟩` → ⟨ψ|H|ψ⟩、`{𝑥│𝑥 > 0}` → \{x \mid x>0\}。
-- 左右不一致も可: `(0,1]`。
-- ceil/floor は `⌈ ⌉ ⌊ ⌋`(複数行はブラケット片を片角だけ:
-  ceil = `⎡`+`⎢` で足なし、floor = `⎢`+`⎣` で頭なし)、
-  ノルムは `‖` の全高列(複数行は同じ `‖` を縦に積む。ノルム直下のノルム入れ子は
-  書けない — 内側は `⎢ ⎥` で)。
-- **ヌルデリミタ** 左 `┆` U+2506 / 右 `┊` U+250A(破線 — `┈` と同じ幽霊系): 「片側なし」
-  (LaTeX の `\left.`/`\right.` 相当)。cases はこれ:
-  `⎧` + 中身の格子 + 右の `┊` 列。
 
-### 行列・グリッド — 格子(どこでも同じ絵)
-区切り行・区切り列の交点(外周含む)に `┌┬┐ ├┼┤ └┴┘` を置く。行列は
-これをデリミタで挟むだけ。セル内外の空白は自由(境界はマーカーが決める):
-```
+- Parens `⎛⎜⎝`, brackets `⎡⎢⎣`, braces `⎧⎪⎨⎩` (**the vertex ⎨ is
+  always the baseline row**); tall angles are **diagonal arms `╱ ╲`
+  only** (even height, `⟨ ⟩` on one line only). The fold is a vertical
+  pair in one column — left: `╱` directly above `╲` — and the upper
+  row of the pair is the baseline.
+- Absolute value: left `⎢` / right `⎥` (bracket extension pieces; a
+  column with no corners reads as a bar; `|` is an atom, `│` is the
+  radical stem / segment separator).
+- **Middles** (bra-kets, set-builder): full-height `│` columns split
+  segments: `⟨ψ│H│ψ⟩`, `{𝑥│𝑥 > 0}` → \{x \mid x>0\}.
+- Mismatched pairs are fine: `(0,1]`.
+- Ceil/floor: `⌈ ⌉ ⌊ ⌋` (tall: bracket pieces with one corner dropped —
+  ceil has no foot, floor has no head). Norm: a full-height `‖` column
+  (tall: the same `‖` stacked; a norm directly inside a norm cannot be
+  written — use `⎢ ⎥` inside).
+- **Null delimiters** left `┆` U+2506 / right `┊` U+250A ("no wall
+  here", `\left.`/`\right.`). `cases` is `⎧` + a grid + a right `┊`.
+
+### Matrices and grids — the lattice (the same picture everywhere)
+
+Junction glyphs `┌┬┐ ├┼┤ └┴┘` sit at every separator intersection,
+outer border included; a matrix just wraps the grid in a delimiter
+pair. Whitespace inside cells is free — markers decide the boundaries:
+
+```plain
 ┌   ┬   ┐      ⎡ a   b ⎤     ⎡   ┬   ⎤     ⎛ a ⎞
   a   b        ⎢   ┼   ⎥     ⎢ a   b ⎥     ├   ┤
 ├   ┼   ┤      ⎣ c   d ⎦     ⎣   ┴   ⎦     ⎝ b ⎠
-  c   d        ← bmatrix      1行ベクトル    1列ベクトル(接合 ├┤ は
-└   ┴   ┘       (区切り行は空白+┼ のみ)      ⎛系が同じ列に続くことで縁と区別)
+  c   d        ← bmatrix      one row       one column (the ├┤ junctions
+└   ┴   ┘       (separator     (┬┴ rows)     bite into the delimiter column)
+                rows: spaces + ┼)
 ```
 
-### アクセント — 基底1文字の真上/真下にマーク(縦に重ね掛け可)。
-複数文字には**マーク入りバンド行**を基底の上(下)に密着させる:
-```
+### Accents — marks directly above/below a one-character base (stackable)
+
+For multi-character bases, a **marked band row** hugs the base:
+
+```plain
 ┈┈˰┈┈     ┈┈￫┈     ┈___┈
  𝑎𝑏𝑐       𝐴𝐵       𝑧+1   ← \widehat / \vec / \overline
-                           (下に ┈¯¯¯┈ なら \underline、┈˜˜˜┈ なら
-                            \utilde。基底は裸のまま)
+                           (below: ┈¯¯¯┈ = \underline, ┈˜˜˜┈ = \utilde;
+                            the base stays bare)
 ```
-マーク文字は専用(AST 上: `^` `˜` `¯` `⇀` `˙` `¨` `ˇ` `˚` / 下:
-`‗` `˷`)。描画はすべて基底に密着する形: 1文字の bar は真上に `_`、
-hat は `˰`、tilde は `˷`、check は `˯`、ring は `˳`、dot は `․`
-U+2024(原子の `.` とは別字)、vec は `￫` U+FFEB(原子の `→` とは
-別字)、ddot は `․․`(右に1列はみ出し、その列の基線は空白のまま)、
-underline は真下に `¯`、utilde は真下に `˜`
-(チルダは AST と描画が上下で入れ替わる対。AA に書くのは密着形のみ —
-AST マーク文字を直接置く旧形式は読めない)
-```
+
+All marks draw in base-hugging forms: bar above is `_`, hat `˰`, tilde
+`˷`, check `˯`, ring `˳`, dot `․` U+2024 (not the atom `.`), vec `￫`
+U+FFEB (not the atom `→`), ddot `․․` (overhanging one column right,
+that column's baseline stays blank), underline is `¯` below, utilde `˜`
+below (the tildes swap between AST and drawing).
+
+```plain
 ￫       ￫        ˰
-E ⋅ d A          ￫    ← 重ね掛けは縦に積む(内側が基底寄り): \hat{\vec{a}}
+E ⋅ d A          ￫    ← stacks grow outward: \hat{\vec{a}}
                  𝑎
 ```
 
-### 否定 — 合成済みの斜線付き原子を使う(結合文字の打ち消し線は不可)
-U+0338 のような結合オーバーレイは受理されない(明示エラー)。否定は
-≠ ∉ ⊄ ≢ など Unicode の合成済み文字で書く。
+### Negation — precomposed slashed atoms only
 
-### 空白 — 実スペースは自由、意味のある空白は `␣` (U+2423、`\space` か `\`+Space)
-実スペースは整形用で、パースで消える(区切りとして消費)。LaTeX に空白を
-出したいときだけ可視の `␣` を置く(LaTeX `\ `)。
+Combining overlays like U+0338 are rejected (explicit error). Write
+≠ ∉ ⊄ ≢ … directly.
 
-### ローマン体 — 裸のラン(2文字以上=\operatorname)、1文字は `'…'`、テキストは `"…"`
-`dx` `asiny` のような英字ラン(非辞書語)はそのまま \operatorname。
-`i.i.d.` `w.r.t.` のような略語もドットごと1ランで立体(内部の `.` は
-直後が英字のとき、末尾の `.` はランが既に `.` を含むときだけ参加 —
-`sin.` は \sin+ピリオドのまま)。単独1文字は
-`d𝑦` のように文字に密着させればローマン(微分の d、1文字は \mathrm)。孤立させるときだけ
-`'d'` と引用する(引用符は曖昧なときだけ必要 — mascii 自身の出力も
-文脈で自動着脱する)。
-`"if x"` → \text{if x}(実空白そのまま。`\"` `\\` でエスケープ)。
-`'` は**常に** \mathrm 引用の区切り — prime は独立した原子 `′` U+2032。
+### Spaces
 
-### ラベル付き伸縮矢印 — 胴体 `─`(⇒⇐ は `═`)+ 先端 `>` `<`
-```
+Real spaces are formatting and vanish on parse. To put a space into the
+LaTeX output use the visible atom `␣` U+2423 (`\space`; a LaTeX control space).
+
+### Upright text — bare runs, `'…'`, `"…"`
+
+Letter runs like `dx` `asiny` are upright (`\operatorname`);
+abbreviations with dots (`i.i.d.`, `w.r.t.`) are one run. A single
+letter is roman only when glued to a letter (`d𝑦`, the differential);
+isolate it as `'d'`. `"if x"` → `\text{if x}` (real spaces allowed,
+`\"` `\\` escape). `'` is **always** a quote delimiter — the prime is
+the atom `′` U+2032.
+
+### Labelled stretchy arrows — body `─` (`═` for ⇒⇐) + head `>` `<`
+
+```plain
    f
-A────>B     ← A \xrightarrow{f} B(ラベルは矢印の上下に中央寄せ)
+A────>B     ← A \xrightarrow{f} B (labels centered above/below)
 ```
-`─` のランに先端が直接続けば矢印、空白を挟めば分数+原子
-(`─── >`)。二重矢印は `══>` / `<══`。
+
+A head glued to the run makes an arrow; a space makes a fraction bar
+plus an atom (`─── >`). Double arrows: `══>` / `<══`.
 
 ### overbrace / underbrace — `╭──╮` / `╰──╯`
-```
+
+```plain
   n
 ╭───╮
  a+b + c      ← \overbrace{a+b}^{n} + \underbrace{c}_{m}
@@ -168,75 +194,83 @@ A────>B     ← A \xrightarrow{f} B(ラベルは矢印の上下に中央
        m
 ```
 
-### 関数名 — 立体 ASCII で書く
-`sin cos tan log ln exp lim det …` は立体のまま書く(変数はイタリック体
-`𝑥` になるので区別される)。`\sin x` は `sin x` か `sin𝑥` と書く
-(`sinx` は辞書語でないので \operatorname{sinx} になる)。
+### Function names — upright ASCII
 
-## 予約文字(原子として使ってはいけない)
+`sin cos tan log ln exp lim det …` are written upright (variables
+italicize to `𝑥`, so they stay distinct). Write `\sin x` as `sin x` or
+`sin𝑥` (`sinx` is not a dictionary word and becomes
+`\operatorname{sinx}`).
+
+## Reserved characters (never atoms)
 
 `─ ┈ ═ │ √∛∜ ( ) [ ] ⎛⎜⎝⎞⎟⎠ ⎡⎢⎣⎤⎥⎦ { } ⟨ ⟩ ⎧⎪⎨⎩⎫⎬⎭ ╱ ╲ ┆ ┊ ⬚ ▌
-┌ ┬ ┐ ├ ┼ ┤ └ ┴ ┘ ╭ ╮ ╰ ╯ ¯ ˜ ˷ _ ˰ ˯ ˳ ․ ￫ ' "`、
-数学イタリック体(𝐴–𝑧, ℎ)、インライン上付き・下付き文字。
-これら以外は**表にある文字だけ**が使える(α ≤ ∈ → ℝ ⊗ …)。表に無い
-文字・全角文字・絵文字はパースエラー(1セル1文字のグリッドが崩れ、
-LaTeX の綴りも無いため)。ASCII では `^ ~ \` `` ` `` も不可 — `\sim`
-`\backslash` などを使う。
+┌ ┬ ┐ ├ ┼ ┤ └ ┴ ┘ ╭ ╮ ╰ ╯ ¯ ˜ ˷ _ ˰ ˯ ˳ ․ ￫ ' "`,
+math-italic letters, inline script characters. Beyond those, only
+characters in the symbol tables are usable (α ≤ ∈ → ℝ ⊗ …); anything
+else — full-width characters, emoji — is a parse error (it would shear
+the one-cell grid and has no LaTeX spelling). In ASCII, `^ ~ \` and the
+backtick are also unusable — write `\sim`, `\backslash`.
 
-## 複数行数式
+## Multi-line formulas
 
-行のブロックを縦に並べ、間に **`┈` 1文字だけの行**(左端)を挟む:
-```
+Stack line blocks with a **lone `┈` line** between them:
+
+```plain
 𝑦=(𝑥+1)²
 ┈
 =𝑥²+2𝑥+1
 ```
-LaTeX では `\\` になる。align 相当の桁揃えはない。
 
-## 曖昧さを避けるコツ
+LaTeX `\\`. There is no alignment.
 
-- 空の上付き/下付き(`⬚` だけのスクリプト)は書かない(正準形に存在しない)。
-- 見た目の間隔は `␣` で入れる(実スペースは正準形で消える)。
-- 積分・総和の極限は必ずバンド `┈` で。`∑` の上下にただ置くだけでは
-  入れ子(極限の中の ∫ など)が曖昧になり、エラーになる。
-- 基線上のトークンの真上・真下に(アクセントマーク以外の)内容を
-  重ねない — 黙って捨てられず、パースエラーになる。上付き・下付きは
-  基線が空白の列に置く。
+## Avoiding ambiguity
 
-## 例
+- Never write an empty script (a `⬚`-only exponent) — it doesn't exist
+  in canonical form.
+- Use `␣` for visible spacing (real spaces are eaten by `fmt`).
+- Always band (`┈`) the limits of ∑/∫ — bare stacking is ambiguous with
+  nesting and errors out.
+- Never overlap content directly above/below a baseline token (other
+  than accent marks) — it errors rather than being dropped.
 
-(読みやすさのため実スペースを入れている。整形 `mascii fmt` は空白を詰める)
+## Examples
 
-二次方程式の解:
-```
+(Real spaces added for readability; `mascii fmt` tightens them.)
+
+Quadratic formula:
+
+```plain
     ┌──────
  -𝑏±√𝑏²-4𝑎𝑐
 ────────────
      2𝑎
 ```
 
-ガウス積分:
-```
+Gaussian integral:
+
+```plain
  ∞    -𝑥²   ┌─
 ┈∫┈┈ 𝑒   𝑑𝑥=√π
  -∞
 ```
 
-ベイズの定理(1行で十分な例):
-```
-𝑃(𝐴|𝐵) = 𝑃(𝐵|𝐴)𝑃(𝐴)/𝑃(𝐵)   ← ただし分数を 2D にした方が読みやすい
+Bayes (a one-liner is enough):
+
+```plain
+𝑃(𝐴|𝐵) = 𝑃(𝐵|𝐴)𝑃(𝐴)/𝑃(𝐵)
 ```
 
-回転行列:
-```
+Rotation matrix:
+
+```plain
   ⎡ cosθ   -sinθ ⎤
 𝑅=⎢      ┼       ⎥
   ⎣ sinθ   cosθ  ⎦
 ```
 
-## 完全な仕様
+## Full specification
 
-`docs/aa-spec.md`(正準AA形式仕様)と `docs/design.md`(設計判断)を参照。
-確信が持てない構造は、まず `mascii` の TUI かライブラリ
-(`mascii::render::render_root` + `RenderCtx::canonical()`)で生成した
-出力を手本にすること。
+See `docs/aa-spec.md` (the format spec) and `docs/adr.md` (decision
+records). For any structure you are unsure of, generate a reference
+picture first with the `mascii` TUI or the library
+(`mascii::render::render_root` + `RenderCtx::canonical()`).

@@ -17,7 +17,7 @@ mod modes;
 
 use modes::gap_shift_cell as modes_gap_shift;
 
-pub use command::{Edit, preview_row, resolve};
+pub use command::{Edit, MODE_COMMANDS, ModeCmd, mode_command, preview_row, resolve};
 
 /// One undo step: the formula with the cursor that belonged to it.
 type Snapshot = (Row, Vec<(usize, Field)>, usize);

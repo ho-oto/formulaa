@@ -2,7 +2,7 @@
 //! is a named constant here — tweak freely; nothing else in the code
 //! hard-codes a color.
 //!
-//! The palette is deliberately small (docs/design.md カラーパレット):
+//! The palette is deliberately small:
 //!
 //! - **紫 (selection)** — one main purple for "this is selected / the
 //!   cursor itself" and one softer purple for the secondary kind (the
@@ -78,6 +78,12 @@ pub const GRID_FRAME_FG: Color = Color::Green;
 /// so the modal layer shows at the cursor itself.
 pub const BOX_CURSOR_FG: Color = Color::Black;
 pub const BOX_CURSOR_BG: Color = Color::Green;
+
+/// The minibuffer overlay while the typed name is a *mode* command
+/// (\f \b \t \c \q — it moves a mode, not the formula): the
+/// selection purple, so the three grounds stay three ideas — green
+/// runs an edit, purple changes where/how you stand, red runs nothing.
+pub const MINIBUF_MODE_BG: Color = PURPLE;
 
 // ----- 赤: error -----
 

@@ -1,279 +1,84 @@
-# mascii キーボードマニュアル
+# Keys
 
-TUI エディタ(`cargo run` / `mascii`)の全キー・全コマンドのリファレンス。
-エディタは LyX 型の構造エディタで、カーソルは常に「数式構造の中の編集位置」
-にあります。同じキーマップが VSCode / Obsidian / Zed 拡張(wasm)でも
-使われます。
+The TUI (`mascii`) is a LyX-style structural editor: the cursor is
+always an edit position inside the formula tree. The same keymap runs
+in the wasm-based editor extensions. `\commands` (including completion
+and the mode spellings for stolen ctrl chords) are in
+[commands.md](commands.md).
 
-## 基本入力
+## Typing
 
-| キー | 動作 |
-|---|---|
-| 英数・記号 | 原子を挿入(英字はイタリック変数 𝑥 に。`-`→−、`*`→∗) |
-| `^` / `_` | 上付き / 下付きに入る(可能なら `x²` `aᵢ` とインライン表示) |
-| `(` `[` `{` | 自動サイズ括弧に入る(選択中はそれを包む) |
-| `)` `]` `}` | 括弧を閉じて外へ(`]` は行列からの脱出も) |
-| `//` | 分数(`/` 2連打。リテラル `//` は `/ /` と打って間の空白を消す) |
-| `Space` | 整形用の空白(LaTeX に出ない。意味のある空白は `\space`→␣) |
-| `\` | コマンド入力(下の「コマンド」参照)。入力中の `\command` は**カーソル位置に重ねて表示**され(赤=まだ `Enter` で通らない綴り。打ちかけの名前も、引数がまだの `\lr` `\matrix` も赤)、既知の名前は**確定結果をその場にプレビュー**(記号はカーソル位置のゴースト文字、`\frac` などの構造は直下に ⬚ スロット付きの形)。プレビューも補完も数式の**上に浮かぶ**だけなので、下の数式はずれない(両者は同じ箱の大小 — 同じ灰地・同じ位置に出て、`Tab` で場所は動かない)。`Tab` で補完一覧(下記)。`Enter`/`Space` で確定、`Esc` 取消。`\`+`Space` は意味のある空白 ␣ |
-| `"` | **テキストモード**: 入力して閉じ `"` で確定(`\text`)。`\"` `\\` でエスケープ、括弧類は不可 |
-| `'` | prime ′(立体ランの引用符は入力できない — `\rm…` を使う) |
+| Key | Action |
+| --- | --- |
+| letters, digits, symbols | insert atoms (letters become math italics) |
+| `^` `_` | enter a super/subscript (inlined as `x²` when possible) |
+| `(` `[` `{` | enter an auto-sizing pair (wraps the selection) |
+| `)` `]` `}` | close the pair and step out (`]` also exits a matrix) |
+| `//` | fraction (type `/` twice) |
+| `Space` | formatting space (not in LaTeX output; `\space` is the semantic `␣`) |
+| `"` | text mode: type prose, close with `"` (`\text`) |
+| `'` | the prime atom ′ |
+| `\` | command minibuffer — see [commands.md](commands.md) |
 
-## 移動
+## Moving
 
-| キー | 動作 |
-|---|---|
-| `←` `→` | 構造の中を通り抜けながら移動(選択中は選択の左端/右端へ集約) |
-| `↑` `↓` | 分子⇄分母、極限の上⇄下、行列の行移動。直前が裸の ∑/lim ならバンドに昇格して極限へ。縦ターゲットがなければ複数行数式の行間移動(列位置を保持) |
-| `Tab` | 現在のインセット(分数・根号・極限・括弧など)から抜ける |
-| `Home` / `End` | 現在行の先頭 / 末尾(複数行数式では Break 区切りの行単位) |
-| `Ctrl+A` / `Ctrl+E` | 数式全体の先頭 / 末尾へ |
-| `Delete` / `Ctrl+D` | カーソルの右を削除(`Backspace` の逆向き)。^T グリッド編集中はどちらも選択セルの中身クリア |
-| 構造の外側で `Backspace`/`Delete` | 中身のある構造(分数・根号・括弧 …)に外から削除が触れると、まず**その構造全体が選択**され、もう一度押すと消える(中に入って編集するのは矢印キーの役)|
-| マウスクリック | クリック位置に最も近い編集位置へ(端末のテキスト選択は Shift+ドラッグに) |
-| `Ctrl+F` | **フリーカーソルモード**(下記) |
+| Key | Action |
+| --- | --- |
+| `←` `→` | move through structure |
+| `↑` `↓` | numerator ⇄ denominator, limits, matrix rows; multi-line rows otherwise |
+| `Tab` | leave the current inset |
+| `Home` `End` | start / end of the current line |
+| `Ctrl+A` `Ctrl+E` | start / end of the formula |
+| mouse click | nearest edit position |
+| `Enter` (top level) | formula line break |
 
-## 複数行数式
+## Selecting
 
-| キー | 動作 |
-|---|---|
-| `Enter`(トップレベル) | 数式の改行。行間に `┈` 1文字の区切り行が入る(align 相当の桁揃えはなし) |
-| 行頭で `Backspace` | 前の行と結合 |
-| `↑` `↓` | 行間移動(列位置をなるべく保持) |
+| Key | Action |
+| --- | --- |
+| `Shift+←` `Shift+→` | grow / shrink the selection |
+| `Shift+↑` | select the parent block |
+| `Ctrl+B` | block-select mode: walk the ancestor chain with the arrows, `Enter` selects |
+| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | copy / cut / paste (editor clipboard) |
+| structure keys, with a selection | containers (`(`, `\frac`, `\sqrt`, `\norm`, `\abs`, `\lr…`) wrap it; content inserts (symbols, functions, matrices) replace it |
 
-## 選択・クリップボード
+## Deleting
 
-| キー | 動作 |
-|---|---|
-| `Shift+←` `Shift+→` | 選択を伸縮(背景色で表示) |
-| `Shift+↑` | 選択を親ブロックへ拡大 |
-| `Ctrl+B` | **ブロック選択モード**: いま選ばれている祖先を選択色で、その**1つ内側と1つ外側だけ**を淡い色で表示(矢印は1段ずつ動くので、見える必要があるのも1段だけ)。↑/→=外側へ、↓/←=内側へ、Enter で選択、`Shift+←/→`=選択してそのまま通常選択の伸縮へ、もう一度 `Ctrl+B`/Esc で解除(ラベルキーは無し — 移動はカーソルキーのみ) |
-| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | コピー / カット / ペースト |
-| `←` / `→`(選択中) | 選択を解除して左端 / 右端へ |
-| `Backspace` / `Delete`(選択中) | 選択範囲を削除 |
-| 構造キー(選択中) | `^` `_` `(` `[` `{` `\frac` `\sqrt`(`\cbrt` `\qdrt` も)`\norm` `\abs` `\ceil` `\braket` `\lr…` などの入れ物は選択を包む(`\braket`/`\set` は選択が第1セグメントに入り、カーソルは次のセグメントへ)。**内容の挿入(記号・Space・`\sin` 等の関数・∑バンド・行列・名前ボックス・Enter)は選択を置換**(通常のエディタと同じ) |
+| Key | Action |
+| --- | --- |
+| `Backspace` / `Delete` (`Ctrl+D`) | delete left / right |
+| …with a selection | delete the selection |
+| …touching a non-empty structure from outside | first press selects it whole, second deletes it (entering to edit is what the arrows are for) |
+| …just inside a bracket, `\sqrt`, or `\norm` | first press lights the pair up (arms it), second lifts the contents out, third deletes them |
+| `Shift+←/→` touching just the bracket | arms the same way — the next delete unwraps without selecting anything |
 
-## コマンドの補完(`Tab`)
+Pairs with `│` mids and brackets whose sole content is a matrix don't
+unwrap (there is no single "contents"); empty pairs delete in one
+press.
 
-`\` に続けて途中まで打ってから `↑`/`↓` を押すと、カーソルの下に補完一覧が
-出る(`Tab` は打った名前がまだコマンドでないときだけ一覧を出し、
-コマンドになっていれば**そのまま確定**する)。各行は**挿入されるシンボルと、
-その綴り**:
+## Undo, output, quitting
 
-```
-\al
- α    al/p/ha
- ∀    A, all, forall
- ℵ    aleph
-```
+| Key | Action |
+| --- | --- |
+| `Ctrl+Z` / `Ctrl+R` | undo / redo |
+| `Ctrl+Y` | copy the canonical AA to the system clipboard |
+| `Esc` | dismiss mode → clear selection → quit |
 
-| キー | 動作 |
-|---|---|
-| `↑` `↓` | **一覧を開く / 行を選ぶ**(最初の1回は開くだけ。端で折り返す) |
-| `Tab` | **確定**: 選択行があればそれを、無くても打った名前がコマンドならそれを実行。どちらでもないときだけ一覧を出す |
-| `Enter` / `Space` | 選んだ行を確定(その行の一番長い綴りが使われる) |
-| 続けて入力 / `Backspace` | 一覧が絞り込まれる(一致が無くなっても一覧は開いたまま — 戻せば再表示される) |
-| `Esc` | 一覧だけ閉じる(打った文字は残る。もう一度で `\` 入力自体を取消) |
+## Free cursor (`Ctrl+F`)
 
-- **同じシンボルになる綴りは1行にまとまる**。`al/p/ha` は `\al` `\alp`
-  `\alpha` のどれでも α になる、という意味(どこまで打てば足りるかが
-  そのまま読める)。共通の頭を持たない綴りは `A, all, forall` のように
-  カンマで並ぶ。
-- 探し方は**前方一致 → 部分一致 → とびとび一致**の順。`in` は `\int` を
-  前方一致で、`\!in`(∉)を部分一致で拾う。
-- `\rmx` `\matrix34` `\lr(]` `\^z` のように**引数が綴りに含まれる**
-  コマンドは表に載らないが、打った綴り自体がコマンドとして通るなら
-  **その行が先頭に出る**(`Tab` を押しても意味が変わらない)。
-- 一覧には**「続き」の行**も混ざる。実行するものがまだ無い行で、
-  選んで確定すると**入力がそこまで伸びて次を訊いてくる**:
-  - スタイル族は数百字の規則なので、綴りではなく変換の範囲で示す
-    (`𝔞…𝔷  frak{a…z}` / `𝔄…ℨ  frak{A…Z}` / 数字を持つ族は `{0…9}` も)。
-    選ぶと `\frak` まで入力され、続けて文字を打てばよい。それ以上
-    進めない行をもう一度選ぶと一覧が閉じる(「あとは打って」の合図)。
-  - 行列は `pmatrix{1…9}{1…9}` のように行数・列数の形で示す。環境名を
-    打ち切ると同じ族の兄弟(`pmatrix` `bmatrix` …)も並ぶ。行数まで
-    打った途中も `matrix3{1…9}` と列数を訊く行が残る。
-  - `\lr` はトークンを1つずつ選んでいける。`\lr` で `↓` を押すと
-    `\lr(…` `\lr[…` `\lr\langle…` などが並び、選ぶと `\lr(` まで
-    入力されて**次に来られるトークンだけ**が並ぶ(開き側の次は閉じ側と
-    `|` だけ)。`\` を打てば名前形(`\lceil` など)に絞られる。`|` を
-    選んだ後は「ここで確定」のコマンド行が先頭に出たまま、さらに `|` や
-    閉じ側が続く(`|` は mid にも閉じにもなれるので両方が並ぶ)。
-    もう続けられないスペック(`\lr)` など)には続きが出ず、Enter で
-    エラーになる。
-  - `↑`/`↓` はこれらの行も含めて動く(下に隠れた行に届かなくなるため)。
-- 記号欄が空の行がある: `\addrow` `\mid` のように**結果がカーソル位置で
-  変わる**コマンドは、`resolve` が文脈を知らないので推測を描かず、
-  代わりに `delrow (delete this row)` のように短い説明を添える。
-- 綴りの畳み方は入れ子の括弧: `al[p[ha]]` は `\al` `\alp` `\alpha` の
-  どれでも α になるという意味(閉じ括弧が続くときは `]…]` に畳む)。
+Move anywhere on the grid with the arrows; the nearest edit position is
+shown as a snap target. `Enter` lands there; `Esc` cancels.
 
-## 括弧を外す(中身を取り出す)
+## Grid edit (`Ctrl+T`, inside a matrix)
 
-`(foo)` の `(` の直後で `Backspace`(または `)` の直前で `Delete`/`Ctrl+D`)を
-押すと、括弧を抜けるのではなく**括弧そのものを外す**流れに入る:
+The edited matrix's frame turns green.
 
-| 回数 | 動作 |
-|---|---|
-| 1回目 | 左右の括弧が選択色で光る(まだ何も消えない) |
-| 2回目 | 括弧が消えて中身が裸になり、**その中身全体が選択される** |
-| 3回目 | 選択された中身を削除(= 括弧ごと消したことになる) |
-
-2回目のあとに `←`/`→` を押せば選択が解けるだけなので、「括弧を外す」で
-止められる。1回目のあとに他のキーを押すと解除され、次の `Backspace` は
-また1回目から始まる。
-
-**Shift で括弧に触れても同じ流れに入れる**: 括弧の手前(または直後)で
-`Shift+→`(`Shift+←`)を押して**括弧だけに触れた**とき、ノード全体を
-選択する代わりにペアが光る(=1回目と同じ状態)。そこで
-`Backspace`/`Delete` を押せば括弧が外れる — この場合は解除の意図が
-明白なので**中身は選択されず**、カーソルが元の側に残るだけ。もう一度
-`Shift+→` を押せば従来どおりノード全体の選択になる。既にある選択を
-伸ばして括弧に達したときは従来どおり一気にノード全体を飲み込む。
-中身の端(=括弧のすぐ内側)で `Shift` を括弧側に押しても同じように
-光り、そこからはどちらの削除キーでも外せる。
-
-`\sqrt` も同じ扱い: 中身の左端(√ 記号の側)で `Backspace`、または
-√ に `Shift` で触れる(外からでも中からでも)とルートが光り、次の
-`Backspace` で中身だけが残る。`\norm`(‖ ‖)も括弧と同様に両端から
-外せる。
-
-`\lr` の │ 区切りを持つ括弧と、**中身が行列そのものだけ**の括弧
-(`\pmatrix` など)は対象外 — 取り出すべき「中身」が一つに定まらない
-ので、従来どおりカーソルが括弧の外に出る(行列を他の要素と並べて
-入れた括弧は対象になる)。空の `()`(空の √ や ‖ ‖ も)は対象外で、
-従来どおり1打鍵で消える。
-
-## undo / redo
-
-| キー | 動作 |
-|---|---|
-| `Ctrl+Z` | undo(数式が変わった操作ごとに1ステップ。カーソルも当時の位置に戻る) |
-| `Ctrl+R` | redo(新しい編集をすると redo 履歴はクリア) |
-
-## フリーカーソルモード(`Ctrl+F`)
-
-グリッド上を自由に動くカーソル(専用色)と、最寄りの編集位置への
-スナップ先が同時に表示されます。
-
-| キー | 動作 |
-|---|---|
-| `←→↑↓` | セル単位で自由移動(未展開の添え字・スロットに近づくと自動展開) |
-| `Enter` | スナップ先の編集位置に確定してモード終了 |
-| `Esc` など | キャンセル |
-
-## グリッド編集モード(`Ctrl+T`、行列の中で — **T**able)
-
-セル単位の選択と、行・列そのものの編集。
-
-モード中は**編集対象の行列のフレームが緑に変わります**。
-
-**セル選択**(モード開始時):
-
-| キー | 動作 |
-|---|---|
-| `←→↑↓` | セルカーソルを移動(現在セルがハイライト) |
-| `⇧` + 矢印 | 矩形にセル選択を拡張(隙間ごと選択色で塗りつぶし)。**軸いっぱいまで選んでさらに押すと行/列そのものの選択に昇格** |
-| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | セル矩形のコピー / カット / 貼り付け(貼り付けは上書き。はみ出す分は格子が自動で拡張。グリッド外に貼ると裸の行列ノードになる) |
-| `Backspace` / `Delete` | 選択セルの**中身**をクリア(セル自体は残る) |
-| `c` / `\|` | 列モードへ(カーソルの列を選択) |
-| `r` / `-` | 行モードへ |
-| `Enter` | モードを抜けてそのセルを編集 |
-| `Esc` / `Tab` / `Ctrl+T` | モード解除(カーソルが行列外に出ても自動解除) |
-
-**列モード / 行モード**(`c`/`\|`・`r`/`-`):
-
-カーソルは「隙間(緑)」と「レーン(構造選択の紫)」を交互に進みます。
-レーンの紫はセル選択の紫と**別色**です — 「列の全セルの選択(中身)」と
-「列そのものの選択(構造)」は色で見分けられます。
-
-| キー | 動作 |
-|---|---|
-| 軸方向の矢印(列=`←→`、行=`↑↓`) | 隙間 ⇄ レーンを交互に移動 |
-| `Enter`(緑=隙間で) | **その場所に列/行を挿入**(挿入位置は緑のゴーストでプレビュー) |
-| `Backspace` / `Delete` / `d`(紫=レーンで) | 選択した列/行を**削除** |
-| `⇧` + 軸方向矢印 | 複数レーン選択 |
-| 交差方向の矢印・`Enter`(紫で) | セル選択に降格(そのレーンの全セルが選択される) |
-| `Esc` / `Tab` | グリッド編集モード全体を終了(セル選択へ戻るのは交差方向の矢印か、同軸キー `c`/`\|`/`r`/`-` の再打鍵。`c`/`r` は逆軸のレーンモードへの切替にも使える) |
-
-Ctrl 系(`Ctrl+Z` undo など)はモード中もそのまま使えます。
-選択の昇格・降格は `⇧↑` の「親構造へ拡大」と同じ文法:
-中身の選択が縁を越えると構造そのものの選択になります(そこでの
-Backspace は中身クリアではなく構造の削除)。
-
-## 行列(通常時)
-
-| キー / コマンド | 動作 |
-|---|---|
-| `]` | 行列から脱出 |
-| `\addrow` `\addcol` `\delrow` `\delcol` | 行・列の追加/削除(グリッド編集モードのほうが速い) |
-
-## 表示・出力・終了
-
-| キー | 動作 |
-|---|---|
-| `Ctrl+Y` | AA をクリップボードへ(空スロットの ⬚ は、消してもパースが変わらない場合は空白でエクスポート) |
-| `Esc` | モード解除(フリー/ブロック/グリッド/ミニバッファ/ボックス)→ 選択解除 → 終了(`Ctrl+Q` は端末に取られることがあるので Esc が確実) |
-
-## ミニバッファコマンド(`\` で開く)
-
-### 構造
-
-| コマンド | 動作 |
-|---|---|
-| `\frac` | 分数(選択中はそれが分子に) |
-| `\sqrt` `\cbrt` `\qdrt` | √ ∛ ∜ |
-| `\tex` / `\latex` | LaTeX 入力ボックス: 打ち込むかペーストして Enter で確定(best-effort 読み込み。KaTeX/MathJax 方言、不明コマンドは無視) |
-| `\matrix34` / `\array34` / `\smallmatrix34` | 裸の格子。**サイズは綴りの一部**(3行×4列。そこから `^T` や Enter で増やせる)。サイズ無しの `\matrix` は実行できず、補完が `matrix{1…9}{1…9}` と訊いてくる |
-| `\pmatrix22` `\bmatrix` `\Bmatrix` `\vmatrix` `\Vmatrix` `\cases` `\rcases` | 括弧付きの行列(同様に `\cases32` のようにサイズを添える)。`\Vmatrix` は ‖ ‖ |
-| `\overbrace` `\underbrace` | ╭──╮ / ╰──╯(ラベル付き) |
-| `\xto` `\xfrom`(`\xrightarrow` `\xleftarrow`)/ `\xTo` `\xFrom` | ラベル付き伸縮矢印 → ← / ⇒ ⇐ |
-
-### デリミタ
-
-| コマンド | 動作 |
-|---|---|
-| `\lr(]` `\lr{|}` `\lr\lceil\rfloor` など | **見た目の順**のデリミタ指定(左・middle…・右)。トークンは仕様文字1つか `\名前`(`\lparen` `\lbrack` `\lbrace` `\lceil` `\lfloor` `\langle` `\vert` `\none` と対応する `r…`)。`.` はヌル(片側なし、`┆`/`┊` で表示) |
-| `\lparen` `\lceil` `\rfloor` … | **`\lr` の中でだけ**使うトークン名。単体ではコマンドではない(括弧は常に対なので、片側の名前だけでは意味が決まらない) |
-| `\ceil` `\floor` `\norm` | ⌈ ⌉ / ⌊ ⌋ / ‖ ‖(ノルム直下のノルム入れ子は非対応) |
-| `\mid` | デリミタ内: │ 区切りを追加(braket・集合の内包表記)。デリミタ外: divides 原子 ∣(否定は `\nmid` / `\!mid`) |
-
-### 演算子・関数
-
-| コマンド | 動作 |
-|---|---|
-| `\sum` `\int` `\prod` … | 大型演算子の原子(↑/↓ でバンドに昇格して極限へ) |
-| `\lim` `\max` `\min` `\sup` `\inf` `\det` `\gcd` `\Pr` `\plim` `\injlim` `\projlim` | ┈バンド┈ を作り下極限へ |
-| `\argmax` `\argmin` `\limsup` `\liminf` | 複数語バンド(`┈arg┈max┈` `┈lim┈sup┈` — 語ごとに piece)。LaTeX にネイティブ名があれば(\limsup)それで出力 |
-| `\op` | **名前ボックス**を開く: 英数で名前を入力し `Enter`/`Tab`/`Space` で確定 → 立体ラン(2文字以上は \operatorname、辞書語は \sin 等の関数に) |
-| `\op*`(別名 `\limits` `\operatorname*`) | 同上、確定で ┈バンド┈ になり下極限へ。**スペースは piece 区切り**(`ess sup` → `┈ess┈sup┈`)。`Esc` 取消、名前以外のキーは確定してから通常動作 |
-| ボックス内の編集(`\op` `\rm` `\text` `\tex` 共通) | `←`/`→` でボックス内カーソル移動、`Home`/`End` で両端、`Backspace`/`Delete` で削除。**カーソルが端から外に出ると確定**して矢印はそのまま数式側に効く。ボックスは緑の `[…]` で囲んで表示され、キャレットも緑になる。スペースは `\op*`(piece 区切り、␣ 表示)・`\text`・`\tex` では内容、`\op`/`\rm` では確定 |
-
-### テキスト・空白・アクセント
-
-| コマンド | 動作 |
-|---|---|
-| `\rm` | **名前ボックス**: 英数と `.` で入力し確定 → 立体ラン(`i.i.d.` 可、辞書語は関数に)。`\rm<chars>` の直結形も可 |
-| `\text` | **ボックス**: 自由なテキストを入力し確定 → `"…"`(\text)。`\text<chars>` の直結形も可 |
-| `\space` | 意味のある空白 ␣(LaTeX `\ `) |
-| `\^z` `\z^` `\_10` `\^gamma` など | 上付き/下付きノードを挿入(`^`/`_` は名前の前後どちらでも可。1文字英数の連なりか記号名) |
-| `\hat` `\vec` `\bar` `\dot` `\ddot` `\tilde` `\check` `\ring` `\underline` `\utilde` | 直前の1文字にアクセント(続けて実行で重ね掛け)。**選択があれば伸縮アクセント**(`┈┈˰┈┈` などのマーク入り範囲行が基底の上下に付く \widehat 形。分数など背の高い選択も可) |
-
-### 記号
-
-`\alpha` `\infty` `\to` `\in` `\bbR` … 約450綴りの記号+スタイル族の合成(`->` `+-` `oo` のような
-ASCII 名も)。上の名前と重ならなければすべて記号テーブル引きです。
-演算子全体に斜線が付く否定形は、基底の綴りに `!` を**前置か後置**して
-綴れます: `\!=` / `\=!`→≠、`\!in`→∉、`\!le`→≰、`\subset!`→⊄、
-`\!equiv`→≢、`\!prec`→⊀、`\!vdash`→⊬ など、斜線付きの Unicode が
-ある関係すべて(正式名は `\ne` `\notin` `\nleq` `\nsubset` …)。
-また `\!` 単独は**直前の記号と否定形をトグル**するコマンドです
-(`=` の直後に `\!` → ≠、もう一度 → =。対応表に無い記号ではエラー)。
-打ち消し線(\cancel)そのものは非対応です。
-
-## モードの重なり(内部構造)
-
-キーは次の順で解釈されます: フリーカーソル → ブロック選択 →
-ミニバッファ → \op ボックス → (Ctrl コード → グリッド編集 → 通常キー)。
-モード系のキー処理はすべて共有キーマップ(`src/input.rs`)にあり、
-TUI と wasm で挙動が一致します。
+| Key | Action |
+| --- | --- |
+| arrows | move the cell cursor |
+| `Shift`+arrows | select a cell rectangle; pushing past a full axis promotes to a row/column lane |
+| `Ctrl+C/X/V` | copy / cut / paste the cell rectangle (paste overwrites, growing the grid as needed) |
+| `Backspace` / `Delete` | clear the selected cells |
+| `c` / `\|`, `r` / `-` | column / row lane mode: walk gaps and lanes, `Enter` on a gap inserts a lane, `Backspace` on a lane deletes it |
+| `Enter` | leave the mode with the cell's contents selected |
+| `Esc` / `Tab` / `\` / `Ctrl+T` | leave the mode |

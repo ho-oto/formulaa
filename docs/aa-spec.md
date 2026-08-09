@@ -1,395 +1,323 @@
-# 正準AA形式仕様 (Canonical AA Format)
+# The mascii AA format
 
-> パース側の視点(基線復元→基線走査→再帰)で整理した仕様は
-> **docs/parse-model.md** を参照。本書はレンダラ側(ノード別レイアウト)。
+This document is the format specification, written for someone who has
+never seen this implementation and wants to build a parser (or renderer)
+from scratch. It defines the grid model, the reserved glyph vocabulary,
+and — construct by construct — what a picture must look like to mean
+what it means. `src/render` and `src/parse.rs` implement the two sides
+of this spec and must always change together.
 
-mascii のアスキーアート数式は、AST と**一対一に対応する正準形式**として定義される。
-`render.rs`(AST→AA)と `parse.rs`(AA→AST)はこの仕様を両側から実装しており、
-**必ず両方を同時に変更**すること。正しさは以下の不変条件で検証される
-(`tests/roundtrip.rs`):
+Atoms (the ~500 ordinary symbols: `α`, `≤`, `∈`, `ℝ` …) are *not*
+enumerated here; they live in the tables under `src/symbols/`. What this
+spec fixes is the rule that governs them (§2).
 
+## 0. The contract
+
+A formula is simultaneously a picture and a syntax tree. For every tree
+`x`:
+
+```plain
+parse(render(normalize(x))) == normalize(strip_spacers(normalize(x)))
 ```
-parse(render(normalize(x))) == normalize(strip_spacers(normalize(x)))  -- 任意の AST x
-```
 
-(`render(parse(aa)) == aa` は要求では**ない** — AA はソースコードで、
-受理は正準形より広い。`fmt` が受理形を正準形に整える。)
+`render(parse(aa)) == aa` is **not** required. The AA is source code:
+the parser accepts more than the canonical form (lenient hand-written
+input, §9), every accepted picture has exactly one reading, and `fmt`
+rewrites any accepted picture into the canonical form. Two further
+requirements:
 
-## 1. 座標モデル
+- `normalize` is idempotent (§8).
+- No rule may depend on *how many* spaces separate two things. Space
+  carries meaning only by presence or absence.
 
-- 数式は文字のグリッド(全行同幅)。各部分式は**矩形領域 + 基線行**を持つ。
-- 兄弟ノードは互いに素な列範囲を占める(`hcat` が基線を揃えて水平連結)。
-- パースは「領域と基線を受け取り、基線を左→右に走査して構造グリフごとに
-  部分矩形へ再帰する」再帰下降(`parse_region`)。
+## 1. The grid model
 
-## 2. 予約グリフ
+- A formula is a character grid; every character is exactly one cell
+  wide (this is why the atom set is an allow-list, §2).
+- Every subexpression owns a **rectangle plus a baseline row**. Siblings
+  sit side by side in disjoint column ranges, with baselines aligned.
+- Parsing is recursive descent over regions: given a rectangle and its
+  baseline, scan the baseline left to right; each structural glyph
+  claims a column range and dictates which sub-rectangles to recurse
+  into (§5). Sub-regions either inherit the baseline (delimiter
+  segments, radical contents, brace arguments) or re-derive it (§4).
 
-原子(`Sym`)として使える文字は**許可リスト**(`symbols::is_atom`)で、
-表そのものから導出される: 何らかの `\name` が生成する文字か、
-キーボードが直接打つ ASCII のいずれか。理由は2つ —
-レイアウトは**1セル1文字のグリッド**なので全角文字や結合文字が1つ
-混ざると全カラムがずれる(絵文字を貼ると静かに壊れる)、そして表に
-無い文字は LaTeX の綴りを持たない。どちらも発覚が遅いので入口で弾く。
-ASCII のうち `^ ~ \` `` ` `` は原子にならない(LaTeX の構文と衝突し、
-かつ `\sim` `\backslash` という正しい綴りがある)。`# $ % &` は原子だが
-出力時にエスケープされる。
+## 2. Vocabulary: three glyph classes
 
-以下の文字はさらに構造専用であり、原子として出現してはならない。
-シンボル表(`symbols/atoms.rs` の `NAMES`/`ATOMS`)からも除外されている。
+1. **Atoms** — the ordinary symbols. An allow-list derived from the
+   symbol tables: a character is an atom iff some `\name` produces it or
+   it is directly typeable ASCII. Everything on the list is one cell
+   wide and non-combining. ASCII `^ ~ \` and the backtick are excluded
+   (they collide with LaTeX syntax; `\sim`, `\backslash` are the
+   spellings); `# $ % &` are atoms that the LaTeX serializer escapes.
+   Any character outside the list is a parse error — one double-width
+   character would silently shear every column to its right.
 
-| グリフ | 用途 |
-|---|---|
-| `─` U+2500 | 分数罫線(原子のマイナス `-` は ASCII のままなので衝突しない) |
-| `┈` U+2508 | 大型演算子バンド(極限の範囲標識)・伸縮アクセントの範囲行。**`┈` 1文字だけの行 = 複数行数式の区切り行**(§3 Break) |
-| `═` U+2550 | 二重矢印(⇒⇐)の胴体。単矢印の胴体は `─`(先端の有無で分数と区別) |
-| `╭ ╮ ╰ ╯` | overbrace/underbrace の範囲行(`╭──╮` / `╰──╯`) |
-| `"` | \text 範囲(`"if x"` = \text{if x}。中の `\"` `\\` はエスケープ) |
-| `'` | \mathrm 範囲(1文字立体の `'d'`。**prime 原子は ′ U+2032** で別物 — `'` は常に区切り) |
-| `_`(基線より上の行) | bar アクセントの描画形と wide overline の充填(`_` キーは下付きコマンドなので原子化不可) |
-| `√ ∛ ∜` | 累乗根(指数 2/3/4)。`│` は根号の縦茎 |
-| `⎛⎜⎝ ⎞⎟⎠` | 複数行丸括弧。1行なら `( )` |
-| `⎡⎢⎣ ⎤⎥⎦` | 角括弧(行列)。1行なら `[ ]`(キーボードの `[ ]` は予約) |
-| `{ } ⎧⎪⎨⎩ ⎫⎪⎬⎭` | 波括弧(頂点 ⎨⎬ は基線行)。複数行は最低高さ3(2行の中身でも3行の列に頂点を中央配置) |
-| `⟨ ⟩ ╱ ╲` | 山括弧。1行は `⟨ ⟩`、複数行は**罫線の腕 ╱╲ のみ**(高さ偶数)。折り返しは同一列の縦ペア(左=`╱` の直下に `╲`、右=`╲` の直下に `╱`)で、ペアの上側の行が基線 |
-| `⎢ ⎥`(角なし列) | 縦棒デリミタ(左/右、\abs)。角括弧の延長片 U+23A2/23A5 の流用で、**列に角(⎡⎣/⎤⎦)が無ければ縦棒**と読む(ceil/floor の角集合解決と同じ仕組み)。middle は全高 `│` 列 |
-| `⌈ ⌉ ⌊ ⌋` | ceil / floor(1行)。複数行は**ブラケット片を片角だけ**使う: ceil = `⎡`+`⎢`(足なし)、floor = `⎢`+`⎣`(頭なし)。列に含まれる角の組(⎡と⎣の有無)が家系を決める |
-| `‖` U+2016 | ノルム(**専用ノード `Norm`**): `‖` の全高列。左右が同じ字なので側は「同じ縦extentの列の中での出現パリティ」で決まる — 一般デリミタの「左右で別グリフ」という前提の唯一の例外なので、AST でも別ノードにして `Delim` の機構から外してある。middle は持てない。 |
-| `┆ ┊` U+2506/250A | ヌルデリミタ(左/右、`\left.`/`\right.` 相当。破線=幽霊系で `┈` と揃える) |
-| `┌┬┐ ├┼┤ └┴┘` | 裸グリッドの格子マーカー(区切りの交点。外周を含む) |
-| `⬚` U+2B1A | 「空」の綴り: 空スロット・行頭スクリプトの明示基底(LaTeX の空グループ `{}` に相当する形式の一部) |
-| `¯ ˜ ˷ ˰ ˯ ˳ ․ ￫`(+下 `_ ˜`) | アクセントの**描画グリフ**(予約されるのはこれら描画形のみ — AST は `Accent` enum で、マーク文字という表現は存在しない)。上: bar `_`、hat `˰` U+02F0、tilde `˷` U+02F7、check `˯` U+02EF、ring `˳` U+02F3、dot `․` U+2024、vec `￫` U+FFEB、ddot `․․`(**右に1列はみ出す** — はみ出し列の基線は空白で、他に何も置けない)。下: underline `¯`、utilde `˜`(上下でグリフを入れ替える対) |
-| `‗ ˷` U+2017/02F7 | 下アクセントマーク(underline / utilde)。**描画では `¯` / `˜`**(下から基底に密着。チルダは AST マークと描画グリフが上下で入れ替わる対: over は AST `˜`→描画 `˷`、under は AST `˷`→描画 `˜`) |
-| `˰ ˷ ˯ ˳ ․` U+02F0/02F7/02EF/02F3/2024 | hat / tilde / check / ring / dot の密着描画形(上欄参照)。`․` は原子の `.` とは別字。バンドにも使う(`┈˷˷˷┈`、中央の `˳` `․` `․․`) |
-| 数学イタリック体 U+1D434–1D467, `ℎ` | 平文字の描画形(原子は ASCII で保持) |
-| `⁰¹²…ⁿⁱ` / `₀₁₂…ₓ` | インライン上付き・下付き |
+2. **Structural glyphs** — reserved, never atoms, so their appearance is
+   always a structural claim. The roles:
 
-### 表示専用文字(形式の一部では**ない**)
+   | Glyphs | Role |
+   | --- | --- |
+   | `─` | fraction bar; also the body of stretchy arrows (`──>`) |
+   | `═` | double-arrow body (`══>`) |
+   | `┈` | the band: big-operator limits, wide-accent mark rows, and (alone on a line) the multi-line formula separator |
+   | `╭ ╮ ╰ ╯` | overbrace / underbrace range rows |
+   | `√ ∛ ∜ │ ┌` | radicals: root glyph, stem column, overline corner (`┌` + `─` run) |
+   | `( ) [ ] { } ⟨ ⟩` + `⎛⎜⎝ ⎞⎟⎠ ⎡⎢⎣ ⎤⎥⎦ ⎧⎪⎨⎩ ⎫⎪⎬⎭ ╱ ╲` | delimiter columns (§5.4). `⌈ ⌉ ⌊ ⌋` one-line ceil/floor; `‖` the norm; `┆ ┊` the null delimiters (`\left.`/`\right.`); mid-height `│` the segment separator |
+   | `┌┬┐ ├┼┤ └┴┘` | grid lattice markers (§5.5) |
+   | `⬚` | the explicit empty: empty slots, the base of a leading script |
+   | `' "` | roman/text quoting (§5.8) — the prime atom is `′` U+2032, a different character |
+   | `_ ¯ ˜ ˷ ˰ ˯ ˳ ․ ￫` | accent drawing forms (§5.7) — `․` U+2024 and `￫` U+FFEB are distinct from the atoms `.` and `→` |
+   | math-italic letters, `⁰¹²…`, `₀₁₂…` | the *rendered* faces of plain letters and inline scripts (§5.6) |
 
-以下はエディタの**ビュー層**だけが使う文字で、正準AAには決して出現しない
-(カーソルなし描画だけがパース・整形・コピーの対象)。原子との名前空間
-衝突を防ぐため予約はされているが、上の表の文法グリフとは層が違う:
+3. **Display-only characters** — the editor's view layer uses `▌` and
+   the private-use block U+E000–F8FF for cursors and selection markers.
+   They never appear in canonical AA and a parser may reject them.
 
-| 文字 | 用途 |
-|---|---|
-| `▌` | カーソル(wasm のテキスト画面のみ、該当セルに上書き描画。TUI は反転表示で、カーソルは幅ゼロのメタデータ — レイアウトはカーソル無しと同一) |
-| U+E000–F8FF(私用領域) | 表示マーカー: ジャンプ/ブロックラベル・選択・グリッド編集のセル/レーン選択ペア・フレーム角・隙間ゴースト(幅ゼロのメタデータとして伝搬され、セルに重ね描きされる。例外的に隙間ゴーストは表示専用の幅1レーンを伴う) |
+`␣` U+2423 is an ordinary atom (a *semantic* space; LaTeX renders it as a control space). A real
+space column is either a sibling separator or a formatting spacer that
+vanishes on reparse.
 
-`␣` U+2423 は予約グリフではなく**通常の原子**(意味のある空白、`\space`。
-LaTeX `\ `)。これとは別に AST には整形専用の `Spacer`
-(Space キー)があり、空白1列として描画されるが LaTeX には出力されず、
-**再パースで消える**: ラウンドトリップ契約は
-`parse(render(normalize(x))) == normalize(strip_spacers(normalize(x)))`。
-正規化規則: 行頭・行末の Spacer は落とす(行頭スクリプトの ⬚ 基底を
-守るため)。同種スクリプト間の Spacer はマージで消える。
-ブランク区切りグリッドのセル直下には置けない(空白列がセル区切りと衝突)。
+## 3. Multi-line formulas
 
-## 3. ノード別レイアウト規則
+A line whose only glyph is a single `┈` splits the picture into
+formulas joined by line breaks (LaTeX `\\`). Bands always sandwich
+their material without spaces, so a lone `┈` has no other reading.
+Blank lines adjacent to a separator are formatting; a blank line
+splitting a formula *without* a separator is an error. Two consecutive
+separators mean an empty line. There is no alignment (no `align`
+column syncing).
 
-### Break(数式の改行 — 複数行数式)
-- ルート行の `Break` で数式を表示行に分割する(align 相当の桁揃えは
-  なし)。各行のブロックを左揃えで縦に積み、行の間に
-  **`┈` 1文字だけの区切り行**(左端)を置く。バンドは piece を空白なしで
-  挟むので、行内に単体の `┈` しかない行は他の読みを持たない。
-- パースは「唯一のグリフが `┈` の行」で分割し、各セグメントを通常の
-  数式として基線推定から読む(行と行の間の空白行は整形扱い。区切り行の
-  ない位置に全空白行が挟まって1つの数式が分断されている場合はエラー)。
-  空のセグメント(区切り行の間に何もない/空白行のみ)は空行。
-- LaTeX は `\\`。正規化: 行頭・行末の Break と、
-  **各行の端(Break の前後)の Spacer** は落とす(残すと行頭スクリプトの
-  ⬚ 基底が実体化されず、基線行が全空白になって読めない)。
-  空行そのものは合法: `Break Break` = 空の中間行。
+## 4. Baseline recovery
 
-### Sym(原子)
-- 英字は数学イタリック体で描画(`a`→`𝑎`, `h`→`ℎ`)。`*`→`∗`(`-` は ASCII のまま)。
-- 自動の間隔調整は一切ない(`x+1`)。見た目の空白はユーザーが整形
-  Spacer(実空白1列、再パースで消える)か意味のある `␣` で入れる。
+When a region's baseline is not inherited, derive it from the **leftmost
+column after trimming**:
 
-### Func(sin, cos, …)
-- 立体(upright)ASCII で描画。平文字がイタリック化されるため、立体英字の
-  極大列=関数名として一意にパース可能。辞書は `symbols::FUNCS`。
+1. If the column contains `─`, `┈`, or `═`, that row is the baseline
+   (bars and bands sit on the baseline and stick out past their
+   contents).
+2. Strip accent marks growing down from the top and up from the bottom;
+   what remains is the base's row.
+3. Otherwise branch on the first glyph: brace/angle verticals with a
+   vertex (`⎨`, `⟨`) → the vertex row; `╱` with `╲` directly below it →
+   an angle fold, the upper row; paren/bracket/bar/null columns
+   (`⎛ ⎡ ⎢ ┆`) → the extent's center row if the interior is a fused
+   grid, else recurse into the interior; lattice edges (`┌ ├ └`) → the
+   lattice extent's center row; `╭` → recurse below (the argument),
+   `╰` → recurse above; `(` on one line → that row.
+4. If exactly one non-blank row remains, that is the baseline. More
+   than one → ambiguity error (the writer must use a form that shows
+   its baseline).
 
-### Accent(アクセント)
-- 基底1文字の真上に上マーク列(内側から外側へ積む)、真下に下マーク列。
-- スクリプトは常に基底の右上/右下に置かれるため、原子の直上・直下のセル列は
-  アクセント以外に使われない → 列を縦に走査してスタックを回収できる。
-- すべてのマークは wide 形と同じく基底に密着して描く:
-  上バー(AST `¯`)は `_`、hat(`^`)は `˰`、tilde(`˜`)は `˷`、
-  check(`ˇ`)は `˯`、ring(`˚`)は `˳`、dot(`˙`)は `․` U+2024
-  (原子の `.` とは別字)、vec(`⇀`)は `￫` U+FFEB(原子の `→` とは
-  別字)、下バー(AST `‗`)は `¯`、under tilde
-  (AST `˷`)は `˜`(セル内の描画位置が基底寄りになる。チルダの
-  AST マークと描画グリフは上下で入れ替わる対)。
-- ddot(`¨`)は `․․` — 2つ目の `․` が**基底の右隣の列にはみ出す**。
-  はみ出し列は基線が空白のままブロックに含まれ(幅2)、他の内容を
-  持てない。パースは「基底の真上が `․` かつ右隣も `․` で、その列に
-  他の内容がない」ときだけ対にする(隣の原子の dot は基線が埋まって
-  いるので食わない)。ddot ブロックの右基線端は空白なので、後続の
-  1文字の立体ランは裸にならず引用付きのまま(glue 判定は辺ごと)。
-  隣の兄弟と `─` 同士が同じ行で接触すると √ の貪欲なオーバーライン走査
-  などと融合しうるため、兄弟境界で `─` が接触する場合は分離空白1を挟む
-  (render の幾何規則)。
-- 上マークと下マークの文字集合は互いに素。AST は入れ子でなく
-  `Accent{overs, unders, base}` の**フラットな2リスト**: 上下マークの
-  入れ子順(\hat{\underline{x}} vs \underline{\hat{x}})は絵に現れない
-  ため、構造的に表現不能にして曖昧性を消す。LaTeX へは
-  「下マークを内側・上マークを外側」の順で入れ子に直列化する。
+## 5. The baseline scan
 
-### Frac(分数)
-- 罫線幅 = max(分子幅, 分母幅) + 2。分子・分母は中央寄せ(両側に必ず1列の
-  余白ができるため、領域の左端列には罫線しか現れない)。基線=罫線行。
-- 分子・分母領域 = 罫線の列範囲の上下矩形(トリム後、基線は再帰的に決定)。
+Scan the baseline left to right. Each construct below consumes its
+column range and recurses into the rectangles it defines.
 
-### Sqrt(累乗根)
-- 上段: `┌` + `─`×(引数幅)。以降: 茎(`│`…最下行は `√`/`∛`/`∜`)+ 引数。
-- 茎は引数の全行を覆う。オーバーライン `─` の連続長が引数の右端界を
-  与える(パースは `┌` の直下に茎があることを要求 — 格子の `┌` は
-  真下がマーカー間の空白なので衝突しない。`┌` は括弧対としては
-  数えない: 行内に閉じがないため深さ計数から除外)。
-- 引数の基線 = 外側の基線と同一行(パース時に再帰不要)。
+### 5.1 Blank baseline run → scripts
 
-### Sup / Sub(上付き・下付き)
-- 引数が全てインライン化可能な文字なら `x²` `aᵢ` 形式(別コードポイントなので
-  無曖昧)。それ以外は 2D ブロックを基線の上/下に右接置。
-- **行頭のスクリプトには `⬚` 基底を明示**(`[Sup(x)]` → `⬚ˣ`)。
-- パース: 基線が空白の列ラン内で、上側・下側を**独立に**列ラン分割
-  (ブラケット保護された空白列はランを橋渡し)、左端列順に並べる。
+A run of blank baseline columns holds the *scripts of the element to
+its left*: content above is superscript, below is subscript. Chunk the
+upper and lower halves **independently** into column groups; columns
+that are blank on both sides separate groups; columns protected by a
+bracket pair (§7) never separate. Before treating a blank run as
+scripts, look for two structures whose interiors the baseline happens
+to pass through blankly: a lattice edge (`┌ ├ └`) whose extent centers
+on this baseline (an inline bare grid), and a `╭`/`╰` above/below whose
+argument side contains this baseline (an over/underbrace).
 
-### Text(ローマン体)と ASCII 英字の規則
-ASCII 英字の**極大ラン**ごとに判定する(ラン内の部分マッチはしない)。
-ランには略語用のドットが入れる: 内部の `.` は直後が英字のときランに
-参加し、末尾の `.` はランが既に `.` を含むときだけ参加する
-(`i.i.d.` は1ラン、`sin.` は Func+ピリオド)。ドット入りランは常に
-`Func`(辞書は引かない)。AST は `Func(String)`(2文字以上)と
-`Roman(char)`(単独の立体**文字** — 数字やドットは素の原子と区別が
-ないので `Roman` にならない):
-1. 辞書語(FUNCS)そのもの → `Func`(`sin` — 出力は \operatorname{sin})
-2. 2文字以上 → `Func` = **`\operatorname`**(`asiny` → \operatorname{asiny})
-3. **単独の1文字 → イタリック変数**(`a sin y` の a)。ただし前後どちらかが
-   文字(イタリック・ギリシャ含む)に密着していれば `Roman`
-   (`d𝑦` → \mathrm{d}y — 1文字だけが \mathrm)
-描画: 立体ランは自己識別できる形なら**裸** — 英字2文字以上・非辞書語、
-ドット入りで上の字句規則を満たす形(`i.i.d.`)、
-または**1文字でも文字に密着している**とき(`d𝑦` — 規則3の逆写像)。
-それ以外は `'…'`(シングルクォート)。引用符は文脈で自動的に
-付いたり消えたりする(隣に変数が来れば `'d'` → `d𝑦`、離せば戻る)。
-`"…"`(ダブル)は常に `\text`(実空白そのまま。`'…'` の中だけ ␣)。
-- `'` は**常に** \mathrm 引用の区切り(閉じ `'` があり中身が非空の ASCII
-  英数/␣/`.` であること。閉じが無ければエラー)。prime は独立した原子
-  `′` U+2032 なので両者は衝突しない。
-- `"…"` の中では `\` が次の1文字をエスケープする(`\"` `\\`)。
-  括弧類は入れられない(引用は不透明なので括弧の深さ計数が狂う)。
-- 隣接する立体ラン(Func / 裸 Text)同士は空白1で区切る(`sin cos`)。
+### 5.2 `───` → fraction; `──>` → arrow
 
-### Arrow(ラベル付き伸縮矢印)
-- 胴体は `─`(→ ←)/ `═`(⇒ ⇐)、先端は ASCII の `>` / `<`(`──>` `<──`
-  `══>` `<══`。箱罫線と Unicode 矢印はフォントで高さが揃わないため)。
-  先端は ASCII `<` `>` のみ(Unicode 矢印 `→ ⇐ …` は常に普通の原子で、
-  矢印の先端としては受理しない)。ラベルは矢印の列範囲の
-  上下に中央寄せ(バンドと同じ「範囲+基線」)。
-- **maximal munch**: `─` のランに `>` が直接続けば矢印、空白を挟めば
-  「分数+原子 `>`」(空白の**有無**が解釈を変え、個数は常に無意味)。
-  レンダラは融合しうる隣接(`─`|`>`、`<`|`─`、`═`|`>`、`<`|`═`、同種
-  胴体同士)にだけ空白1を挿入する。`<` `>` は比較演算子の原子のまま。
-- 幅 = max(上,下,1)+3。空ラベルは編集中以外は描画されない。
+Read the maximal `─` run. If a `>` is glued to its end (or a `<` to its
+start), it is a labelled stretchy arrow: labels sit centered above and
+below the body's column range. Otherwise it is a fraction: numerator
+and denominator are the rectangles above and below the bar's columns
+(centered; the bar is 2 wider than either, so the region's left column
+holds only the bar). `═` runs are double arrows. Maximal munch: glued
+means arrow, one space means "fraction (or bar) then an atom `>`".
+Arrowheads are ASCII `<` `>` only; Unicode arrows are always atoms.
 
-### Brace(overbrace / underbrace)
-- 引数ブロックの直上に `╭──╮`(over)/ 直下に `╰──╯`(under)の範囲行、
-  その先にラベル。幅 = max(引数, ラベル)+2(分数と同じ規則)。
-```
-  𝑛
-╭───╮
- 𝑎+𝑏 + 𝑐
-      ╰─╯
-       𝑚
-```
-- パースは空白ラン内の `╭`/`╰` 列の先読みで検出。**引数が呼び出し元の
-  基線を覆う**ことが条件(スクリプト内に完結するブレースはスクリプト側で
-  パースされる)。
+### 5.3 `┈material┈` → big operator with limits
 
-### WideAccent(複数文字アクセント=マーク入りバンド行)
-- **基線は裸のまま**、基底ブロックの上(下)に「`┈` に挟まれたマーク素材
-  の行」を密着させて範囲を示す(`\widehat{abc}` 等)。バンド行の中は
-  予約文脈(原子は住めない)なので既存文法と衝突しない。
-- 伸ばせるマークは基底幅いっぱいに伸びる:
-```
-┈┈┈˰┈┈┈   ┈┈￫┈┈     ┈___┈     ┈˷˷˷┈      𝑥+𝑦
- 𝑎𝑏𝑐𝑑𝑒     𝐴𝐵𝐶       𝑧+1       𝑝𝑞𝑟      ┈¯¯¯┈
-widehat    vec       overline  widetilde  underline
-```
-  hat/check は中央1文字の `˰` / `˯`(コンパクト形と同じ低位矢頭。
-  斜めペアの旧形式は廃止)、
-  vec は中央1文字の `￫`(コンパクト形と同じ半角矢印)、
-  overline は `_` 充填(¯ はセル上部に
-  浮くが `_` は基底に密着 — √ のオーバーラインと同じ)、underline は
-  逆に `¯` 充填(下から基底に密着)、tilde は低位形 `˷` の繰り返し
-  (同じ密着の理屈。充填グリフは片側専用: `˷`=上、`˜`=下)。
-  ring / dot は低位形 `˳` `․` の中央1文字、ddot は中央の `․․`、
-  下側の utilde は `˜` 充填(バーと同じく充填グリフは片側専用 —
-  `˷` は上・`˜` は下と排他で、基線復元の潜り方向が一意になる)。
-  走査は「先頭┈ → 素材 → 末尾┈」の
-  段階で読み、末尾 ┈ の後の文字は隣のもの(貪欲に吸収しない)。
-- バンド幅は基底+2(brace の範囲行と同じく1列はみ出す — パーサは
-  そのはみ出しの空白基線列から見上げて発見する)。走査は {┈, マーク}
-  以外の文字で自然に終端する(デリミタ列と密着してよい)。
-- マークは**コンパクト形と同じく縦に重ねられる**(`overs`/`unders` の
-  リスト、内側=基線に近い方が先)。バンド行を積むだけで幅は変わらない
-  ので絵は一意 — パースは基線から離れる向きにバンドが続く限り読む。
-- 上下どちらか一方でも両方でもよい。基底は**任意のブロック**(分数など
-  背の高い内容も可)で、エディタでは選択を包んで作る(基底は再入不可 —
-  消して作り直し)。基線復元では、このバンド行は基線にならず brace の
-  範囲行と同様に反対側へ潜る。
-- 基底が1文字でマークが1つなら通常の `Accent`(コンパクトな縦積み)に
-  正規化。
-  WideAccent ブロックの左右には常に空白1(バンドに終端グリフがなく、
-  背の高い隣と密着すると走査が隣を食うため)。
-- LaTeX: \widehat \widetilde \overline \overrightarrow \widecheck
-  \underline(wide 形のないマークはそのままグループに適用: \dot{abc})。
+Material sandwiched by `┈` with no spaces takes limits above and below,
+centered within the band's columns: `┈∑┈`, `┈lim┈`, `┈argmax┈`. The
+material is one piece (no spaces); a single ∑-class symbol is a symbol
+operator, anything else is a named operator. The band is what makes
+limit attachment unambiguous (without it, `∑` above `∫` cannot say
+which owns which). A band with both limits empty never appears in
+canonical AA — it normalizes to the bare atom or upright run (§8).
+Bands read greedily, so canonical output always separates a band from
+its neighbors with one space.
 
-### BigOpSym / BigOp(バンド=上下極限)
-- 文法は `┈+ 中身 ┈+`: **空白なしで `┈` に挟まれた列は何であれ**上下に
-  極限を取る(`┈∑┈` `┈lim┈` `┈argmax┈`)。中身は**1ピース**(空白を
-  含まない1つのラン)— これが「バンドを外した裸の絵」をちょうど1つの
-  ノードに読み戻す条件になる。
-- 1文字で ∑ 系の記号なら `BigOpSym{op}`、それ以外は `BigOp{name}`。
-- 極限はバンドの列範囲内に中央寄せ。バンドが極限の帰属範囲を一意にする
-  (バンドがないと ∑ の上の ∫ と ∫ の下の ∑ が同一の絵 — `examples/ambig.rs`)。
-- **両極限が空なら常に裸の形に正規化**: `┈∑┈`→`∑`(`Sym`)、
-  `┈lim┈`→`lim`(`Func`)。名前が1ピースゆえ両向きが1対1で対応するので、
-  例外条件は要らない。↑/↓ でいつでもバンドに戻せる(編集中はエディタが
-  自分の木にバンドを保持し、カーソルが空スロットにある間だけ画面に
-  `┈lim┈` が見える — 正準形には現れない)。
-- バンド端はどちら側でも隣接ノードと空白1で区切る(多要素文法では band が
-  空白まで貪欲に読むため、これは構造上必須のスペーサ)。
+Floating *above or below* the baseline, a row of `┈` plus accent
+material is a **wide accent** range row (§5.7).
 
-### Delim(汎用デリミタ)
-`Delim { left, right, mids, segs }`。left/right は `Delim` enum
-(`Col(ColDelim) | Angle`)で、仕様文字は
-`( ) [ ] { } ⌈ ⌉ ⌊ ⌋ ⟨ ⟩ | .`(`.` はヌルデリミタ)。列グリフは高さ h と基線 bl から:
+### 5.4 Vertical delimiter columns
 
-| 仕様 | h=1 | 複数行(上/延長/**基線行**/下) |
-|---|---|---|
-| `( )` | `( )` | `⎛⎜⎝ ⎞⎟⎠`(基線マークなし) |
-| `[ ]` | `[ ]` | `⎡⎢⎣ ⎤⎥⎦`(同上) |
-| `{ }` | `{ }` | `⎧⎪⎨⎩ ⎫⎪⎬⎭` — **頂点 ⎨/⎬ は常に基線行**(角より優先)。最低高さ3(2行の中身は3行の列が包む) |
-| `⟨ ⟩` | `⟨ ⟩` | 腕 `╱ ╲`、**頂点 ⟨/⟩ は常に基線行** |
-| `\|` | `⎢ ⎥` | 全行 `⎢`(左)/`⎥`(右) — 角のない延長片の列 |
-| `.` | `┆ ┊` | 全行 `┆`(左)/`┊`(右) — `\left.`/`\right.` 相当 |
+A delimiter pair is two columns of pair glyphs around one or more
+segments, `│` full-height columns separating segments (the "mids", as
+in `⟨ψ│H│ψ⟩` or `{x│x>0}`):
 
-- middle(`\|`)は seg 間の**全高 `│` 列**。segs.len() == mids.len() + 1。
-- 左右不一致ペア(`( ]` など)も合法。対応発見は**基線行での深さ計数**
-  (基線行には必ず側判別可能なグリフが現れる)。共有グリフ `⎪ ╱ ╲` は
-  列を縦に辿って側を解決する(左右不一致ペアを行が横切る場合に必要)。
-- 基線: `⎨ ⟨` 系は頂点行から直接。`⎡ ⎛ ⎢ ┆` は、内側に融合グリッド
-  マーカーがあれば extent 中央行、なければ内側(最初の seg)を再帰。
+| Spec | One line | Multi-line column (top/extension/bottom) |
+| --- | --- | --- |
+| `( )` | `( )` | `⎛⎜⎝ ⎞⎟⎠` |
+| `[ ]` | `[ ]` | `⎡⎢⎣ ⎤⎥⎦` |
+| `{ }` | `{ }` | `⎧⎪⎨⎩ ⎫⎪⎬⎭` — the vertex `⎨ ⎬` is always the baseline; minimum height 3 |
+| `⟨ ⟩` | `⟨ ⟩` | diagonal arms `╱ ╲` only, even height; the fold is a vertical pair in one column (left: `╱` above `╲`) and the upper row of the pair is the baseline |
+| `⌈ ⌉ ⌊ ⌋` | those glyphs | bracket pieces with one corner dropped: ceil = `⎡`+`⎢` (no foot), floor = `⎢`+`⎣` (no head) |
+| `\|` (abs) | `⎢ ⎥` | all-rows `⎢` / `⎥` — a cornerless extension column |
+| `.` (null) | `┆ ┊` | all-rows `┆` (left) / `┊` (right) |
 
-### 否定(打ち消し線は無い)
-- \cancel 相当の「線を引く」機能は持たない(結合文字オーバーレイは
-  フォント差で1セルに収まらず表示が不安定 — design.md §67)。否定は
-  Unicode の**合成済み斜線付き原子**で書く: ≠ ∉ ⊄ ≢ …。入力は正式名
-  (`\ne` `\nsubseteq` …)のほか、基底の綴りに `!` を前置/後置
-  (`\!=` `\=!` `\!in` `\subset!`)。対応表は `symbols::negated`。
-- 結合ストライク(U+0338/U+0336)入りのテキストはパースの入口で
-  明示エラー(セルを消費せず列モデルを壊すため受理しない)。
-- **空の Sup/Sub は正規形に存在しない**(単独の ⬚ が隣のスクリプト塊と
-  融合するため)。
+- Which bracket family a column belongs to is decided by **which
+  corners the column run contains** (`⎡`+`⎣` = bracket, `⎡` alone =
+  ceil, corner-free = absolute-value bar).
+- Matching: walk the baseline counting depth; left and right glyphs
+  are distinct characters, so mismatched pairs like `(0,1]` count
+  correctly. The side-shared glyphs `⎪ ╱ ╲` are resolved by walking
+  their column. The norm `‖` is the one pair whose two sides share a
+  glyph: its side is resolved by parity among same-extent `‖` columns,
+  it takes no mids, and a norm directly inside a norm is inexpressible
+  (write the inner pair as `⎢ ⎥`).
+- Unmatched closing atoms `) ] } ⟩` are a parse error; closing-bracket
+  atoms cannot exist (they would desynchronize the depth count).
 
-### Array(グリッド)
-`Array { rows, cols, cells }`。**どこに現れても同じ一つの絵**: 区切り行・
-区切り列の交点(外周を含む)に位置別の box-drawing 交点グリフを置いた
-**格子**であり、行列はこれをデリミタで挟んだだけのもの(`[ ]` を含め、
-デリミタ側にグリッドの特別扱いは一切ない):
-```
-┌   ┬   ┐        ⎡ a   b ⎤     ⎡   ┬   ⎤     ⎛ a ⎞
-  a   b          ⎢   ┼   ⎥     ⎢ a   b ⎥     ├   ┤
-├   ┼   ┤        ⎣ c   d ⎦     ⎣   ┴   ⎦     ⎝ b ⎠
-  c   d           複数行×複数列   1行           1列
-└   ┴   ┘         (┼ のみ)     (┬┴ 行)      (├┤ 接合)
-```
-**融合形**(デリミタの単独 seg が Array のとき)は最小マーカーで描く:
-- 複数行×複数列: **区切り行は空白と `┼` のみ**(これで行と列が両方定まる)
-- 1行: 列マーカー `┬`/`┴` の行を上下に置く
-- 1列: デリミタ列に食い込んだ接合 `├`/`┤` U+251C/2524 が行区切り
-  (HEAVY 罫線 `┠ ┨` は廃止 — 格子の縁の `├ ┤` と共用だが、
-  「同じ列に ⎛/⎡ 系のグリフが続く」ことで縁と区別できる)
-「純粋な行」(空白+マーカーのみ)であることが検出条件 — 入れ子構造は必ず
-他のグリフをその行に落とすため誤検出しない。┬┴ 行と ├┤ 接合の併用や、枠付き
-裸格子をデリミタで包んだ絵も**合法な入力**で同じ AST になる(整形で最小形へ)。
-1×1 は融合形でセルと区別できないため素の行に正規化。山括弧 `⟨⟩` は頂点
-幾何と、**波括弧 `{}` は頂点 `⎨` と接合グリフの不在**とで融合と両立しない
-ため融合せず、seg 内に裸格子をそのまま置く。
-- 角 `┌┐└┘`・辺 `┬┴├┤`・内部 `┼`。セル境界はマーカー位置から読むため、
-  セル内外の空白は幅に関係なく無意味(空白の個数に依存する規則はない)。
-- 明示的な角があるため隣接する格子同士が融合して読まれることはない
-  (`┼` のみだと同じ高さの格子2つ+間の内容が「セルの多い1つの格子」と
-  同一の絵になる反例があった)。
-- セルは列内で中央寄せ・行内で基線揃え。格子の基線 = extent 中央行。
-  左端列(`┌├└`)からパースでき、基線が空白のセル行に落ちる場合も列の
-  格子グリフで検出できる。格子の縁はブラケット保護にも参加する。
+### 5.5 Grids
 
-## 4. スペーサ規則
+An `Array` is drawn the same way everywhere: box-drawing junction
+markers at every separator intersection, outer border included —
+`┌┬┐ ├┼┤ └┴┘`. A matrix is just a grid wrapped in a delimiter pair.
+Cell boundaries are read from marker positions; whitespace inside or
+around cells is meaningless in any quantity.
 
-レンダラが自動挿入する空白は「そうしないとパースが壊れる」場合**のみ**
-(融合すると別のトークンに化ける隣接の分離):
-1. 隣接ブロックの基線行末端が**同じバー文字**(`──` または `══`)で接触する
-   場合の空白1列(ランの融合防止)。
-2. バンド端: 片側が `┈` なら相手が何であれ空白1列(バンドは空白まで
-   貪欲に読むため)。
-3. 矢印の融合対: `─`|`>`・`═`|`>`、および `<`|`─`・`<`|`═` の接触に
-   空白1列(§Arrow)。
-4. 隣接する立体英字ラン同士(Func / 裸 Text)の空白1列(§Text)。
-6. `.` の直後に英字が来る組、およびドット入りラン(`i.i.d.`)の直後に
-   英字か `.` が来る組に空白1列(ランへの吸収防止。数字の小数 `3.14` は
-   密着のまま)。
+When a grid is a delimiter's sole segment it **fuses**: the delimiter
+columns absorb the lattice edge and only minimal markers remain —
+multi-row × multi-column: separator rows of spaces and `┼` only;
+one row: a `┬`…`┴` marker row above/below; one column: `├ ┤` junctions
+biting into the delimiter column (told from a bare lattice edge by the
+`⎛/⎡`-family glyphs continuing in the same column). A "pure marker row"
+is the detection condition — nested structure always drops other glyphs
+into such a row, so there are no false positives. Braces and angles do
+not fuse (no junction glyph coexists with the `⎨` vertex / the diagonal
+arms); they wrap a bare lattice instead. A fused 1×1 is
+indistinguishable from a plain cell, so it normalizes away. The corner
+markers are what keep two adjacent lattices from merging into one.
+The grid's baseline is the center row of its extent.
 
-それ以外の無条件マージンは置かない — 行内の全高空白列は「同一基線の兄弟の
-区切り」でなければならず、そうでないと外側から見たスクリプト領域の分割が
-壊れる(normalize の合流で修復できるのは同一基線の分割だけ)。
-見た目のための空白は自動では入れない。ユーザーが明示的な空白原子 `␣` を
-置く(§1 予約グリフ参照)。
+### 5.6 Letters, scripts, functions
 
-## 5. 正規形 (normalize)
+- Plain letters render as math italics (`a` → `𝑎`); an upright ASCII
+  run is therefore self-identifying. Per maximal run: a run of 2+
+  letters is an upright name (`\operatorname`, or the function `\sin`
+  when it is a dictionary word); a single letter is an italic variable,
+  unless glued to a letter neighbor — then it is roman (the
+  differential `d` in `d𝑦`). Dots may join a run (`i.i.d.`): an inner
+  `.` joins when a letter follows; a trailing `.` joins when the run
+  already contains one. Adjacent upright runs are separated by one
+  space.
+- Inline scripts use the dedicated Unicode script characters
+  (`x²`, `aᵢ`) — distinct code points, hence unambiguous. Content that
+  cannot be inlined becomes a 2D block above/below-right of its base
+  (read by §5.1). A script at the start of a row gets an explicit `⬚`
+  base.
 
-パーサが返すのは正規形のみ。レンダラも正規形を前提とする。
-- 隣接する同種スクリプトの合流: `Sup(a);Sup(b)` → `Sup(a++b)`(絵が同一のため)。
-  合流は間の Spacer を跨いでも起こる。合流後の引数は再帰的に再正規化(冪等性)。
-- 両極限が空の BigOp は base を行に展開(裸の `∑` はただの原子)。
-- 空の Sup/Sub/Text、マークなしの Accent は消す(Accent は Sym に)。
-- 行頭・行末の Spacer は落とす。
-- デリミタの単独 seg 内の 1×1 Array は中身に展開(固定点まで)。
+### 5.7 Accents
 
-## 6. 基線復元 (find_baseline)
+Nothing but accent marks may occupy the cells directly above and below
+a baseline token (anything else there is an error — content is never
+silently dropped). So accents are read by walking straight up (and
+down) from the base while marks continue, innermost first. The AST
+keeps flat over/under lists — over/under nesting order cannot be drawn,
+so it must not be representable.
 
-部分領域の基線は、トリム後の**左端列**から決定する:
-1. 列に `─`/`┈`/`═` があればその行(罫線・バンドは基線に載り、左端列を
-   独占する)。
-2. 上端からの上アクセントマーク・下端からの下マークを除去。
-3. 残った先頭文字で分岐: `⎡[⎛⎢┆` → 融合グリッドマーカーがあれば extent
-   中央行、なければ内側を再帰。`⎧⎪⎨⎩`/`⟨╱╲` → 頂点(`⎨`/`⟨`)の行
-   (頂点が無く接合 `├` があれば融合グリッドとして extent 中央行)。
-   `┌├└` → 格子 extent の中央行。`(` → その行。`│`/`√∛∜` → 内容領域を
-   再帰。`╭` → 下側(引数側)を再帰、`╰` → 上側を再帰(領域最上行の `╰`
-   は曖昧エラー)。
-4. 非空白行がただ1つならその行。複数残ればエラー(曖昧)。
+Marks are drawn in *base-hugging* forms: bar `_` (above) / `¯` (below),
+hat `˰`, tilde `˷` above / `˜` below, check `˯`, ring `˳`, dot `․`,
+vec `￫`, ddot `․․` (the second dot overhangs one column to the right;
+the overhang column has a blank baseline and holds nothing else).
 
-## 7. 寛容パース(手書きAA)
+**Wide accents** (multi-character bases, `\widehat{abc}`,
+`\overline{z+1}`): the base stays bare on the baseline, and a band row
+`┈` + mark material hugs it above (below), one column wider on each
+side, discovered from the blank baseline column it overhangs.
+Stretchable marks fill the width (`┈___┈` overline, `┈˷˷˷┈` widetilde);
+point marks sit alone in the center (`┈┈˰┈┈` widehat, `┈┈￫┈┈` vec).
+Fill glyphs are side-exclusive (`˷` above, `˜` below), so baseline
+recovery knows which way to dive past the band. Bands stack for
+repeated accents. A one-character base with a single mark normalizes to
+the compact form. A wide accent always has one space on each side.
 
-正準形に加えて以下を受理する:
-- 単独の ASCII 英字1文字をイタリック変数と同一視(`x+1` が書ける)。
-  ランの扱いは §Text の規則どおり(貪欲最長一致は廃止)。
-- `*` と `∗` の同一視、数式イタリック体(`𝑥` `𝛼`)を素の文字と同一視。
-  (`−` U+2212 は原子ではない — マイナスは ASCII `-`。)
-- タブは空白1に置換。
+### 5.8 Quoting
 
-寛容にしない部分:
-- 基線上のトークンの真上・真下に(消費されたアクセントマーク以外の)
-  内容が重なっている入力は**エラー**(黙って捨てない)。
-- 対応の取れない閉じ括弧(`) ] } ⟩`)は**エラー**。閉じ括弧の原子は
-  左右不一致ペアの深さ計数と原理的に衝突する(`{y)}` が `)` で閉じて
-  読みがずれる)ため、括弧グリフは原子として存在できない。
+- `"…"` is `\text` — real spaces allowed inside; `\"` and `\\` escape;
+  bracket characters cannot appear inside (quotes are opaque and would
+  break depth counting).
+- `'…'` forces a roman run (`'d'` = a lone `\mathrm{d}`). `'` is
+  *always* a quote delimiter: it must close, and the contents are ASCII
+  alphanumerics/`␣`/`.`. The prime is the separate atom `′`.
 
-## 8. 既知の制限(ロードマップは docs/design.md)
+### 5.9 Braces (overbrace / underbrace)
 
-- 可変幅アクセント(`\overline{x+y}` 等)は未対応(アクセントは基底
-  1文字のみ。`\overbrace`/`\underbrace` は Brace ノードで対応済み)。
-- `Func` は辞書名のみ(任意の `\operatorname` は往復不可)。
-- イタリック OFF 表示(Ctrl+T)は閲覧用であり、正準形式はイタリック固定。
+`╭──╮` directly above the argument block (`╰──╯` below), the label
+beyond it, both 2 wider than max(argument, label) — the fraction rule
+displaced off the baseline. Detected from the blank baseline run whose
+columns carry the `╭`/`╰` (the argument must cover the caller's
+baseline).
+
+### 5.10 Radicals
+
+Top row `┌` + a `─` run whose length is the argument's width; below it
+the stem column (`│`, bottoming out in `√ ∛ ∜`) covering every argument
+row. The argument's baseline is the outer baseline. The `┌` is told
+from a lattice corner by the stem directly beneath it, and it does not
+participate in bracket depth counting.
+
+## 6. Recursion
+
+Inherit the baseline into: delimiter segments, radical arguments, brace
+arguments. Re-derive it (§4) for: fraction halves, band limits, arrow
+and brace labels, grid cells, script chunks.
+
+## 7. The two devices that keep readings unique
+
+**Protection.** A column that lies inside a bracket pair (or lattice
+border) on *any* row never acts as a separator — the interior blanks of
+a nested matrix cannot split its parent.
+
+**Separation duty.** The renderer must place one space between any two
+neighbors that would fuse into a different token: bar runs of the same
+glyph (`──`+`──`), a band and anything (both sides), `─`/`═` against an
+arrowhead, upright runs, `√`'s greedy overline against a neighboring
+bar, a wide accent block on both sides, dotted-run absorption cases.
+The parser then simply reads greedily and stops at spaces. No other
+whitespace is ever emitted: a full-height blank column means "sibling
+separator" and nothing else.
+
+## 8. Normalization
+
+The parser returns only normal forms; the renderer assumes them:
+
+- Merge adjacent same-kind scripts (`x^a^b` ≡ `x^{ab}` — same picture),
+  across intervening spacers; re-normalize recursively (idempotence).
+- A band with both limits empty unwraps to its bare material.
+- Drop empty scripts and empty text; a markless accent is its base.
+- Drop leading/trailing formatting spacers on each line (protects the
+  `⬚` base of a leading script).
+- A fused 1×1 grid inside a delimiter unwraps to its content (to a
+  fixed point); a bare 1×1 lattice keeps its frame and survives.
+
+## 9. Lenient input and hard errors
+
+Accepted beyond canonical (and rewritten by `fmt`):
+
+- Plain ASCII letters for italic variables (`x+1`); `*` for `∗`;
+  math-italic code points read as their plain letters; tabs as one
+  space; free whitespace between siblings.
+
+Rejected loudly, never silently dropped:
+
+- Content overlapping directly above/below a baseline token (other than
+  consumed accent marks).
+- Unmatched closing brackets.
+- Characters outside the atom allow-list; combining overlays
+  (U+0338/U+0336 — negation is written with precomposed atoms: ≠ ∉ ⊄).
+- A formula split by a blank line without a `┈` separator; an ambiguous
+  baseline.

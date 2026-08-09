@@ -15,7 +15,7 @@ use mascii::render::{RenderCtx, render_root};
 
 use crate::theme;
 
-const HELP: &str = "^F free move  ^B select block  \\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ⇧←→/⇧↑ select  ^T table/grid  ^Z/^R undo/redo  ^Y copy AA  Esc/^Q quit";
+const HELP: &str = "^F free move  ^B block select  \\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ⇧←→/⇧↑ select  ^T table/grid  ^Z/^R undo/redo  ^Y copy AA  Esc/^Q quit";
 
 /// Context-sensitive last line: generic keys normally, the relevant
 /// commands when the cursor is inside a grid cell or a delimiter.
@@ -246,6 +246,8 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
 struct Decor {
     lines: Vec<Vec<char>>,
     bg: Vec<Vec<Option<Color>>>,
+    /// Cells drawn bold (the completion's `[^F]` chord markers).
+    bold: Vec<Vec<bool>>,
     caret: Option<(usize, usize)>,
     /// The edited grid's frame rectangle (x0, x1, top, bottom).
     frame: Option<(usize, usize, usize, usize)>,
@@ -259,6 +261,7 @@ impl Decor {
         if x >= self.lines[y].len() {
             self.lines[y].resize(x + 1, ' ');
             self.bg[y].resize(x + 1, None);
+            self.bold[y].resize(x + 1, false);
         }
     }
 
@@ -269,6 +272,7 @@ impl Decor {
         while self.lines.len() <= y {
             self.lines.push(Vec::new());
             self.bg.push(Vec::new());
+            self.bold.push(Vec::new());
         }
     }
 
@@ -524,9 +528,11 @@ fn marker_boxes(
             }
         }
     }
+    let bold = bg.iter().map(|r| vec![false; r.len()]).collect();
     let mut decor = Decor {
         lines: grid,
         bg,
+        bold,
         caret: None,
         frame,
         armed,
@@ -624,10 +630,13 @@ fn overlay_minibuffer(ed: &Editor, d: &mut Decor, view: Viewport) {
     let text: Vec<char> = std::iter::once('\\').chain(buf.chars()).collect();
     let end = cx + text.len();
     d.widen(cy, end);
-    // Live feedback: the overlay turns red as soon as the typed name
-    // is not something \execute knows (it goes back on completion).
+    // Live feedback: green runs an edit, purple is a mode command,
+    // red runs nothing (yet) — \tau walks red -> purple (\t) ->
+    // green (\ta) as the name grows.
     let color = if ed.command_known(buf) {
         theme::MINIBUF_BG
+    } else if mascii::editor::mode_command(buf).is_some() {
+        theme::MINIBUF_MODE_BG
     } else {
         theme::MINIBUF_BAD_BG
     };
@@ -771,6 +780,14 @@ fn overlay_completion(
         let y = top + i;
         d.ensure_row(y);
         d.widen(y, x0 + box_w.saturating_sub(1));
+        // A mode command's symbol is its chord, `[^F]`: drawn bold, so
+        // the marker reads apart from the glyphs without a row tint
+        // (a tinted row under the selection highlight reads as
+        // neither).
+        let item = &list.items[start + i];
+        let mode = item
+            .commit()
+            .is_some_and(|c| mascii::editor::mode_command(c).is_some());
         let bg = if start + i == list.sel {
             theme::POPUP_SEL_BG
         } else {
@@ -784,6 +801,9 @@ fn overlay_completion(
                 row.get(dx).copied().unwrap_or(' ')
             };
             d.bg[y][x0 + dx] = Some(bg);
+            // The chord sits in the symbol column: " [^F]" is
+            // columns 1..=sym_w of the row.
+            d.bold[y][x0 + dx] = mode && (1..=sym_w).contains(&dx);
         }
     }
 }
@@ -894,6 +914,15 @@ fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec
             // Explicit space atom: keep visible but unobtrusive.
             flush(&mut buf, buf_bg, &mut spans);
             let mut style = Style::default().fg(theme::SPACE_FG);
+            if let Some(color) = cell_bg {
+                style = style.bg(color);
+            }
+            spans.push(Span::styled(cell, style));
+        } else if d.bold.get(y).and_then(|r| r.get(i)).copied() == Some(true) {
+            // A bold cell (the completion's [^F] chord markers): its
+            // own span, keeping whatever background it carries.
+            flush(&mut buf, buf_bg, &mut spans);
+            let mut style = Style::default().add_modifier(Modifier::BOLD);
             if let Some(color) = cell_bg {
                 style = style.bg(color);
             }
@@ -1708,6 +1737,7 @@ mod tests {
             let d = Decor {
                 lines: vec![vec![ghost, Mark::Gap { cols: true }.ch()]],
                 bg: vec![vec![None, None]],
+                bold: vec![vec![false, false]],
                 caret: cursor.map(|x| (0, x)),
                 frame: None,
                 armed: None,
@@ -1975,6 +2005,44 @@ mod tests {
             }
         }
     }
+    /// A mode command's row wears its chord in the symbol column,
+    /// bold: [^F] is what tells \free apart from the edits without a
+    /// row tint of its own.
+    #[test]
+    fn mode_rows_show_their_chord_bold() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut ed = Editor::new();
+        ed.input(Key::Char('\\'), false, false);
+        ed.input(Key::Char('f'), false, false);
+        ed.input(Key::Down, false, false);
+        let mut view = View::default();
+        let mut term = Terminal::new(TestBackend::new(40, 14)).unwrap();
+        term.draw(|f| {
+            draw(f, &ed, &mut view);
+        })
+        .unwrap();
+        let buf = term.backend().buffer().clone();
+        let screen: Vec<String> = (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect()
+            })
+            .collect();
+        let at = screen
+            .iter()
+            .enumerate()
+            .find_map(|(y, l)| l.find("[^F]").map(|x| (x, y)))
+            .unwrap_or_else(|| panic!("no [^F] marker:\n{}", screen.join("\n")));
+        let cell = &buf[(at.0 as u16, at.1 as u16)];
+        assert!(
+            cell.style()
+                .add_modifier
+                .contains(ratatui::style::Modifier::BOLD),
+            "the chord marker is not bold"
+        );
+    }
+
     fn shot_at(ed: &Editor, w: u16, h: u16) -> Vec<String> {
         use ratatui::{Terminal, backend::TestBackend};
         let mut view = View::default();

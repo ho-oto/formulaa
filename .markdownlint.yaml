@@ -1,0 +1,5 @@
+# Line length is not enforced: the docs carry wide tables and AA
+# examples whose columns are meaningful.
+MD013: false
+# The AA examples inside tables/lists sometimes need inline HTML-free
+# long tokens; keep the rest of the default rules.

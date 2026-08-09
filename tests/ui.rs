@@ -1960,3 +1960,97 @@ fn container_commands_wrap_the_selection() {
     type_script(&mut ed, r"a S-Left \set b");
     assert_eq!(latex(&ed), "\\left\\{a\\middle|b\\right\\}");
 }
+
+/// The mode commands: minibuffer spellings for the ctrl chords, so a
+/// terminal that steals ^F/^B/^T/^C/^Q still has every mode. They
+/// run on commit like any command, and the ordinary edits keep their
+/// meaning beside them (\t is a mode, \ta and \tau stay edits).
+#[test]
+fn mode_commands_run_from_the_minibuffer() {
+    // \free enters free-cursor mode; \f is the short form.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"x \free");
+    assert!(ed.free.is_some(), "free mode did not start");
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"x \f");
+    assert!(ed.free.is_some());
+
+    // \b starts block select, \t toggles grid edit inside a matrix.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"x ^ 2 \b");
+    assert!(ed.block.is_some(), "block select did not start");
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\pmatrix22 x \g");
+    assert!(ed.grid.is_some(), "grid mode did not start");
+
+    // \clipboard puts the AA on the *system* clipboard, exactly like
+    // ^Y. No \c: one letter beside ^C (the internal copy) would read
+    // as the same thing, and it is not.
+    let mut ed = Editor::new();
+    let fx = type_script(&mut ed, r"ab \clipboard");
+    assert!(fx.contains(&Effect::CopyAa), "{:?}", fx);
+    let mut ed = Editor::new();
+    let fx = type_script(&mut ed, r"ab \c");
+    assert!(!fx.contains(&Effect::CopyAa), "\\c still copies");
+
+    // \quit quits: the effect reaches the host. The one-letter \q
+    // does not — a quit one typo away is the wrong price for brevity.
+    let mut ed = Editor::new();
+    let fx = type_script(&mut ed, r"\quit");
+    assert!(fx.contains(&Effect::Quit), "{:?}", fx);
+    let mut ed = Editor::new();
+    let fx = type_script(&mut ed, r"\q");
+    assert!(!fx.contains(&Effect::Quit), "\\q still quits");
+
+    // Tab never runs a mode command — no matter how complete the
+    // spelling or which row is highlighted, only an explicit
+    // Enter/Space commits one.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"x \ f Tab");
+    assert!(ed.free.is_none(), "Tab ran a mode command");
+    type_script(&mut ed, r"Tab Tab");
+    assert!(ed.free.is_none(), "Tab took the mode row");
+    type_script(&mut ed, r"Enter");
+    assert!(ed.free.is_some(), "Enter did not run it");
+
+    // …and the neighbouring edits are untouched.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\tau");
+    assert_eq!(latex(&ed), "\\tau ");
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ta");
+    assert_eq!(latex(&ed), "\\tau ");
+}
+
+/// Grid mode leaves the way the other modes do, and Enter keeps the
+/// cell meaningful: its contents become the ordinary selection, so a
+/// wrap or a replacement can act on the cell at once.
+#[test]
+fn grid_mode_exits_on_backslash_and_enter_keeps_the_cell() {
+    // `\` leaves the mode like it leaves ^F/^B (consumed, no
+    // minibuffer yet — the next `\` opens it).
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\pmatrix22 ab C-t");
+    assert!(ed.grid.is_some());
+    type_script(&mut ed, r"\");
+    assert!(ed.grid.is_none(), "backslash did not leave grid mode");
+    assert!(
+        ed.minibuffer.is_none(),
+        "the leaving key opened the minibuffer"
+    );
+
+    // Enter: out of the mode with the cell's contents selected —
+    // `\norm` can wrap them immediately.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\pmatrix22 ab C-t Enter");
+    assert!(ed.grid.is_none());
+    assert_eq!(ed.selection(), Some((0, 2)), "the cell is not selected");
+    type_script(&mut ed, r"\norm");
+    assert!(latex(&ed).contains("\\|ab"), "{}", latex(&ed));
+
+    // A multi-cell rectangle has no linear reading: Enter just leaves.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\pmatrix22 ab C-t S-Right Enter");
+    assert!(ed.grid.is_none());
+    assert_eq!(ed.selection(), None);
+}
