@@ -294,17 +294,9 @@ fn script_cmd(cmd: &str) -> Option<(bool, crate::ast::Row)> {
     Some((marker == '^', arg))
 }
 
-/// `\lr…` / `\delim…` delimiter spec, read in *visual order*: first
-/// token = left, interior tokens = middles ('|' only), last token =
-/// right. A token is one spec char — `( ) [ ] { } | .` with `<` `>`
-/// aliasing ⟨ ⟩ — or a `\name` (\langle, \vert, \none …), so `\lr(]`,
-/// `\lr{|}` and `\lr\langle||\rangle` all read like the picture. None
-/// when the string is not a delimiter spec (a `\lr…` symbol name like
-/// \lrcorner then resolves normally).
-fn lr_spec(cmd: &str) -> Option<(Delim, Delim, usize)> {
-    let spec = cmd
-        .strip_prefix("delim")
-        .or_else(|| cmd.strip_prefix("lr"))?;
+/// The spec's tokens, one glyph each: a spec char (`<` `>` aliasing
+/// ⟨ ⟩) or a `\name`. None when a name is not a delimiter's.
+fn lr_tokens(spec: &str) -> Option<Vec<char>> {
     let mut tokens = Vec::new();
     let mut it = spec.chars().peekable();
     while let Some(c) = it.next() {
@@ -322,6 +314,66 @@ fn lr_spec(cmd: &str) -> Option<(Delim, Delim, usize)> {
         };
         tokens.push(tok);
     }
+    Some(tokens)
+}
+
+/// A spec split at the name still being typed: everything through the
+/// last complete token, and the trailing `\name` fragment — `""` when
+/// the spec ends on a token boundary (`lr\` splits to a settled part
+/// and an empty fragment: the backslash itself says a name is coming).
+/// The split follows the tokenizer, not string search: in `\vert|`
+/// the name ended at its `t` and the `|` is a token of its own, which
+/// a "text after the last backslash" reading gets wrong. None when an
+/// unknown name is sealed by more spec after it — nothing can finish
+/// that name, so the spec is broken beyond continuing.
+pub(crate) fn lr_split(spec: &str) -> Option<(&str, &str)> {
+    let mut it = spec.char_indices().peekable();
+    while let Some((at, c)) = it.next() {
+        if c != '\\' {
+            continue;
+        }
+        let mut name = String::new();
+        while let Some(&(_, ch)) = it.peek() {
+            if !ch.is_ascii_alphabetic() {
+                break;
+            }
+            name.push(ch);
+            it.next();
+        }
+        if crate::symbols::DELIM_NAMES.contains_key(name.as_str()) {
+            continue;
+        }
+        return it.peek().is_none().then(|| (&spec[..at], &spec[at + 1..]));
+    }
+    Some((spec, ""))
+}
+
+/// Whether a spec written so far can still become one, and if so
+/// whether the opening token is still to come. A spec is an opener,
+/// any number of `|` middles, then a closer — so `\lr)` (a closer in
+/// the opening slot) and `\lrx` (not a delimiter at all) are already
+/// finished as failures, and the completion must stop offering them a
+/// continuation rather than let the spelling grow forever.
+pub(crate) fn lr_spec_more(spec: &str) -> Option<bool> {
+    let tokens = lr_tokens(spec)?;
+    let Some((first, rest)) = tokens.split_first() else {
+        return Some(true);
+    };
+    (Delim::of_spec_side(*first, true).is_some() && rest.iter().all(|&c| c == '|')).then_some(false)
+}
+
+/// `\lr…` / `\delim…` delimiter spec, read in *visual order*: first
+/// token = left, interior tokens = middles ('|' only), last token =
+/// right. A token is one spec char — `( ) [ ] { } | .` with `<` `>`
+/// aliasing ⟨ ⟩ — or a `\name` (\langle, \vert, \none …), so `\lr(]`,
+/// `\lr{|}` and `\lr\langle||\rangle` all read like the picture. None
+/// when the string is not a delimiter spec (a `\lr…` symbol name like
+/// \lrcorner then resolves normally).
+fn lr_spec(cmd: &str) -> Option<(Delim, Delim, usize)> {
+    let spec = cmd
+        .strip_prefix("delim")
+        .or_else(|| cmd.strip_prefix("lr"))?;
+    let tokens = lr_tokens(spec)?;
     if tokens.len() < 2 {
         return None;
     }
@@ -351,16 +403,19 @@ pub fn grid_env_name(left: Delim, right: Delim, cols: usize) -> Option<&'static 
         .map(|(&name, _)| name)
 }
 
-/// Grid minibuffer commands with an optional RxC digit suffix
-/// (`matrix34` = 3 rows × 4 cols; bare name = 2×2). Returns the delimiter
-/// pair and the dimensions.
+/// Grid minibuffer commands with their RxC digit suffix
+/// (`matrix34` = 3 rows × 4 cols). Returns the delimiter pair and the
+/// dimensions.
 fn grid_command(cmd: &str) -> Option<(GridWrap, usize, usize)> {
     for (name, &delims) in GRID_ENVS.entries() {
         let Some(rest) = cmd.strip_prefix(name) else {
             continue;
         };
         match rest.as_bytes() {
-            [] => return Some((delims, 2, 2)),
+            // A bare name builds nothing: a grid's size is part of what
+            // the command says, and every default is a guess about the
+            // formula. The completion answers with the shape instead
+            // (`matrix{1…9}{1…9}`), the way `\lr` answers with tokens.
             [r, c] if r.is_ascii_digit() && c.is_ascii_digit() => {
                 let (rows, cols) = ((r - b'0') as usize, (c - b'0') as usize);
                 if rows >= 1 && cols >= 1 {
@@ -1695,11 +1750,16 @@ mod tests {
         assert!(matches!(ed.root[0],
             Node::Delim { left: Delim::Angle, right: Delim::Angle, mids: 2, ref segs }
                 if segs.len() == 3));
-        // A non-spec `lr…` name falls through to the symbol table
-        // (bare \lr is the ↔ arrow in the extended table).
+        // Bare `\lr` builds nothing: it is the prefix of a spec, not a
+        // command. (It used to be a spelling of ↔, which meant the
+        // first half of every spec inserted an arrow instead.)
         let mut ed = Editor::new();
         ed.execute("lr");
-        assert_eq!(ed.root, vec![Node::Sym('↔')]);
+        assert!(ed.root.is_empty());
+        assert!(ed.message.contains("usage"), "{:?}", ed.message);
+        // A `lr…` name that is not a spec still falls through to the
+        // symbol table rather than being read as one.
+        assert_eq!(lr_spec("lrfoo"), None);
         // A right-shaped glyph cannot open (and vice versa): `\lr][`
         // used to build a picture that read back as unmatched.
         assert_eq!(lr_spec("lr]["), None);
@@ -1984,7 +2044,7 @@ mod tests {
     #[test]
     fn grid_row_col_editing() {
         let mut ed = Editor::new();
-        ed.execute("bmatrix"); // 2x2, cursor in cell 0
+        ed.execute("bmatrix22"); // 2x2, cursor in cell 0
         ed.insert_sym('a');
         ed.execute("addcol"); // now 2x3, cursor in new empty cell (0,1)
         ed.insert_sym('x');
@@ -2010,7 +2070,7 @@ mod tests {
     fn grid_and_mid_editing() {
         // \matrix puts the cursor into cell 0 of a [ ] grid.
         let mut ed = Editor::new();
-        ed.execute("bmatrix");
+        ed.execute("bmatrix22");
         ed.insert_sym('a');
         assert_eq!(ed.path.len(), 2);
         ed.close_bracket();

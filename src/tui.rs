@@ -1005,7 +1005,7 @@ mod tests {
             )
         };
         let mut ed = Editor::new();
-        for c in "\\bmatrix a".chars() {
+        for c in "\\bmatrix22 a".chars() {
             ed.input(Key::Char(c), false, false);
         }
         ed.input(Key::Char('t'), false, true); // ^T grid
@@ -1111,7 +1111,7 @@ mod tests {
     #[test]
     fn frame_survives_a_middle_row_gap() {
         let mut ed = Editor::new();
-        for c in r"\bmatrix a".chars() {
+        for c in r"\bmatrix22 a".chars() {
             ed.input(Key::Char(c), false, false);
         }
         ed.input(Key::Char('t'), false, true);
@@ -1135,7 +1135,7 @@ mod tests {
     #[test]
     fn fused_frame_recolors_both_delimiters() {
         let mut ed = Editor::new();
-        for c in r"\pmatrix a".chars() {
+        for c in r"\pmatrix22 a".chars() {
             ed.input(Key::Char(c), false, false);
         }
         ed.input(Key::Char('t'), false, true); // ^T grid
@@ -1234,10 +1234,10 @@ mod tests {
     #[test]
     fn frame_rect_is_exact() {
         let mut ed = Editor::new();
-        for c in r"\bmatrix ".chars() {
+        for c in r"\bmatrix22 ".chars() {
             ed.input(Key::Char(c), false, false);
         }
-        for c in r"\pmatrix x".chars() {
+        for c in r"\pmatrix22 x".chars() {
             ed.input(Key::Char(c), false, false);
         }
         ed.input(Key::Char('t'), false, true); // grid mode on the INNER grid
@@ -1276,7 +1276,7 @@ mod tests {
     #[test]
     fn click_lands_true_while_the_gap_ghost_is_up() {
         let mut ed = Editor::new();
-        for c in r"\bmatrix x".chars() {
+        for c in r"\bmatrix22 x".chars() {
             ed.input(Key::Char(c), false, false);
         }
         ed.input(Key::Char('t'), false, true);
@@ -1449,11 +1449,11 @@ mod tests {
         );
     }
 
-    /// Tab opens a completion list under the typed name: a symbol
+    /// The completion list draws under the typed name: a symbol
     /// column, the spellings next to it, and the highlighted row
     /// picked out — and, like every overlay, the formula stays put.
     #[test]
-    fn tab_opens_a_completion_popup() {
+    fn the_completion_list_draws_under_the_name() {
         use ratatui::{Terminal, backend::TestBackend};
         let shot = |ed: &Editor| -> Vec<String> {
             let mut view = View::default();
@@ -1482,11 +1482,11 @@ mod tests {
         for c in "\\al".chars() {
             ed.input(Key::Char(c), false, false);
         }
-        ed.input(Key::Tab, false, false);
+        ed.input(Key::Down, false, false);
         let after = shot(&ed);
         let screen = after.join("\n");
         assert!(
-            screen.contains("al/p/ha"),
+            screen.contains("al[p[ha]]"),
             "the α row is listed:\n{}",
             screen
         );
@@ -1521,11 +1521,13 @@ mod tests {
     /// left rather than running off the right edge.
     #[test]
     fn completion_popup_stays_on_screen() {
+        // An arrow always opens the list; Tab would commit these
+        // queries, since they are already commands.
         let open = |ed: &mut Editor, q: &str| {
             for c in format!("\\{}", q).chars() {
                 ed.input(Key::Char(c), false, false);
             }
-            ed.input(Key::Tab, false, false);
+            ed.input(Key::Down, false, false);
         };
         // A short terminal cannot show all 12 rows: stepping to the
         // last one must still show it highlighted somewhere.
@@ -1538,9 +1540,12 @@ mod tests {
             ed.input(Key::Down, false, false);
         }
         let last = ed.completion.as_ref().unwrap().items[n - 1].names.clone();
+        // Its opening letters, not the whole row: a row wider than the
+        // box is drawn trimmed, which is not what this is about.
+        let head: String = last.chars().take(5).collect();
         let screen = shot_at(&ed, 40, 14).join("\n");
         assert!(
-            screen.contains(last.split(',').next().unwrap()),
+            screen.contains(&head),
             "the selected row is off screen:\n{}",
             screen
         );
@@ -1614,9 +1619,9 @@ mod tests {
             ed.input(Key::Char(c), false, false);
         }
         let preview = where_is(&ed, 34, 12, 'α').expect("the preview is drawn on its own ground");
-        ed.input(Key::Tab, false, false);
+        ed.input(Key::Down, false, false);
         let popup = where_is(&ed, 34, 12, 'α').expect("the popup row is drawn");
-        assert_eq!(preview, popup, "Tab moved the box");
+        assert_eq!(preview, popup, "the box moved");
 
         // …and the same when there is no room below, so both flip up.
         let mut ed = Editor::new();
@@ -1628,9 +1633,9 @@ mod tests {
             ed.input(Key::Char(c), false, false);
         }
         let preview = where_is(&ed, 34, 8, 'α').expect("the preview lands on screen");
-        ed.input(Key::Tab, false, false);
+        ed.input(Key::Down, false, false);
         let popup = where_is(&ed, 34, 8, 'α').expect("the popup lands on screen");
-        assert_eq!(preview, popup, "Tab flipped the box to the other side");
+        assert_eq!(preview, popup, "the box flipped to the other side");
     }
 
     /// A typed overlay is content, not decoration: centering it off the

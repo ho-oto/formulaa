@@ -67,6 +67,10 @@ pub static DELIM_NAMES: phf::Map<&'static str, char> = phf::phf_map! {
     "rbrace" => '}',
     "langle" => '⟨',
     "rangle" => '⟩',
+    "lceil" => '⌈',
+    "rceil" => '⌉',
+    "lfloor" => '⌊',
+    "rfloor" => '⌋',
     "vert" | "mid" => '|',
     "dot" | "none" => '.',
 };

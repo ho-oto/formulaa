@@ -384,7 +384,10 @@ pub static NAMES: phf::Map<&'static str, char> = phf::phf_map! {
     "leftarrow" | "left" | "<-" => '←',
     "Rightarrow" | "Right" | "=>" => '⇒',
     "Leftarrow" | "Left" | "<=" => '⇐',
-    "leftrightarrow" | "leftright" | "lr" | "<->" => '↔',
+    // `lr` is not here: it is the delimiter-spec prefix (\lr(] …),
+    // and an arrow hiding under it made `\lr` insert ↔ instead of
+    // starting a pair. `\<->` and `\leftrightarrow` remain.
+    "leftrightarrow" | "leftright" | "<->" => '↔',
     "Leftrightarrow" | "LR" | "Leftrigh" | "Lr" | "<=>" => '⇔',
     "mapsto" | "|->" => '↦',
     // Sets / logic

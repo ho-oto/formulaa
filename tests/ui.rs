@@ -223,12 +223,22 @@ fn minibuffer_previews_the_commit() {
         ed.command_preview_row().as_deref(),
         Some([mascii::ast::Node::Frac { .. }])
     ));
-    // Unknown or empty spellings preview nothing; mode openers too.
+    // An unknown spelling previews nothing…
     let mut ed = Editor::new();
     type_script(&mut ed, r"\ f r");
     assert_eq!(ed.command_preview_row(), None);
+    // …a name box previews the slot it opens, since that is what
+    // committing gives you…
     let mut ed = Editor::new();
     type_script(&mut ed, r"\ t e x");
+    assert_eq!(
+        ed.command_preview_row(),
+        Some(vec![mascii::ast::Node::Sym('⬚')])
+    );
+    // …and the commands that act on their surroundings preview
+    // nothing, because what they do depends on where the cursor is.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ a d d r o w");
     assert_eq!(ed.command_preview_row(), None);
     // The preview never touches the formula.
     let mut ed = Editor::new();
@@ -269,7 +279,7 @@ fn ctrl_e_jumps_to_the_end_outside_grids() {
     assert_eq!((ed.path.len(), ed.col), (0, 3), "formula end");
     // ^E is the end jump even inside a grid cell (grid mode is ^O).
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix x C-t");
+    type_script(&mut ed, r"\bmatrix22 x C-t");
     assert!(ed.grid.is_some());
 }
 
@@ -328,11 +338,34 @@ fn caret_underscore_commands_insert_scripts() {
 fn command_known_tracks_execute() {
     let ed = Editor::new();
     for ok in [
-        "frac", "sqrt", "alpha", "sin", "lim", "argmax", "hat", "^z", "rmdx", "pmatrix",
+        "frac",
+        "sqrt",
+        "alpha",
+        "sin",
+        "lim",
+        "argmax",
+        "hat",
+        "^z",
+        "rmdx",
+        "pmatrix22",
+        "lr(]",
     ] {
         assert!(ed.command_known(ok), "\\{} should be known", ok);
     }
-    for bad in ["", "fra", "nosuchthing", "zzz"] {
+    // Known means Enter inserts something. A spelling that only prints
+    // its usage (`\lr`, `\matrix` — an argument is part of the name)
+    // is as unready as a half-typed one.
+    for bad in [
+        "",
+        "fra",
+        "nosuchthing",
+        "zzz",
+        "lr",
+        "lr(",
+        "matrix",
+        "pmatrix",
+        "matrix3",
+    ] {
         assert!(!ed.command_known(bad), "\\{} should be unknown", bad);
     }
     // The probe never touches the real editor.
@@ -450,7 +483,7 @@ fn grid_edit_mode() {
     let mut ed = Editor::new();
     type_script(
         &mut ed,
-        r"\bmatrix a C-t Right Enter b C-t Down Left Enter c C-t Right Enter d",
+        r"\bmatrix22 a C-t Right Enter b C-t Down Left Enter c C-t Right Enter d",
     );
     assert_eq!(
         latex(&ed),
@@ -467,14 +500,14 @@ fn grid_edit_mode() {
     // (green), Enter inserts a column there and lands on it; a
     // cross-axis arrow drops back to cell selection of that lane.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix x C-t | Left Enter Up Enter y");
+    type_script(&mut ed, r"\bmatrix22 x C-t | Left Enter Up Enter y");
     assert_eq!(
         latex(&ed),
         "\\begin{bmatrix}  & x &  \\\\ y &  &  \\end{bmatrix}"
     );
     // Undo works inside grid mode (row deletion is one step).
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix a Down b C-t r Backspace C-z");
+    type_script(&mut ed, r"\bmatrix22 a Down b C-t r Backspace C-z");
     assert!(
         latex(&ed).contains("\\\\"),
         "undo restored the row: {}",
@@ -490,12 +523,12 @@ fn grid_edit_mode() {
 fn grid_selection_promotes_and_clears() {
     // Backspace on a full-column CELL selection clears the contents…
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix a Down b C-t S-Up Backspace");
+    type_script(&mut ed, r"\bmatrix22 a Down b C-t S-Up Backspace");
     assert_eq!(latex(&ed), "\\begin{bmatrix}  &  \\\\  &  \\end{bmatrix}");
     // …while pushing the selection past the edge promotes it to the
     // column itself, where Backspace deletes the column.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix a Down b C-t S-Up S-Up");
+    type_script(&mut ed, r"\bmatrix22 a Down b C-t S-Up S-Up");
     assert!(
         matches!(
             ed.grid,
@@ -515,7 +548,7 @@ fn grid_selection_promotes_and_clears() {
 #[test]
 fn esc_exits_grid_mode_from_lane_mode() {
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix x C-t c Esc");
+    type_script(&mut ed, r"\bmatrix22 x C-t c Esc");
     assert!(ed.grid.is_none(), "{:?}", ed.grid);
 }
 
@@ -531,7 +564,7 @@ fn grid_state_survives_undo_redo_and_clicks() {
     // Undo shrinks the grid under a lane cursor parked past the end:
     // used to drain past the cells vec / index out of bounds.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix a C-t | Right Right Right Enter C-z");
+    type_script(&mut ed, r"\bmatrix22 a C-t | Right Right Right Enter C-z");
     redraw(&ed);
     type_script(&mut ed, "Backspace");
     redraw(&ed);
@@ -541,7 +574,7 @@ fn grid_state_survives_undo_redo_and_clicks() {
     let mut ed = Editor::new();
     type_script(
         &mut ed,
-        r"\bmatrix a C-t S-Down C-c Down Right C-v Down Down Right S-Up C-z",
+        r"\bmatrix22 a C-t S-Down C-c Down Right C-v Down Down Right S-Up C-z",
     );
     redraw(&ed);
     type_script(&mut ed, "C-c C-v Backspace");
@@ -549,7 +582,7 @@ fn grid_state_survives_undo_redo_and_clicks() {
     // A click relocates the cursor (possibly outside any grid): the
     // grid state follows or ends, never dangles.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix a Tab Tab + x");
+    type_script(&mut ed, r"\bmatrix22 a Tab Tab + x");
     type_script(&mut ed, "C-a"); // back to formula start…
     // …enter the matrix and grid mode with an anchor:
     type_script(&mut ed, r"Right C-t S-Down");
@@ -564,7 +597,7 @@ fn lane_selection_copies_its_cells() {
     // ^C on a purple lane copies the lane's cells (it used to be a
     // silent no-op).
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix a Down b C-t S-Up S-Up C-c");
+    type_script(&mut ed, r"\bmatrix22 a Down b C-t S-Up S-Up C-c");
     assert!(ed.message.contains("copied"), "{}", ed.message);
     type_script(&mut ed, "Esc Tab Tab C-v");
     assert!(
@@ -579,7 +612,7 @@ fn cell_clip_pastes_over_cells_even_outside_grid_mode() {
     // With the cursor in a grid cell but ^O off, a cell clipboard
     // still pastes as an overwrite — never a nested matrix.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix a Down b C-t S-Up C-c Esc Right C-v");
+    type_script(&mut ed, r"\bmatrix22 a Down b C-t S-Up C-c Esc Right C-v");
     assert_eq!(
         latex(&ed),
         "\\begin{bmatrix} a & a \\\\ b & b \\end{bmatrix}"
@@ -589,7 +622,7 @@ fn cell_clip_pastes_over_cells_even_outside_grid_mode() {
 #[test]
 fn vmatrix_wraps_a_grid_in_a_norm() {
     let mut ed = Editor::new();
-    ed.execute("Vmatrix");
+    ed.execute("Vmatrix22");
     type_script(&mut ed, "a Right b");
     assert_eq!(latex(&ed), "\\begin{Vmatrix} a & b \\\\  &  \\end{Vmatrix}");
 }
@@ -599,7 +632,7 @@ fn grid_cells_copy_paste() {
     // Copy a 2x1 block, paste at the far corner: overwrite semantics,
     // and the grid grows to fit the overhang.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix a Down b C-t S-Up C-c Down Right C-v");
+    type_script(&mut ed, r"\bmatrix22 a Down b C-t S-Up C-c Down Right C-v");
     assert_eq!(
         latex(&ed),
         "\\begin{bmatrix} a &  \\\\ b & a \\\\  & b \\end{bmatrix}"
@@ -706,7 +739,7 @@ fn enter_inside_an_inset_is_inert() {
     // Enter only breaks lines at the top level; inside a grid cell it
     // does nothing (rows are added in ^T grid mode or with \addrow).
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\pmatrix a Enter");
+    type_script(&mut ed, r"\pmatrix22 a Enter");
     let pic = aa(&ed);
     assert_eq!(pic.matches('┼').count(), 1, "still 2×2:\n{}", pic);
     assert!(
@@ -781,11 +814,11 @@ fn vertical_exits_a_grid_at_its_edge() {
     // ↓ on the bottom row leaves the matrix (after it); ↑ on the top
     // row leaves before it.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\pmatrix a Down b Down x");
+    type_script(&mut ed, r"\pmatrix22 a Down b Down x");
     assert!(ed.path.is_empty(), "path: {:?}", ed.path);
     assert!(latex(&ed).ends_with('x'), "latex: {}", latex(&ed));
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\pmatrix a Up y");
+    type_script(&mut ed, r"\pmatrix22 a Up y");
     assert!(ed.path.is_empty());
     assert!(latex(&ed).starts_with('y'), "latex: {}", latex(&ed));
 }
@@ -929,7 +962,7 @@ fn content_inserts_replace_the_selection() {
     assert_eq!(latex(&ed), "a\\sum_{n}");
     // A grid replaces and enters its first cell.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"ab S-Left \pmatrix x");
+    type_script(&mut ed, r"ab S-Left \pmatrix22 x");
     assert_eq!(latex(&ed), "a\\begin{pmatrix} x &  \\\\  &  \\end{pmatrix}");
     // A name box deletes the selection when it opens; the commit
     // lands where the range was.
@@ -979,7 +1012,7 @@ fn block_select_mode_selects_a_structure() {
     // Arrow walk: outward Array -> Delim; a second ^B cancels without
     // moving the cursor.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\pmatrix x");
+    type_script(&mut ed, r"\pmatrix22 x");
     let (path, col) = (ed.path.clone(), ed.col);
     type_script(&mut ed, r"C-b");
     assert_eq!(ed.block.as_ref().map(Vec::len), Some(2), "Array + Delim");
@@ -994,7 +1027,7 @@ fn block_select_mode_selects_a_structure() {
     // Enter on the outer ancestor selects the delimiter block, ready
     // for wrapping.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\pmatrix x C-b Up Enter \sqrt");
+    type_script(&mut ed, r"\pmatrix22 x C-b Up Enter \sqrt");
     assert_eq!(
         latex(&ed),
         "\\sqrt{\\begin{pmatrix} x &  \\\\  &  \\end{pmatrix}}"
@@ -1343,7 +1376,7 @@ fn unwrap_leaves_middles_and_grids_alone() {
     // to the segment before pressing — otherwise Backspace never
     // reaches the delimiter at all.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\pmatrix x Tab Home");
+    type_script(&mut ed, r"\pmatrix22 x Tab Home");
     assert!(
         matches!(ed.path.last(), Some((_, mascii::ast::Field::Seg(0)))),
         "cursor is in the delimiter's segment: {:?}",
@@ -1369,15 +1402,18 @@ fn unwrap_leaves_middles_and_grids_alone() {
 fn tab_completion_picks_a_row() {
     // \al + Tab + Enter commits the first row: α.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\ a l Tab Enter");
+    type_script(&mut ed, r"\ a l Down Enter");
     assert_eq!(latex(&ed), "\\alpha ");
     assert!(ed.completion.is_none(), "the popup outlived the pick");
     assert!(ed.minibuffer.is_none());
 
     // ↓ moves to the next row, and that row is what Enter inserts.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\ a l Tab");
-    let second = ed.completion.as_ref().unwrap().items[1].commit.clone();
+    type_script(&mut ed, r"\ a l Down");
+    let second = ed.completion.as_ref().unwrap().items[1]
+        .commit()
+        .unwrap()
+        .to_string();
     type_script(&mut ed, "Down Enter");
     let mut expected = Editor::new();
     expected.execute(&second);
@@ -1385,7 +1421,7 @@ fn tab_completion_picks_a_row() {
 
     // ↑ from the first row wraps to the last: the list cycles.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\ a l Tab Up");
+    type_script(&mut ed, r"\ a l Down Up");
     let list = ed.completion.as_ref().unwrap();
     assert_eq!(list.sel, list.items.len() - 1);
 }
@@ -1395,7 +1431,7 @@ fn tab_completion_picks_a_row() {
 #[test]
 fn tab_completion_follows_the_query() {
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\ a l Tab");
+    type_script(&mut ed, r"\ a l Down");
     assert_eq!(
         ed.completion.as_ref().unwrap().items[0].symbol,
         "α",
@@ -1404,7 +1440,7 @@ fn tab_completion_follows_the_query() {
     // Typing on narrows the list without closing it.
     type_script(&mut ed, "e p h");
     let list = ed.completion.as_ref().expect("the popup stayed open");
-    assert_eq!(list.items[0].commit, "aleph");
+    assert_eq!(list.items[0].commit(), Some("aleph"));
     // Backspace widens it again.
     type_script(&mut ed, "Backspace Backspace Backspace");
     assert_eq!(ed.completion.as_ref().unwrap().items[0].symbol, "α");
@@ -1437,7 +1473,7 @@ fn block_select_paints_only_a_step_in_each_direction() {
     use mascii::glyphs::Mark;
     let mut ed = Editor::new();
     // Nest deeply: a matrix cell inside a fraction inside a bracket.
-    type_script(&mut ed, r"( 1 // \pmatrix x");
+    type_script(&mut ed, r"( 1 // \pmatrix22 x");
     type_script(&mut ed, "C-b");
     let depth = ed.block.as_ref().map(Vec::len).unwrap_or(0);
     assert!(depth >= 4, "expected a deep chain, got {}", depth);
@@ -1536,7 +1572,7 @@ fn arming_does_not_survive_undo_or_a_click() {
 #[test]
 fn a_click_closes_the_completion_popup() {
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\ a l Tab");
+    type_script(&mut ed, r"\ a l Down");
     assert!(ed.completion.is_some());
     ed.click(0, 0);
     assert!(ed.completion.is_none(), "the popup outlived the click");
@@ -1553,15 +1589,15 @@ fn a_click_closes_the_completion_popup() {
 fn the_popup_tracks_the_query_and_both_commit_keys_take_it() {
     // Space commits the highlighted row, exactly as Enter does.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\ a l Tab Down");
+    type_script(&mut ed, r"\ a l Down Down");
     let picked = ed
         .completion
         .as_ref()
         .unwrap()
         .selected()
+        .and_then(|i| i.commit())
         .unwrap()
-        .commit
-        .clone();
+        .to_string();
     type_script(&mut ed, "Space");
     let mut expected = Editor::new();
     expected.execute(&picked);
@@ -1570,7 +1606,7 @@ fn the_popup_tracks_the_query_and_both_commit_keys_take_it() {
     // Typing past every match keeps the popup open (empty), so
     // backspacing restores the list instead of needing another Tab.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\ a l Tab");
+    type_script(&mut ed, r"\ a l Down");
     assert!(!ed.completion.as_ref().unwrap().items.is_empty());
     type_script(&mut ed, "q q z");
     assert!(
@@ -1585,7 +1621,7 @@ fn the_popup_tracks_the_query_and_both_commit_keys_take_it() {
 
     // An empty list commits the typed text rather than nothing.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\ a l Tab q q z Enter");
+    type_script(&mut ed, r"\ a l Down q q z Enter");
     assert!(ed.message.contains("unknown command"), "{:?}", ed.message);
 
     // …and the "no completion" notice does not outlive its keystroke.
@@ -1594,4 +1630,196 @@ fn the_popup_tracks_the_query_and_both_commit_keys_take_it() {
     assert!(!ed.message.is_empty(), "no notice");
     type_script(&mut ed, "Backspace");
     assert!(ed.message.is_empty(), "stale notice: {:?}", ed.message);
+}
+
+/// Tab finishes, the arrows browse. A name that is already a command
+/// commits on Tab — that is what "complete" means once there is
+/// nothing left to complete — and only a name that is not a command
+/// makes Tab ask for the list.
+#[test]
+fn tab_finishes_and_the_arrows_browse() {
+    // \alpha is a command: Tab runs it.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ a l p h a Tab");
+    assert_eq!(latex(&ed), "\\alpha ");
+    assert!(ed.minibuffer.is_none() && ed.completion.is_none());
+
+    // \al is a command too (a shorthand for the same α).
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ a l Tab");
+    assert_eq!(latex(&ed), "\\alpha ");
+
+    // \alp… is not: Tab asks for the list instead of running anything.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ x y z z Tab");
+    assert_eq!(latex(&ed), "", "Tab executed a non-command");
+    assert!(
+        ed.completion.is_some() || !ed.message.is_empty(),
+        "Tab neither listed nor explained"
+    );
+
+    // An arrow opens the list on the first press without skipping its
+    // first row, and Tab then takes whatever is highlighted.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ a l Down");
+    let first = ed.completion.as_ref().unwrap();
+    assert_eq!(first.sel, 0, "the revealing press skipped a row");
+    type_script(&mut ed, "Down");
+    let second = ed
+        .completion
+        .as_ref()
+        .unwrap()
+        .selected()
+        .and_then(|i| i.commit())
+        .unwrap()
+        .to_string();
+    type_script(&mut ed, "Tab");
+    let mut expected = Editor::new();
+    expected.execute(&second);
+    assert_eq!(latex(&ed), latex(&expected), "Tab took \\{}", second);
+}
+
+/// A step that would change nothing closes the list instead: `\frak`'s
+/// own row leaves `frak` typed and the rest is free input the list
+/// cannot enumerate, so a second accept means "let me type". (It used
+/// to rebuild the identical list, and Enter looked dead.)
+#[test]
+fn a_stalled_step_closes_the_list() {
+    // The first accept completes the prefix; the second yields.
+    // (`\fra`'s first row is `frac`; the frak family sits under it.)
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ f r a Down Down Enter");
+    assert_eq!(
+        ed.minibuffer.as_deref(),
+        Some("frak"),
+        "the step stalled early"
+    );
+    assert!(ed.completion.is_some(), "the list closed with a step taken");
+    type_script(&mut ed, "Enter");
+    assert_eq!(ed.minibuffer.as_deref(), Some("frak"));
+    assert!(
+        ed.completion.is_none(),
+        "the list stayed up with nothing to add"
+    );
+    // …and typing carries straight on.
+    type_script(&mut ed, "a Enter");
+    assert_eq!(latex(&ed), "\\mathfrak{a}");
+}
+
+/// A shape row is a step, not an answer: taking it writes the next
+/// piece of the spelling and asks for the rest, so a delimiter spec
+/// can be built by picking tokens without ever knowing them by heart.
+#[test]
+fn shape_rows_extend_the_spelling() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ l r Down");
+    let list = ed.completion.as_ref().expect("the spec tokens are listed");
+    // The spec rows lead the list (ordinary matches for the letters
+    // `lr` keep a tail below them) and none of them can be taken.
+    let spec: Vec<_> = list
+        .items
+        .iter()
+        .filter(|i| i.names.starts_with("lr"))
+        .collect();
+    assert!(spec.len() >= 8, "{:?}", list.items);
+    assert!(spec.iter().all(|i| i.is_step()), "{:?}", spec);
+    assert!(list.selected().is_none(), "a step row was committable");
+
+    // Enter writes the highlighted token and offers what may follow.
+    let token = ed
+        .completion
+        .as_ref()
+        .unwrap()
+        .highlighted()
+        .and_then(|i| i.step_to())
+        .map(str::to_string);
+    type_script(&mut ed, "Enter");
+    assert_eq!(ed.minibuffer, token, "the token was not written");
+    assert!(latex(&ed).is_empty(), "a step row executed something");
+    assert!(
+        ed.completion.as_ref().is_some_and(|l| !l.items.is_empty()),
+        "the list did not ask for the rest"
+    );
+
+    // The arrows walk shape rows too: a row hidden below them has to
+    // be reachable.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ f r a k Down");
+    let first = ed.completion.as_ref().unwrap().sel;
+    type_script(&mut ed, "Down");
+    assert_ne!(
+        ed.completion.as_ref().unwrap().sel,
+        first,
+        "the list did not move"
+    );
+
+    // A family row leaves the family's own prefix typed.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ f r Down");
+    while ed
+        .completion
+        .as_ref()
+        .and_then(|l| l.highlighted())
+        .is_some_and(|i| !i.names.starts_with("frak{"))
+    {
+        type_script(&mut ed, "Down");
+    }
+    type_script(&mut ed, "Enter");
+    assert_eq!(ed.minibuffer.as_deref(), Some("frak"));
+    // …and the styled letter still types, which is the point of the row.
+    type_script(&mut ed, "A Enter");
+    assert_eq!(aa(&ed), "𝔄");
+}
+
+/// The delimiter names are spec tokens, not commands: `\lceil` alone
+/// would have to mean a pair, and then `\rceil` alone would mean the
+/// same one, which reads as nonsense. They work where they are read
+/// in visual order — inside `\lr`.
+#[test]
+fn delimiter_names_are_spec_tokens() {
+    for cmd in ["lparen", "lbrack", "lceil", "lfloor", "rparen", "rceil"] {
+        let mut ed = Editor::new();
+        ed.execute(cmd);
+        assert!(
+            ed.message.contains("unknown"),
+            "\\{}: {:?}",
+            cmd,
+            ed.message
+        );
+        assert!(aa(&ed).is_empty(), "\\{} inserted something", cmd);
+    }
+    // \mid and \dot keep the meanings they already had.
+    let mut ed = Editor::new();
+    ed.execute("mid");
+    assert_eq!(aa(&ed), "∣", "\\mid is the divides atom outside a pair");
+    // A spec can name ceil/floor, so a mismatched pair is writable.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\lr\lceil\rfloor x");
+    assert_eq!(aa(&ed), "⌈𝑥⌋");
+    // …and bare \lr is the start of a spec, not the ↔ arrow.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\lr");
+    assert!(aa(&ed).is_empty(), "bare \\lr inserted {}", aa(&ed));
+}
+
+/// Tab means "run this", so it must not fire on a spelling that only
+/// explains itself: `\lr` is the start of a spec, and pressing Tab on
+/// it used to print the usage line instead of offering the tokens.
+#[test]
+fn tab_does_not_commit_a_half_written_spec() {
+    for q in [r"\ l r", r"\ d e l i m"] {
+        let mut ed = Editor::new();
+        type_script(&mut ed, &format!("{} Tab", q));
+        assert!(ed.message.is_empty(), "{:?} -> {:?}", q, ed.message);
+        assert!(ed.minibuffer.is_some(), "{:?} closed the minibuffer", q);
+        assert!(
+            ed.completion.as_ref().is_some_and(|l| !l.items.is_empty()),
+            "{:?} offered nothing",
+            q
+        );
+    }
+    // …while a spelling that really is a command still commits on Tab.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ a l p h a Tab");
+    assert_eq!(latex(&ed), "\\alpha ");
 }

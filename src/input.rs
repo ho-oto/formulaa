@@ -145,19 +145,81 @@ impl Editor {
                         self.minibuffer = None;
                     }
                 }
-                Key::Tab => match &mut self.completion {
-                    // A second Tab walks the list, like a shell's.
-                    Some(list) => list.step(true),
-                    None => {
-                        let query = self.minibuffer.clone().unwrap_or_default();
-                        match crate::complete::Completion::build(&query) {
-                            Some(list) => self.completion = Some(list),
-                            None => self.info(format!("no completion for \\{}", query)),
-                        }
+                // A step row continues the spelling rather than
+                // running: `\lr` offers `\lr(…`, and taking it leaves
+                // `\lr(` typed with the list asking for what comes
+                // next. Both commit keys and Tab do it, because on
+                // such a row "accept" can only mean "go on".
+                Key::Enter | Key::Char(' ') | Key::Tab
+                    if self
+                        .completion
+                        .as_ref()
+                        .and_then(|l| l.highlighted())
+                        .is_some_and(|i| i.is_step()) =>
+                {
+                    let next = self
+                        .completion
+                        .as_ref()
+                        .and_then(|l| l.highlighted())
+                        .and_then(|i| i.step_to().map(str::to_string))
+                        .unwrap_or_default();
+                    // A step that changes nothing has said all it can:
+                    // `\frak`'s own row leaves `frak` typed and the
+                    // rest is free input (letters, digits the list
+                    // cannot enumerate), so accepting it again closes
+                    // the popup — the signal that it is the keyboard's
+                    // turn now — instead of rebuilding the same list.
+                    if self.minibuffer.as_deref() == Some(next.as_str()) {
+                        self.completion = None;
+                    } else {
+                        self.minibuffer = Some(next.clone());
+                        self.completion = crate::complete::Completion::build(&next);
                     }
-                },
-                Key::Down | Key::Up if self.completion.is_some() => {
-                    if let Some(list) = &mut self.completion {
+                }
+                // Tab accepts: the highlighted row if a list is open,
+                // else the typed name if it is already a command —
+                // finishing what you started is what Tab is for. Only
+                // when it is *not* a command does Tab ask for help.
+                Key::Tab => {
+                    let picked = self
+                        .completion
+                        .as_ref()
+                        .and_then(|l| l.selected())
+                        .and_then(|i| i.commit().map(str::to_string));
+                    let query = self.minibuffer.clone().unwrap_or_default();
+                    // Only a spelling that runs something: `\lr` and
+                    // `\matrix` print their usage instead, and Tab
+                    // must ask the list about those, not accept them.
+                    let ready = crate::editor::resolve(&query).is_some();
+                    match picked.or_else(|| ready.then_some(query.clone())) {
+                        Some(cmd) => {
+                            self.completion = None;
+                            self.minibuffer = None;
+                            self.execute(&cmd);
+                        }
+                        None => match crate::complete::Completion::build(&query) {
+                            Some(list) => self.completion = Some(list),
+                            None if query.is_empty() => {
+                                self.info("type a command name (\\frac, \\alpha, …)")
+                            }
+                            None => self.info(format!("no completion for \\{}", query)),
+                        },
+                    }
+                }
+                // The arrows always mean "show me the list": browsing
+                // is their whole job, so they open it if it is shut.
+                Key::Down | Key::Up => {
+                    let opening = self.completion.is_none();
+                    if opening {
+                        let query = self.minibuffer.clone().unwrap_or_default();
+                        self.completion = crate::complete::Completion::build(&query);
+                    }
+                    // The press that reveals the list leaves the first
+                    // row highlighted: it asked to see the list, not to
+                    // skip its first answer.
+                    if let Some(list) = &mut self.completion
+                        && !opening
+                    {
                         list.step(key == Key::Down);
                     }
                 }
@@ -181,7 +243,7 @@ impl Editor {
                     let picked = self
                         .completion
                         .take()
-                        .and_then(|l| l.selected().map(|i| i.commit.clone()));
+                        .and_then(|l| l.selected().and_then(|i| i.commit()).map(str::to_string));
                     if let Some(cmd) = picked {
                         self.minibuffer = None;
                         self.execute(&cmd);
@@ -218,13 +280,10 @@ impl Editor {
         if self.completion.is_none() {
             return;
         }
-        self.completion = self.minibuffer.clone().map(|q| {
-            crate::complete::Completion::build(&q).unwrap_or(crate::complete::Completion {
-                query: q,
-                items: Vec::new(),
-                sel: 0,
-            })
-        });
+        self.completion = self
+            .minibuffer
+            .as_deref()
+            .map(|q| crate::complete::Completion::build(q).unwrap_or_default());
     }
 
     /// \op name box: printable keys build the name; any key that is not

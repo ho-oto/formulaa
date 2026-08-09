@@ -159,11 +159,14 @@ impl Editor {
     /// Does `\cmd` name something the editor can execute? Pure —
     /// `resolve` is the single dispatch, so this can never drift from
     /// what `execute` does. (The TUI colors the minibuffer by this.)
-    /// The `\lr` prefixes count as known while the spec is still being
-    /// typed (execute shows the usage line for them).
+    ///
+    /// A spelling that only *explains itself* is not known: `\lr` and
+    /// `\matrix` print a usage line rather than build anything, and
+    /// showing them as ready would promise an Enter that does nothing.
+    /// Half-typed commands read red the same way `\alph` does, and the
+    /// completion list is what says where the spelling can still go.
     pub fn command_known(&self, cmd: &str) -> bool {
-        !cmd.is_empty()
-            && (resolve(cmd).is_some() || cmd.starts_with("delim") || cmd.starts_with("lr"))
+        resolve(cmd).is_some()
     }
 
     /// What the open minibuffer would insert on commit, as a row the
@@ -348,13 +351,15 @@ pub fn preview_row(cmd: &str) -> Option<Row> {
                 base: '⬚',
             }
         }]),
-        Edit::Mid
-        | Edit::Negate
-        | Edit::AddRow
-        | Edit::AddCol
-        | Edit::DelRow
-        | Edit::DelCol
-        | Edit::OpenBox(_) => None,
+        // A name box previews as the slot it opens: what commits is a
+        // box to fill, and the empty-slot glyph is exactly that.
+        Edit::OpenBox(_) => Some(vec![Node::Sym(crate::glyphs::PLACEHOLDER)]),
+        // The rest act on what is already there, so what they produce
+        // depends on where the cursor is — which `resolve` does not
+        // know. Better nothing than a guess.
+        Edit::Mid | Edit::Negate | Edit::AddRow | Edit::AddCol | Edit::DelRow | Edit::DelCol => {
+            None
+        }
     }
 }
 
@@ -445,7 +450,6 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
         // The exact spelling `\delim` is `\lr` in every way — including
         // the way a bare `\lr` falls through the spec parser onto the
         // ext symbol `lr` (↔).
-        "delim" => resolve("lr"),
         "op" | "operatorname" => Some(Edit::OpenBox(BoxKind::Op)),
         "op*" | "operatorname*" | "limits" => Some(Edit::OpenBox(BoxKind::OpStar)),
         "rm" => Some(Edit::OpenBox(BoxKind::Rm)),

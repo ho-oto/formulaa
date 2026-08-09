@@ -68,8 +68,8 @@ TUI は毎編集後に AA→AST の逆変換を自動検査し、ラウンドト
 
 ## コマンド(抜粋)
 
-- 構造: `\frac` `\sqrt` `\cbrt`(∛)`\qdrt`(∜) `\matrix`(2×2。`\matrix34` で 3行×4列、
-  各 *matrix/cases/array 共通。Enter/\addcol などで後から増減も可)
+- 構造: `\frac` `\sqrt` `\cbrt`(∛)`\qdrt`(∜) `\matrix34`(3行×4列。サイズは
+  綴りの一部で、各 *matrix/cases/array 共通。Enter/\addcol などで後から増減も可)
 - デリミタ: `\pmatrix` `\Bmatrix` `\vmatrix` `\array`(裸グリッド)`\cases` `\rcases`、`\ceil` `\floor` `\norm`
   `\abs` `\langle` `\braket`(⟨·|·⟩)`\set`({·|·})`\mid`(セグメント分割)
   `\lr\langle||\rangle` = ⟨·|·|·⟩。1文字スペック `()[]{}<>|.` と
