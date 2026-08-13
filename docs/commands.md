@@ -39,6 +39,10 @@ inserted symbol beside its spellings:
   again ("your turn to type").
 - Rows whose result depends on the cursor (`\mid`, `\delrow`) show a
   short gloss instead of a symbol.
+- A mouse click on a row accepts it, exactly as Enter on that row
+  would.
+- Accents preview as their spacing form (`ˆ`, `˙`, `→`) — the mark on
+  a `⬚` would be two lines tall.
 
 ## Mode commands
 

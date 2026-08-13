@@ -2055,3 +2055,36 @@ fn grid_mode_exits_on_backslash_and_enter_keeps_the_cell() {
     assert!(ed.grid.is_none());
     assert_eq!(ed.selection(), None);
 }
+
+/// A mouse pick in the completion popup accepts the clicked row like
+/// Enter would: command rows run, step rows continue the spelling, and
+/// an out-of-range index is a no-op.
+#[test]
+fn clicking_a_completion_row_accepts_it() {
+    // Click the second row of \al's list and get exactly what
+    // Enter on it gives.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ a l Down");
+    let second = ed.completion.as_ref().unwrap().items[1]
+        .commit()
+        .unwrap()
+        .to_string();
+    ed.completion_click(1);
+    let mut expected = Editor::new();
+    expected.execute(&second);
+    assert_eq!(latex(&ed), latex(&expected), "clicked \\{}", second);
+    assert!(ed.completion.is_none() && ed.minibuffer.is_none());
+
+    // A step row continues the spelling instead of running.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ l r Down");
+    ed.completion_click(0);
+    assert!(ed.minibuffer.as_deref().is_some_and(|m| m.len() > 2));
+    assert!(latex(&ed).is_empty(), "a step row executed something");
+
+    // Out of range: nothing happens.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ a l Down");
+    ed.completion_click(99);
+    assert!(ed.completion.is_some() && latex(&ed).is_empty());
+}

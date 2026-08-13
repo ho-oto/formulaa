@@ -69,6 +69,10 @@ pub fn help_line(ed: &Editor) -> &'static str {
 pub struct View {
     pub scroll_x: usize,
     pub scroll_y: usize,
+    /// Where the completion popup was drawn last frame, in canvas
+    /// coordinates, for mouse hit-testing: (top row, left column,
+    /// width, first visible item index, rows shown).
+    pub popup: Option<(usize, usize, usize, usize, usize)>,
 }
 
 /// Draw the whole UI; returns the screen coordinates of the formula's
@@ -210,7 +214,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
         &mut view.scroll_y,
     );
 
-    overlay_minibuffer(
+    view.popup = overlay_minibuffer(
         ed,
         &mut d,
         Viewport {
@@ -641,15 +645,19 @@ impl Viewport {
     }
 }
 
-fn overlay_minibuffer(ed: &Editor, d: &mut Decor, view: Viewport) {
+fn overlay_minibuffer(
+    ed: &Editor,
+    d: &mut Decor,
+    view: Viewport,
+) -> Option<(usize, usize, usize, usize, usize)> {
     // The in-place name box (\op \rm \text \tex) overlays exactly
     // like the minibuffer: content cells at the cursor, caret at the
     // box's own cursor. Drawing it as cells (not AST nodes) keeps the
     // run free of the reparse-quoting rules — no stray '…' quotes.
     if let Some((kind, buf)) = &ed.op_entry {
-        let Some((cy, cx)) = d.caret else { return };
+        let (cy, cx) = d.caret?;
         if cy >= d.height() {
-            return;
+            return None;
         }
         let content: Vec<char> = if buf.is_empty() {
             vec!['⬚']
@@ -672,12 +680,14 @@ fn overlay_minibuffer(ed: &Editor, d: &mut Decor, view: Viewport) {
         }
         d.lines[cy][end - 1] = FENDER_R;
         d.caret = Some((cy, cx + 1 + ed.op_cursor.min(content.len())));
-        return;
+        return None;
     }
-    let Some(buf) = &ed.minibuffer else { return };
-    let Some((cy, cx)) = d.caret else { return };
+    let Some(buf) = &ed.minibuffer else {
+        return None;
+    };
+    let (cy, cx) = d.caret?;
     if cy >= d.height() {
-        return;
+        return None;
     }
     let text: Vec<char> = std::iter::once('\\').chain(buf.chars()).collect();
     let end = cx + text.len();
@@ -699,9 +709,9 @@ fn overlay_minibuffer(ed: &Editor, d: &mut Decor, view: Viewport) {
     // Tab opens the completion list, which replaces the preview: it
     // already shows what each row inserts, next to the spellings.
     if let Some(list) = &ed.completion {
-        overlay_completion(list, d, (cy, cx), view);
+        let hit = overlay_completion(list, d, (cy, cx), view);
         d.caret = Some((cy, end));
-        return;
+        return hit;
     }
     // The command previews what committing would insert, as a small
     // box right under the typed name — a symbol as its one character,
@@ -737,25 +747,8 @@ fn overlay_minibuffer(ed: &Editor, d: &mut Decor, view: Viewport) {
         }
     }
     d.caret = Some((cy, end));
+    None
 }
-
-/// The completion list, as a box hanging off the typed name the way an
-/// editor's completion popup hangs off the cursor. Like every overlay
-/// here it floats — it covers the formula rather than moving it — and
-/// it places itself to stay on screen: it opens upward when there is
-/// more room above, shifts left rather than run off the right edge,
-/// and scrolls its own window so the highlighted row is always drawn.
-/// Without that last part the arrows are silent once the selection
-/// passes the bottom of the box, which is worse than no popup.
-/// Which side of the caret a floating box opens on. Room is whichever
-/// is smaller — the screen rows on that side, or the canvas rows, since
-/// the canvas is painted below a centering pad the Decor cannot
-/// address. Below wins ties: that is where a reader looks.
-///
-/// The box's own height is deliberately not an input. The preview and
-/// the completion list are the same box at different sizes — one
-/// replaces the other as Tab is pressed — so letting height decide
-/// would flip the box to the other side of the caret mid-thought.
 fn place_below(view: &Viewport, cy: usize) -> bool {
     let caret_row = view.row_on_screen(cy).unwrap_or(0);
     let below = view.height.saturating_sub(caret_row + 1);
@@ -768,10 +761,10 @@ fn overlay_completion(
     d: &mut Decor,
     caret: (usize, usize),
     view: Viewport,
-) {
+) -> Option<(usize, usize, usize, usize, usize)> {
     let (cy, cx) = caret;
     if list.items.is_empty() {
-        return;
+        return None;
     }
     // One column for the symbols, one for the spellings, so the rows
     // line up into two readable columns.
@@ -825,7 +818,7 @@ fn overlay_completion(
     let x0 = cx.saturating_sub(overflow).max(view.scroll_x);
     let box_w = box_w.min(view.width.saturating_sub(view.col_on_screen(x0)));
     if box_w == 0 {
-        return;
+        return None;
     }
 
     for (i, row) in rows[start..start + shown].iter().enumerate() {
@@ -858,6 +851,9 @@ fn overlay_completion(
             d.bold[y][x0 + dx] = mode && (1..=sym_w).contains(&dx);
         }
     }
+    // The drawn rectangle, for mouse hit-testing (a click on a row
+    // accepts it).
+    Some((top, x0, box_w, start, shown))
 }
 
 /// A close mark pops its *matching* open; standalone marks in between
@@ -2182,6 +2178,32 @@ mod tests {
                 (x, y)
             );
         }
+    }
+
+    /// The draw records where the completion popup landed (canvas
+    /// coordinates) so the mouse can pick rows.
+    #[test]
+    fn the_popup_rect_is_recorded_for_the_mouse() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut ed = Editor::new();
+        ed.input(Key::Char('\\'), false, false);
+        ed.input(Key::Char('a'), false, false);
+        let mut view = View::default();
+        let mut term = Terminal::new(TestBackend::new(40, 14)).unwrap();
+        term.draw(|f| {
+            draw(f, &ed, &mut view);
+        })
+        .unwrap();
+        assert!(view.popup.is_none(), "no list, no rect");
+        ed.input(Key::Down, false, false); // open the list
+        term.draw(|f| {
+            draw(f, &ed, &mut view);
+        })
+        .unwrap();
+        let (top, _left, w, start, shown) = view.popup.expect("no popup rect");
+        assert!(shown > 0 && w > 0 && start == 0, "{:?}", view.popup);
+        // The rect starts where the rows were drawn: below the caret.
+        assert!(top > 0);
     }
 
     fn shot_at(ed: &Editor, w: u16, h: u16) -> Vec<String> {

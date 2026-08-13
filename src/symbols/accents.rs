@@ -51,6 +51,12 @@ pub struct AccentInfo {
     /// the over and under roles, and every drawn glyph names exactly
     /// one (mark, side).
     pub drawn: DrawnForm,
+    /// The one-line stand-in for previews (the minibuffer preview and
+    /// the completion's symbol column): the accent applied to `⬚` is
+    /// two lines tall, and its drawn glyph alone (`˰`, `․`) reads as a
+    /// stray speck — the spacing form (`ˆ`, `˙`) is the character that
+    /// *means* the mark on its own.
+    pub preview: char,
 }
 
 /// The input direction, same shape as the symbol `NAMES` table:
@@ -96,6 +102,7 @@ impl Accent {
                 wide_latex: "widehat",
                 under: false,
                 drawn: DrawnForm::Center('˰'),
+                preview: 'ˆ',
             },
             Accent::Tilde => &AccentInfo {
                 name: "tilde",
@@ -103,6 +110,7 @@ impl Accent {
                 wide_latex: "widetilde",
                 under: false,
                 drawn: DrawnForm::Fill('˷'),
+                preview: '˜',
             },
             Accent::Bar => &AccentInfo {
                 name: "bar",
@@ -110,6 +118,7 @@ impl Accent {
                 wide_latex: "overline",
                 under: false,
                 drawn: DrawnForm::Fill('_'),
+                preview: '¯',
             },
             Accent::Vec => &AccentInfo {
                 name: "vec",
@@ -117,6 +126,7 @@ impl Accent {
                 wide_latex: "overrightarrow",
                 under: false,
                 drawn: DrawnForm::Center('￫'),
+                preview: '→',
             },
             Accent::Dot => &AccentInfo {
                 name: "dot",
@@ -124,6 +134,7 @@ impl Accent {
                 wide_latex: "dot",
                 under: false,
                 drawn: DrawnForm::Center('․'),
+                preview: '˙',
             },
             Accent::Ddot => &AccentInfo {
                 name: "ddot",
@@ -131,6 +142,7 @@ impl Accent {
                 wide_latex: "ddot",
                 under: false,
                 drawn: DrawnForm::Dots,
+                preview: '¨',
             },
             Accent::Check => &AccentInfo {
                 name: "check",
@@ -138,6 +150,7 @@ impl Accent {
                 wide_latex: "widecheck",
                 under: false,
                 drawn: DrawnForm::Center('˯'),
+                preview: 'ˇ',
             },
             Accent::Ring => &AccentInfo {
                 name: "ring",
@@ -145,6 +158,7 @@ impl Accent {
                 wide_latex: "mathring",
                 under: false,
                 drawn: DrawnForm::Center('˳'),
+                preview: '˚',
             },
             Accent::Underline => &AccentInfo {
                 name: "underline",
@@ -152,6 +166,7 @@ impl Accent {
                 wide_latex: "underline",
                 under: true,
                 drawn: DrawnForm::Fill('¯'),
+                preview: '_',
             },
             Accent::Utilde => &AccentInfo {
                 name: "utilde",
@@ -159,6 +174,7 @@ impl Accent {
                 wide_latex: "utilde",
                 under: true,
                 drawn: DrawnForm::Fill('˜'),
+                preview: '˷',
             },
         }
     }
@@ -241,6 +257,21 @@ impl Accent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every mark's one-line preview is its own: two accents sharing
+    /// a stand-in would be indistinguishable in the completion list.
+    #[test]
+    fn previews_are_distinct() {
+        let mut seen = std::collections::HashSet::new();
+        for a in Accent::ALL {
+            assert!(
+                seen.insert(a.info().preview),
+                "{:?} reuses the preview {:?}",
+                a,
+                a.info().preview
+            );
+        }
+    }
 
     /// Every drawn glyph names exactly one (mark, side) — the baseline
     /// dive relies on the over/under classification being positionally

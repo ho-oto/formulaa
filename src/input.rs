@@ -293,6 +293,19 @@ impl Editor {
         })
     }
 
+    /// A mouse pick in the completion popup: select row `idx` and
+    /// accept it, exactly as Enter on that row would (a step row
+    /// continues the spelling, a command row runs).
+    pub fn completion_click(&mut self, idx: usize) -> Effect {
+        match &mut self.completion {
+            Some(list) if idx < list.items.len() => {
+                list.sel = idx;
+                self.input(Key::Enter, false, false)
+            }
+            _ => Effect::None,
+        }
+    }
+
     /// Keep an open popup in step with what has been typed. A query
     /// that matches nothing leaves the popup open but empty rather than
     /// closing it: the list was asked for, and typing a letter too many

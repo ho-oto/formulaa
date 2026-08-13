@@ -59,10 +59,27 @@ fn main() -> std::io::Result<()> {
             }
             Ok(Event::Mouse(m)) if m.kind == MouseEventKind::Down(MouseButton::Left) => {
                 if m.column >= origin.0 && m.row >= origin.1 {
-                    ed.click(
+                    let (cx, cy) = (
                         (m.column - origin.0) as usize + view.scroll_x,
                         (m.row - origin.1) as usize + view.scroll_y,
                     );
+                    // A click on a completion row accepts that row
+                    // (the popup floats over the formula, so the two
+                    // targets never overlap ambiguously).
+                    let picked = view.popup.and_then(|(top, left, w, start, shown)| {
+                        ((top..top + shown).contains(&cy) && (left..left + w).contains(&cx))
+                            .then(|| start + (cy - top))
+                    });
+                    match picked {
+                        Some(idx) => {
+                            let fx = ed.completion_click(idx);
+                            if handle_effect(&mut ed, fx) {
+                                break Ok(());
+                            }
+                            guard.check(&mut ed);
+                        }
+                        None => ed.click(cx, cy),
+                    }
                 }
             }
             Ok(_) => {}
@@ -138,6 +155,11 @@ fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers) -> bool {
         mods.contains(KeyModifiers::SHIFT),
         mods.contains(KeyModifiers::CONTROL),
     );
+    handle_effect(ed, effect)
+}
+
+/// Run an `Effect` the shared keymap returned; true means quit.
+fn handle_effect(ed: &mut Editor, effect: Effect) -> bool {
     match effect {
         Effect::Quit => return true,
         // Yank: canonical AA to the system clipboard.

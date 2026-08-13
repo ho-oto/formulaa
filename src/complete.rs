@@ -298,9 +298,9 @@ fn gloss(edit: &Edit) -> Option<&'static str> {
 /// does, because it comes from the same preview the minibuffer draws.
 fn shape(cmd: &str) -> String {
     match resolve(cmd) {
-        // An accent hangs its mark above the baseline, where a
-        // one-line cell cannot show it: the mark itself is the shape.
-        Some(Edit::Accent(mark)) => return mark.glyph().to_string(),
+        // An accent shows its spacing form (`ˆ`, `˙`) — the same
+        // one-line stand-in the minibuffer preview uses.
+        Some(Edit::Accent(mark)) => return mark.info().preview.to_string(),
         // Commands whose result depends on where the cursor is — the
         // grid surgery, and \mid, which adds a │ segment inside a
         // delimiter but inserts the ∣ atom anywhere else — get no
@@ -882,6 +882,12 @@ mod tests {
         // shape, where ─── without its numerator is not.
         let sqrt = complete("sqrt").into_iter().next().unwrap();
         assert_eq!(sqrt.symbol, "√⬚");
+        // An accent shows its spacing stand-in, not the mark hung on
+        // a two-line ⬚ and not the drawn speck (`˰`).
+        let hat = complete("hat").into_iter().next().unwrap();
+        assert_eq!(hat.symbol, "ˆ");
+        let vec = complete("vec").into_iter().next().unwrap();
+        assert_eq!(vec.symbol, "→");
         let cbrt = complete("cbrt").into_iter().next().unwrap();
         assert_eq!(cbrt.symbol, "∛⬚");
         let abs = complete("abs").into_iter().next().unwrap();

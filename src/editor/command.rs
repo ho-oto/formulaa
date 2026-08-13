@@ -351,20 +351,10 @@ pub fn preview_row(cmd: &str) -> Option<Row> {
                 },
             }])
         }
-        // An accent hangs its mark on the empty-slot glyph.
-        Edit::Accent(mark) => Some(vec![if mark.under() {
-            Node::Accent {
-                overs: vec![],
-                unders: vec![mark],
-                base: '⬚',
-            }
-        } else {
-            Node::Accent {
-                overs: vec![mark],
-                unders: vec![],
-                base: '⬚',
-            }
-        }]),
+        // An accent previews as its spacing form (`ˆ`, `˙`): the mark
+        // hung on `⬚` is two lines tall, which reads as a fragment in
+        // a one-line preview box.
+        Edit::Accent(mark) => Some(vec![Node::Sym(mark.info().preview)]),
         // A name box previews as the slot it opens: what commits is a
         // box to fill, and the empty-slot glyph is exactly that.
         Edit::OpenBox(_) => Some(vec![Node::Sym(crate::glyphs::PLACEHOLDER)]),
