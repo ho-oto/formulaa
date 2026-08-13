@@ -42,6 +42,12 @@ pub struct Editor {
     /// The spelling that opened the current box (`\op*` vs `\limits`),
     /// kept until commit for the same reason.
     pub(crate) op_cmd: Option<String>,
+    /// One-shot: a copy just happened; the host blips the selection
+    /// once as the acknowledgement (there is no message).
+    pub copy_flash: bool,
+    /// A │ middle armed for removal: the path the arming happened at
+    /// (one-shot, like `unwrap_armed`) and the mid's index.
+    pub(crate) mid_armed: Option<(Vec<(usize, Field)>, usize)>,
     /// Caret inside the open box, as a char index into its content
     /// (←/→ move it; stepping past either edge commits the box).
     pub op_cursor: usize,
@@ -457,6 +463,9 @@ fn unwrap_contents(node: &Node) -> Option<(Field, &Row)> {
         }
         Node::Norm { arg } => Some((Field::Seg(0), arg)),
         Node::Sqrt { arg, .. } => Some((Field::SqrtArg, arg)),
+        // Deleting into a wide accent's marks removes the accent and
+        // frees the base, same staged flow as a bracket.
+        Node::WideAccent { base, .. } => Some((Field::WideBase, base)),
         _ => None,
     }
 }
@@ -471,6 +480,8 @@ impl Editor {
             op_entry: None,
             executing: None,
             op_cmd: None,
+            copy_flash: false,
+            mid_armed: None,
             op_cursor: 0,
             op_escape: false,
             grid: None,
@@ -985,6 +996,25 @@ impl Editor {
 
     pub fn backspace(&mut self) {
         if self.col > 0 {
+            // An accented atom peels: Backspace removes the outermost
+            // mark first — the inverse of how it was typed — and only
+            // a bare atom deletes.
+            let col = self.col - 1;
+            if let Node::Accent {
+                overs,
+                unders,
+                base,
+            } = &mut self.cur_row_mut()[col]
+            {
+                if overs.pop().is_none() {
+                    unders.pop();
+                }
+                if overs.is_empty() && unders.is_empty() {
+                    let base = *base;
+                    self.cur_row_mut()[col] = Node::Sym(base);
+                }
+                return;
+            }
             let target = &self.cur_row()[self.col - 1];
             if !target.fields().is_empty() && !target.is_empty_structure() {
                 // Non-empty structure: select it whole, so the delete
@@ -1039,6 +1069,48 @@ impl Editor {
             .then_some(i)
     }
 
+    /// The │ middle adjacent to the cursor's segment edge, if the
+    /// enclosing node is a Delim and one exists on that side: pressing
+    /// toward it from segment k touches mid k (rightward) or k-1
+    /// (leftward).
+    fn mid_beside(&self, right: bool) -> Option<usize> {
+        let &(i, Field::Seg(k)) = self.path.last()? else {
+            return None;
+        };
+        let parent = &self.path[..self.path.len() - 1];
+        let Node::Delim { mids, .. } = row_at(&self.root, parent).get(i)? else {
+            return None;
+        };
+        if right {
+            (k < *mids).then_some(k)
+        } else {
+            k.checked_sub(1)
+        }
+    }
+
+    /// Remove │ middle `m` of the enclosing delimiter, merging the
+    /// segments on its two sides; the cursor lands at the junction.
+    pub(crate) fn merge_mid(&mut self, m: usize) {
+        let Some(&(i, Field::Seg(_))) = self.path.last() else {
+            return;
+        };
+        self.path.pop();
+        let row = self.cur_row_mut();
+        let Some(Node::Delim { mids, segs, .. }) = row.get_mut(i) else {
+            return;
+        };
+        if m + 1 >= segs.len() {
+            return;
+        }
+        let tail = segs.remove(m + 1);
+        let junction = segs[m].len();
+        segs[m].extend(tail);
+        *mids -= 1;
+        self.path.push((i, Field::Seg(m)));
+        self.col = junction;
+        self.select_anchor = None;
+    }
+
     /// Lift the enclosing wrapper's contents out of it, replacing it,
     /// and select what came out — so pressing Backspace once more
     /// deletes it, while an arrow key walks away leaving just the
@@ -1059,6 +1131,7 @@ impl Editor {
         let content: Row = match node {
             Node::Delim { segs, .. } => segs.into_iter().next().unwrap_or_default(),
             Node::Norm { arg } | Node::Sqrt { arg, .. } => arg,
+            Node::WideAccent { base, .. } => base,
             other => {
                 self.cur_row_mut().insert(i, other);
                 return;
@@ -1124,6 +1197,12 @@ impl Editor {
             self.col == 0
         };
         if edge {
+            // Touching a │ middle arms *it*: the delete removes just
+            // that separator and merges its two segments.
+            if let Some(m) = self.mid_beside(right) {
+                self.mid_armed = Some((self.path.clone(), m));
+                return true;
+            }
             if self.unwrappable(!right).is_none() {
                 return false;
             }
@@ -1497,6 +1576,7 @@ impl Editor {
         let Some((r0, j0, r1, j1)) = self.grid_rect() else {
             return;
         };
+        self.copy_flash = true;
         self.edit_array(|rows, cols, cells, c| {
             for r in r0..=r1.min(rows - 1) {
                 for j in j0..=j1.min(cols - 1) {
@@ -1734,9 +1814,12 @@ impl Editor {
     /// Copy the selection into the editor clipboard (kept on selection).
     pub fn copy_selection(&mut self) {
         // Silent either way: the chords are muscle memory, and a
-        // message would just repaint the help line (adr §78).
+        // message would just repaint the help line (adr §78). The one
+        // acknowledgement is visual — the selection blips once
+        // (`copy_flash`, read by the host).
         if let Some((lo, hi)) = self.selection() {
             self.clip = Clip::Nodes(self.cur_row()[lo..hi].to_vec());
+            self.copy_flash = true;
         }
     }
 

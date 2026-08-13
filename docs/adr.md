@@ -401,6 +401,34 @@ by a corpus plus randomized property tests.
     reach the system clipboard"; the box help lines only *name* the
     open box instead of teaching its keys.
 
+79. **Accent deletion joins the grammar** (2026-08) — Backspace behind
+    an accented atom peels the outermost mark first (the inverse of
+    typing); the bare atom deletes last. The wide accent's base became
+    a real cursor field (`Field::WideBase`), so the cursor walks in
+    and edits it, the inner edge arms and unwraps through the staged
+    bracket flow (`unwrap_contents` gained a WideAccent arm), and from
+    outside it deletes like any structure — select whole, then remove.
+
+80. **Copy blips, mids die by pointing, accents light up** (2026-08) —
+    ^C acknowledges itself by inverting the selection for ~120ms (the
+    only animation; the main loop polls just until the blip ends). A
+    `│` middle can be removed directly: Shift toward it from a
+    segment's edge arms that one column (`Mark::MidArm` walks right to
+    the │ and lights its full run), and the next delete merges the two
+    segments — Backspace inside the segment keeps its old meaning. An
+    armed wide accent now lights its `┈` bands (it has no delimiter
+    columns, so the armed tint used to show nothing). Roadmap pruned:
+    MathML, AsciiMath, paste work, `\roman`, ≥10 grid sizes are out;
+    `\divides` is in (the ∣ atom by name, everywhere — `\mid` keeps
+    its contextual double life). Help lines separate their entries
+    with broken bars (¦ — a plain pipe collided with the c/| key),
+    spell chords with the control glyph (⌃F, freeing the literal `^`
+    to mean only the superscript key), and bold their key tokens; the
+    ^F and ^B lines shrank to what isn't self-evident. The
+    whole-formula ^B target's marks now insert right-to-left per row —
+    same-row targets used to displace each other, cutting the ring
+    short of the trailing atoms.
+
 ## Test strategy
 
 - `tests/roundtrip.rs`: a corpus of real formulas (Cardano,
@@ -432,19 +460,9 @@ by a corpus plus randomized property tests.
   take a fixed foreground for light-terminal safety. Verified
   hands-on, 2026-08.
 
-- [ ] **Accent deletion behavior** — deleting backward past an
-  accented atom should peel the accent first (the inverse of how it
-  was typed). WideAccent: let the cursor into the base; a delete at
-  the inner edge arms the accent itself, a second delete removes it
-  and selects the contents; from outside, the first delete selects
-  the whole thing and the second removes it (align with the
-  structure-delete grammar).
-- [ ] **Deferred spellings** — `\roman` alias for `\rm` (on hold);
-  `\divides` for the ∣ atom (unclear); ≥10 grid sizes (not needed).
-- [ ] **Paste behavior** — ^V only reads the internal clipboard;
-  terminal paste arrives as keystrokes and multi-line LaTeX into the
-  `\tex` box commits at the first newline (no bracketed paste).
-  Decide how external AA / LaTeX / plain text should be received.
+- (`\roman` and ≥10 grid sizes: rejected; MathML / AsciiMath /
+  paste-behavior work: dropped from the map. `\divides` was adopted —
+  the ∣ atom by name, everywhere.)
 
 ### Editor integrations (own repositories)
 
@@ -467,8 +485,6 @@ inline ideal:
 
 ### Mid term
 
-- [ ] MathML output (the `<math>` tree is nearly isomorphic to the AST).
-- [ ] AsciiMath-style one-line input (`sum_(i=1)^n 1/i^2` → AST).
 - [ ] Multi-line big-operator glyphs (⎲⎳ / ⌠⌡) as an option.
 - [ ] East Asian Width handling (currently every glyph is width 1).
 

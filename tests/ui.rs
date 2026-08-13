@@ -2120,3 +2120,154 @@ fn block_select_reaches_the_whole_formula() {
     type_script(&mut ed, "C-b");
     assert!(ed.block.is_none() && ed.message.is_empty());
 }
+
+/// Backspace behind an accented atom peels the outermost mark first —
+/// the inverse of how it was typed — and only a bare atom deletes.
+#[test]
+fn backspace_peels_accents_before_the_base() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a \hat \vec");
+    assert_eq!(latex(&ed), "\\vec{\\hat{a}}");
+    type_script(&mut ed, "Backspace");
+    assert_eq!(latex(&ed), "\\hat{a}", "the outermost mark peels first");
+    type_script(&mut ed, "Backspace");
+    assert_eq!(latex(&ed), "a", "the last mark leaves a bare atom");
+    type_script(&mut ed, "Backspace");
+    assert_eq!(latex(&ed), "");
+
+    // Unders peel after overs.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a \underline \hat Backspace");
+    assert_eq!(latex(&ed), "\\underline{a}");
+}
+
+/// A wide accent's base is a real field now: the cursor walks in and
+/// edits it, deleting at the inner edge unwraps the accent in the
+/// staged bracket flow, and from outside the accent deletes like any
+/// structure (select whole, then remove).
+#[test]
+fn wide_accents_edit_and_unwrap() {
+    // Walk in and edit the base in place.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"ab S-Left S-Left \hat");
+    assert_eq!(latex(&ed), "\\widehat{ab}");
+    type_script(&mut ed, "Left c");
+    assert_eq!(latex(&ed), "\\widehat{abc}");
+
+    // Inner edge: arm, then the accent unwraps leaving the contents
+    // selected.
+    type_script(&mut ed, "Home Backspace");
+    assert_eq!(latex(&ed), "\\widehat{abc}", "the first press deletes");
+    type_script(&mut ed, "Backspace");
+    assert_eq!(latex(&ed), "abc");
+    assert_eq!(ed.selection(), Some((0, 3)));
+
+    // From outside: first delete selects the whole accent, second
+    // removes it.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"ab S-Left S-Left \hat Backspace");
+    assert_eq!(latex(&ed), "\\widehat{ab}", "the first press deletes");
+    assert_eq!(ed.selection(), Some((0, 1)), "the accent is selected whole");
+    type_script(&mut ed, "Backspace");
+    assert_eq!(latex(&ed), "");
+}
+
+/// A │ middle can be removed by pointing at it: Shift toward the mid
+/// from either side arms it (that one column lights up), and the next
+/// delete removes just the separator, merging its two segments.
+#[test]
+fn an_armed_mid_deletes_and_merges() {
+    // ⟨a│b⟩: arm the mid from the right segment's start, Backspace.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\braket a Right b");
+    assert_eq!(latex(&ed), "\\left\\langle a\\middle|b\\right\\rangle ");
+    type_script(&mut ed, "Home S-Left Backspace");
+    assert_eq!(latex(&ed), "\\left\\langle ab\\right\\rangle ");
+
+    // …and from the left segment's end, with Delete.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\braket a Right b Left Left S-Right Delete");
+    assert_eq!(latex(&ed), "\\left\\langle ab\\right\\rangle ");
+
+    // The arming is one-shot: an unrelated key in between disarms
+    // (End moves to the segment's end; Backspace then deletes b, and
+    // the mid survives).
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\braket a Right b Home S-Left End Backspace");
+    assert_eq!(
+        latex(&ed),
+        "\\left\\langle a\\middle|\\right\\rangle ",
+        "a disarmed Backspace still merged"
+    );
+}
+
+/// \divides is the ∣ atom by name, everywhere — unlike \mid, whose
+/// meaning depends on standing inside a pair.
+#[test]
+fn divides_is_the_atom_everywhere() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a \divides b");
+    assert_eq!(latex(&ed), "a\\mid b");
+    // Inside a pair it is still the atom, not a segment.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"( x \divides y");
+    assert_eq!(latex(&ed), "\\left(x\\mid y\\right)");
+}
+
+/// The whole-formula ^B target shares the root row with the outermost
+/// ancestor, so its marks must not be displaced by the ancestor's own
+/// insertions: the ring has to close after the LAST root node, and
+/// nesting has to hold whichever side the deep target sits on.
+#[test]
+fn whole_formula_ring_encloses_everything() {
+    use formulaa::ast::Node;
+    use formulaa::glyphs::Mark;
+    let decode = |row: &[Node]| -> Vec<String> {
+        row.iter()
+            .map(|n| match n {
+                Node::Sym(c) => match Mark::decode(*c) {
+                    Some(Mark::BlockOpen { rank }) => format!("open{rank}"),
+                    Some(Mark::BlockClose) => "close".into(),
+                    _ => "atom".into(),
+                },
+                _ => "node".into(),
+            })
+            .collect()
+    };
+
+    // a (frac) a — the ring must close after the trailing a.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"a Space 1 // 2 Tab Space a");
+    type_script(&mut ed, "Left Left Left C-b");
+    assert!(ed.block.is_some());
+    let (root, _) = ed.decorated();
+    let seq = decode(&root);
+    assert_eq!(
+        seq.last().map(String::as_str),
+        Some("close"),
+        "the ring does not reach the end: {seq:?}"
+    );
+    assert_eq!(seq.first().map(String::as_str), Some("open1"), "{seq:?}");
+
+    // (frac) a a — mirrored: everything after the fraction must be
+    // INSIDE the ring but OUTSIDE the fraction's own box.
+    let mut ed = Editor::new();
+    type_script(
+        &mut ed,
+        r"1 // 2 Tab Space a Space a Left Left Left Left Left C-b",
+    );
+    assert!(ed.block.is_some());
+    let (root, _) = ed.decorated();
+    let seq = decode(&root);
+    assert_eq!(seq.first().map(String::as_str), Some("open1"), "{seq:?}");
+    assert!(seq.iter().any(|s| s == "open0"), "{seq:?}");
+    assert_eq!(seq.last().map(String::as_str), Some("close"), "{seq:?}");
+    let closes: Vec<usize> = seq
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| *s == "close")
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(closes.len(), 2, "{seq:?}");
+    assert!(closes[0] < seq.len() - 1, "the boxes collapsed: {seq:?}");
+}

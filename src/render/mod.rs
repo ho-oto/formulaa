@@ -626,7 +626,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             unders,
             base,
         } => {
-            let b = render_row(base, None, true, ctx);
+            let b = render_row(base, cur(Field::WideBase), true, ctx);
             // A mark's material needs its cells between the band
             // edges, so the band widens past a narrower base.
             let material = overs

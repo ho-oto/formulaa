@@ -48,9 +48,11 @@ and the mode spellings for stolen ctrl chords) are in
 | --- | --- |
 | `Backspace` / `Delete` (`Ctrl+D`) | delete left / right |
 | …with a selection | delete the selection |
+| …behind an accented atom | peels the outermost mark first (the inverse of typing); the bare atom deletes last |
 | …touching a non-empty structure from outside | first press selects it whole, second deletes it (entering to edit is what the arrows are for) |
-| …just inside a bracket, `\sqrt`, or `\norm` | first press lights the pair up (arms it), second lifts the contents out, third deletes them |
+| …just inside a bracket, `\sqrt`, `\norm`, or a wide accent | first press lights it up (arms it), second lifts the contents out, third deletes them |
 | `Shift+←/→` touching just the bracket | arms the same way — the next delete unwraps without selecting anything |
+| `Shift+←/→` touching a `│` middle (from inside a segment edge) | arms that one separator; the next delete removes it, merging its two segments |
 
 Pairs with `│` mids and brackets whose sole content is a matrix don't
 unwrap (there is no single "contents"); empty pairs delete in one

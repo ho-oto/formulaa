@@ -15,7 +15,7 @@ use formulaa::render::{RenderCtx, render_root};
 
 use crate::theme;
 
-const HELP: &str = "^F free move  ^B block select  ^ sup  _ sub  // frac  ( [ { pairs  \\ command  ^Y AA to system clipboard  Esc/^Q quit";
+const HELP: &str = "⌃F free move ¦ ⌃B block select ¦ \\ command ¦ // frac ¦ ^ sup ¦ _ sub ¦ ( [ { pairs ¦ ⌃Y to clipboard ¦ Esc/⌃Q quit";
 
 /// Context-sensitive last line: generic keys normally, the relevant
 /// commands when the cursor is inside a grid cell or a delimiter.
@@ -35,18 +35,17 @@ pub fn help_line(ed: &Editor) -> String {
         .into();
     }
     if ed.free.is_some() {
-        return "free move: ←→↑↓ cells  Enter snap  Esc cancel".into();
+        return "free move".into();
     }
     if ed.block.is_some() {
-        return "block: ↑/→ wider  ↓/← narrower  Enter select  ⇧←→ select + extend  ^B/Esc cancel"
-            .into();
+        return "block: ↑/→ wider ¦ ↓/← narrower".into();
     }
     if let Some(gs) = ed.grid {
         return match gs {
             // Only the state's name and the transitions nobody
             // guesses: arrows, ⌫ and Enter explain themselves.
             formulaa::editor::GridSel::Cells { .. } => {
-                "grid cell select: c/| column select  r/- row select"
+                "grid cell select: c/| column select ¦ r/- row select"
             }
             formulaa::editor::GridSel::Lanes { cols: true, .. } => {
                 "grid column select: ↑↓ back to cell select"
@@ -63,16 +62,51 @@ pub fn help_line(ed: &Editor) -> String {
     // offers.
     let mut line = String::new();
     if ed.in_grid() {
-        line.push_str("^G grid edit  ");
+        line.push_str("⌃G grid edit ¦ ");
     }
     line.push_str(HELP);
     line
+}
+
+/// The help line with its key tokens bold: each `|`-separated entry
+/// starts with the keys (chords, glyphs — anything that is not a
+/// plain lowercase word), followed by its description. A leading
+/// `label:` (the mode's name) stays plain.
+fn help_spans(text: &str) -> Line<'static> {
+    let base = Style::default().fg(theme::BORDER_FG);
+    let bold = base.add_modifier(Modifier::BOLD);
+    let mut spans = vec![Span::styled(" ", base)];
+    for (e, entry) in text.split(" ¦ ").enumerate() {
+        if e > 0 {
+            spans.push(Span::styled(" ¦ ", base));
+        }
+        let mut keys_done = false;
+        for (t, tok) in entry.split(' ').enumerate() {
+            if t > 0 {
+                spans.push(Span::styled(" ", base));
+            }
+            let is_label = tok.ends_with(':');
+            let is_key = !is_label && !tok.chars().all(|c| c.is_ascii_lowercase());
+            if is_key && !keys_done {
+                spans.push(Span::styled(tok.to_string(), bold));
+            } else {
+                if !is_label {
+                    keys_done = true;
+                }
+                spans.push(Span::styled(tok.to_string(), base));
+            }
+        }
+    }
+    Line::from(spans)
 }
 
 #[derive(Default)]
 pub struct View {
     pub scroll_x: usize,
     pub scroll_y: usize,
+    /// While true, selection grounds draw inverted — the one-frame
+    /// blip that acknowledges a copy.
+    pub copy_blip: bool,
     /// Where the completion popup was drawn last frame, in canvas
     /// coordinates, for mouse hit-testing: (top row, left column,
     /// width, first visible item index, rows shown).
@@ -100,10 +134,7 @@ pub fn draw(f: &mut Frame, ed: &Editor, view: &mut View) -> (u16, u16) {
             Style::default().fg(fg),
         ))
     } else {
-        Line::from(Span::styled(
-            format!(" {}", help_line(ed)),
-            Style::default().fg(theme::BORDER_FG),
-        ))
+        help_spans(&help_line(ed))
     };
     f.render_widget(bottom, help_area);
     origin
@@ -127,6 +158,7 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
         &ed.marker_extents(),
         ed.block.is_some().then_some(ed.block_sel),
     );
+    d.blip = view.copy_blip;
     // ^B: the caret disappears — the blinking block IS the position,
     // and the parked cursor would just sit as a stray white cell
     // inside it (it never moves in this mode anyway).
@@ -269,6 +301,9 @@ struct Decor {
     /// Shift selection, ^B's highlighted ancestor (purple), ^F's snap
     /// preview (inverted).
     flash: Vec<Vec<bool>>,
+    /// The copy acknowledgement: selection grounds draw inverted for
+    /// one brief moment.
+    blip: bool,
     /// Cells drawn in reverse video: the secondary marks (^B's
     /// one-step-outward ring, ^F's snap preview). No color of their
     /// own, so they read on light and dark terminals alike.
@@ -380,7 +415,7 @@ fn marker_boxes(
     };
     // Same corner geometry for a delimiter armed for unwrapping, read
     // separately: only its two columns light up, not the lattice.
-    let armed: Option<(usize, usize, usize, usize)> = match (
+    let mut armed: Option<(usize, usize, usize, usize)> = match (
         marks
             .iter()
             .find(|&&(_, _, c)| Mark::decode(c) == Some(Mark::Delims { open: true })),
@@ -391,6 +426,26 @@ fn marker_boxes(
         (Some(&(t, x0, _)), Some(&(b, x1, _))) => Some((x0, x1, t, b)),
         _ => None,
     };
+    // An armed │ middle lights just its own column: walk right from
+    // the mark to the │, then take its full vertical run.
+    if let Some(&(y, x, _)) = marks
+        .iter()
+        .find(|&&(_, _, c)| Mark::decode(c) == Some(Mark::MidArm))
+    {
+        let mid = formulaa::glyphs::MID;
+        let col = (x..grid[y].len()).find(|&cx| grid[y].get(cx) == Some(&mid));
+        if let Some(cx) = col {
+            let mut t = y;
+            while t > 0 && grid[t - 1].get(cx) == Some(&mid) {
+                t -= 1;
+            }
+            let mut b = y;
+            while b + 1 < grid.len() && grid[b + 1].get(cx) == Some(&mid) {
+                b += 1;
+            }
+            armed = Some((cx, cx, t, b));
+        }
+    }
     for (y, mut row_marks) in by_row {
         row_marks.sort_unstable();
         let mut stack: Vec<(usize, Mark)> = Vec::new();
@@ -419,8 +474,9 @@ fn marker_boxes(
                 (t, b, e.map_or(0, |&(_, _, d)| d))
             };
             match mark {
-                // The corner pairs are read by the scans above.
-                Mark::Frame { .. } | Mark::Delims { .. } => {}
+                // The corner pairs (and the mid mark) are read by
+                // the scans above.
+                Mark::Frame { .. } | Mark::Delims { .. } | Mark::MidArm => {}
                 // A close pops its *matching* open — a standalone mark
                 // (a rank, a gap ghost) must never satisfy a pair.
                 Mark::Cells { open: false } | Mark::Lane { open: false, .. } => {
@@ -593,6 +649,7 @@ fn marker_boxes(
         bold,
         flash: flash_grid,
         invert: invert_grid,
+        blip: false,
         caret: None,
         frame,
         armed,
@@ -893,6 +950,17 @@ fn is_radical_piece(c: char) -> bool {
     matches!(c, '√' | '∛' | '∜' | formulaa::glyphs::OVERLINE_CORNER)
 }
 
+/// A wide accent's visible pieces: the `┈` band and the mark material
+/// riding in it. An armed accent lights its bands (which live on the
+/// rect's top/bottom rows), since it has no delimiter columns to
+/// light.
+fn is_accent_band_piece(c: char) -> bool {
+    c == formulaa::glyphs::OP_BAND
+        || formulaa::symbols::Accent::ALL
+            .iter()
+            .any(|a| a.cells().contains(&c))
+}
+
 /// Turn a rendered cell row into spans: private-use marker chars become
 /// their glyphs, the cursor glyph blinks, and box
 /// backgrounds from `marker_boxes` are applied to plain glyphs.
@@ -970,8 +1038,13 @@ fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec
             // A provisional ground blinks: ^B's highlighted ancestor
             // (purple) and ^F's snap preview (white) keep their own
             // color, and the blink is what says "not committed yet".
+            // A copy acknowledges itself by inverting these grounds
+            // for one brief blip.
             flush(&mut buf, buf_bg, &mut spans);
             let mut style = Style::default().add_modifier(Modifier::SLOW_BLINK);
+            if d.blip {
+                style = style.add_modifier(Modifier::REVERSED);
+            }
             if let Some(color) = cell_bg {
                 style = style.bg(color).fg(theme::GROUND_FG);
             }
@@ -1011,8 +1084,10 @@ fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec
             // selection ground, because they are exactly what the next
             // Backspace/^D removes.
             (t..=b).contains(&y)
-                && (is_delim_piece(c) || is_radical_piece(c))
-                && (i == o || i == close)
+                && (((is_delim_piece(c) || is_radical_piece(c)) && (i == o || i == close))
+                    // A wide accent has no side columns; its bands run
+                    // along the rect's top/bottom rows.
+                    || (is_accent_band_piece(c) && (y == t || y == b) && (o..=close).contains(&i)))
         }) {
             flush(&mut buf, buf_bg, &mut spans);
             spans.push(Span::styled(
@@ -1820,6 +1895,7 @@ mod tests {
                 bold: vec![vec![false, false]],
                 flash: vec![vec![false, false]],
                 invert: vec![vec![false, false]],
+                blip: false,
                 caret: cursor.map(|x| (0, x)),
                 frame: None,
                 armed: None,
@@ -2206,6 +2282,92 @@ mod tests {
         assert!(shown > 0 && w > 0 && start == 0, "{:?}", view.popup);
         // The rect starts where the rows were drawn: below the caret.
         assert!(top > 0);
+    }
+
+    /// Arming a wide accent lights its bands (it has no delimiter
+    /// columns): some cells must take the armed ground, or the first
+    /// Backspace looks like a dead key.
+    #[test]
+    fn an_armed_wide_accent_lights_up() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut ed = Editor::new();
+        for c in "ab".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        ed.input(Key::Left, true, false);
+        ed.input(Key::Left, true, false);
+        for c in "\\hat".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        ed.input(Key::Enter, false, false);
+        ed.input(Key::Left, false, false); // into the base
+        ed.input(Key::Home, false, false);
+        ed.input(Key::Backspace, false, false); // arm
+        let mut view = View::default();
+        let mut term = Terminal::new(TestBackend::new(30, 8)).unwrap();
+        term.draw(|f| {
+            draw(f, &ed, &mut view);
+        })
+        .unwrap();
+        let buf = term.backend().buffer().clone();
+        let armed = (0..buf.area.height)
+            .flat_map(|y| (0..buf.area.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let c = &buf[(x, y)];
+                c.bg == theme::SELECTION_BG && c.style().add_modifier.contains(Modifier::BOLD)
+            })
+            .count();
+        assert!(armed > 0, "the armed accent shows nothing");
+    }
+
+    /// The help line bolds its key tokens (⌃F, \\, //) and leaves the
+    /// descriptions and mode labels plain.
+    #[test]
+    fn help_line_bolds_the_keys() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let ed = Editor::new();
+        let mut view = View::default();
+        let mut term = Terminal::new(TestBackend::new(60, 8)).unwrap();
+        term.draw(|f| {
+            draw(f, &ed, &mut view);
+        })
+        .unwrap();
+        let buf = term.backend().buffer().clone();
+        let y = buf.area.height - 1;
+        let line: String = (0..buf.area.width)
+            .map(|x| buf[(x, y)].symbol().to_string())
+            .collect();
+        let at = line.find("⌃F").expect("no ⌃F in the help line") as u16;
+        // The string index counts bytes; find the cell by scanning.
+        let mut cx = 0;
+        let mut seen = String::new();
+        for x in 0..buf.area.width {
+            if seen.len() >= at as usize {
+                cx = x;
+                break;
+            }
+            seen.push_str(buf[(x, y)].symbol());
+        }
+        assert!(
+            buf[(cx, y)].style().add_modifier.contains(Modifier::BOLD),
+            "⌃ is not bold"
+        );
+        // A description word stays plain.
+        let mut fx = None;
+        let mut seen = String::new();
+        let dat = line.find(" free ").unwrap() + 1;
+        for x in 0..buf.area.width {
+            if seen.len() >= dat {
+                fx = Some(x);
+                break;
+            }
+            seen.push_str(buf[(x, y)].symbol());
+        }
+        let fx = fx.unwrap();
+        assert!(
+            !buf[(fx, y)].style().add_modifier.contains(Modifier::BOLD),
+            "'free' is bold"
+        );
     }
 
     fn shot_at(ed: &Editor, w: u16, h: u16) -> Vec<String> {

@@ -154,6 +154,10 @@ pub enum Mark {
     /// The ghost lane previewing an insertion at a lane gap. The one
     /// decoration with real width.
     Gap { cols: bool },
+    /// A delimiter's │ middle armed for removal: sits at the end of
+    /// the segment left of the mid; the display lights that one
+    /// column.
+    MidArm,
     /// Coordinate probe: never drawn, read straight off `Block.marks`
     /// to build the position → cell table.
     Probe { index: usize },
@@ -182,6 +186,7 @@ impl Mark {
             Mark::Delims { open } => SEL_BASE + 11 + u32::from(!open),
             Mark::Lane { open, cols: false } => SEL_BASE + 13 + u32::from(!open),
             Mark::Gap { cols: false } => SEL_BASE + 15,
+            Mark::MidArm => SEL_BASE + 16,
             Mark::Probe { index } => PROBE_BASE + index as u32,
         };
         char::from_u32(u).expect("marker chars are private-use scalars")
@@ -192,7 +197,7 @@ impl Mark {
         let u = c as u32;
         let open = |n: u32| n.is_multiple_of(2);
         match u {
-            _ if (SEL_BASE..SEL_BASE + 16).contains(&u) => Some(match u - SEL_BASE {
+            _ if (SEL_BASE..SEL_BASE + 17).contains(&u) => Some(match u - SEL_BASE {
                 n @ (0 | 1) => Mark::Sel { open: open(n) },
                 2 => Mark::BlockClose,
                 3 => Mark::SlotGhost,
@@ -209,6 +214,7 @@ impl Mark {
                     cols: false,
                 },
                 15 => Mark::Gap { cols: false },
+                16 => Mark::MidArm,
                 _ => return None,
             }),
             _ if (BLOCK_BASE..SEL_BASE).contains(&u) => Some(Mark::BlockOpen {
@@ -269,6 +275,7 @@ mod tests {
         for cols in [true, false] {
             all.push(Mark::Gap { cols });
         }
+        all.push(Mark::MidArm);
         all.extend([
             Mark::Probe { index: 0 },
             Mark::Probe {

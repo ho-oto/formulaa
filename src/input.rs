@@ -504,6 +504,13 @@ impl Editor {
         // Shift-selection, or the Shift+arrow that moves past it.
         let armed_at = self.unwrap_armed.take();
         let armed = armed_at.as_deref() == Some(&self.path[..]);
+        // The armed │ middle is the same one-shot: it survives into
+        // exactly the delete that follows it.
+        let mid_at = self
+            .mid_armed
+            .take()
+            .filter(|(p, _)| p[..] == self.path[..])
+            .map(|(_, m)| m);
         if ctrl {
             match key {
                 Key::Char('q') => return Effect::Quit,
@@ -593,7 +600,9 @@ impl Editor {
             // inside offers to unwrap it (arm, then lift the contents
             // out) instead of stepping over it.
             Key::Backspace => {
-                if !self.delete_selection()
+                if let Some(m) = mid_at {
+                    self.merge_mid(m);
+                } else if !self.delete_selection()
                     && !self.unwrap_armed_outside(&armed_at)
                     && !self.delete_toward_delim(true, armed)
                 {
@@ -601,7 +610,9 @@ impl Editor {
                 }
             }
             Key::Delete => {
-                if !self.unwrap_armed_outside(&armed_at) {
+                if let Some(m) = mid_at {
+                    self.merge_mid(m);
+                } else if !self.unwrap_armed_outside(&armed_at) {
                     self.delete_forward(armed)
                 }
             }

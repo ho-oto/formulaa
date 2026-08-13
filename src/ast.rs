@@ -53,8 +53,8 @@ pub enum Node {
     /// whose limit region holds nothing but the mark character —
     /// reserved marks cannot be atoms, so a marks-only limit row is
     /// unambiguous (\widehat{abc}, \overline{xy}, \underline{...}).
-    /// The base is a flat one-line row like a BigOp base and is not
-    /// cursor-editable (wrap a selection; re-edit by deleting).
+    /// The base is a row of its own (`Field::WideBase`), so the
+    /// cursor can walk in and edit it in place.
     /// A one-char base with a single over mark normalizes to Accent.
     WideAccent {
         overs: Vec<crate::symbols::Accent>,
@@ -155,6 +155,8 @@ pub enum Field {
     ArrowUnder,
     BraceArg,
     BraceLabel,
+    /// The base row of a WideAccent.
+    WideBase,
     /// Segment index of a Delim.
     Seg(usize),
     /// Row-major cell index of an Array.
@@ -171,10 +173,10 @@ impl Node {
             | Node::Func(_)
             | Node::Text(_)
             | Node::Roman(_)
-            | Node::Accent { .. }
-            | Node::WideAccent { .. } => {
+            | Node::Accent { .. } => {
                 vec![]
             }
+            Node::WideAccent { .. } => vec![Field::WideBase],
             Node::Frac { .. } => vec![Field::FracNum, Field::FracDen],
             Node::Sqrt { .. } => vec![Field::SqrtArg],
             Node::Sup { .. } => vec![Field::SupArg],
@@ -192,6 +194,7 @@ impl Node {
 
     pub fn field(&self, f: Field) -> &Row {
         match (self, f) {
+            (Node::WideAccent { base, .. }, Field::WideBase) => base,
             (Node::Frac { num, .. }, Field::FracNum) => num,
             (Node::Frac { den, .. }, Field::FracDen) => den,
             (Node::Sqrt { arg, .. }, Field::SqrtArg) => arg,
@@ -212,6 +215,7 @@ impl Node {
 
     pub fn field_mut(&mut self, f: Field) -> &mut Row {
         match (self, f) {
+            (Node::WideAccent { base, .. }, Field::WideBase) => base,
             (Node::Frac { num, .. }, Field::FracNum) => num,
             (Node::Frac { den, .. }, Field::FracDen) => den,
             (Node::Sqrt { arg, .. }, Field::SqrtArg) => arg,

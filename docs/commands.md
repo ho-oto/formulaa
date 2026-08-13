@@ -82,7 +82,7 @@ is still the accent — a test enforces this).
 | `\lr(]` `\lr{\|}` `\lr\lceil\rfloor` … | delimiter spec **in visual order**: left, middles, right. Tokens are one spec character or a `\name` (`\lparen` `\lceil` `\langle` `\vert` `\none` and the `r…` twins) — those names work only inside `\lr` |
 | `\ceil` `\floor` `\abs` `\norm` | ⌈ ⌉, ⌊ ⌋, ⎢ ⎥, ‖ ‖ (no `\Vert` — it read like `\vert`'s sibling while doing something else) |
 | `\bra` `\ket` `\braket` `\set` | ⟨·│, │·⟩, ⟨·│·⟩, {·│·} — a lone ⟨ ⟩ pair is `\lr<>` (`\langle` is an `\lr` token only, like `\lceil`) |
-| `\mid` | inside a pair: add a `│` segment; elsewhere: the ∣ atom |
+| `\mid` | inside a pair: add a `│` segment (remove one by Shift-touching it and deleting); elsewhere: the ∣ atom. `\divides` is the atom by name, everywhere |
 
 ## Operators and functions
 

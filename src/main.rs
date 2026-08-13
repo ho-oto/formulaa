@@ -45,9 +45,29 @@ fn main() -> std::io::Result<()> {
     let mut guard = guard::RoundtripGuard::new(debug);
     let mut origin = (0u16, 0u16);
     let mut view = tui::View::default();
+    // The copy acknowledgement: a ~120ms inverted blip of the
+    // selection, the only animation in the program.
+    let mut blip_until: Option<std::time::Instant> = None;
     let result = loop {
+        if std::mem::take(&mut ed.copy_flash) {
+            blip_until = Some(std::time::Instant::now() + std::time::Duration::from_millis(120));
+        }
+        view.copy_blip = blip_until.is_some_and(|t| std::time::Instant::now() < t);
+        if !view.copy_blip {
+            blip_until = None;
+        }
         if let Err(e) = terminal.draw(|f| origin = tui::draw(f, &ed, &mut view)) {
             break Err(e);
+        }
+        // While the blip is up, wait only until it ends; a quiet
+        // timeout just redraws (turning the blip off again).
+        if let Some(t) = blip_until {
+            let left = t.saturating_duration_since(std::time::Instant::now());
+            match event::poll(left) {
+                Ok(false) => continue,
+                Ok(true) => {}
+                Err(e) => break Err(e),
+            }
         }
         match event::read() {
             Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => {

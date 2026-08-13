@@ -467,18 +467,47 @@ impl Editor {
         let shown = self.block_shown();
         // The open mark sits immediately left of its block and a close
         // marker right after it, so the display can paint its extent.
-        // Targets are innermost first = deepest first: inserting into
-        // a deep row never shifts a shallower target's position.
+        // Marks that land in the SAME row (the whole-formula target
+        // shares the root row with the outermost ancestor) are
+        // inserted right-to-left, so no insertion shifts a later
+        // position; at a shared position, an outer close goes in
+        // before an inner one (ending up to its right) and an inner
+        // open before an outer one (ending up inside it).
+        let mut rows: Vec<&Vec<(usize, Field)>> = Vec::new();
+        let mut events: Vec<Vec<(usize, bool, usize)>> = Vec::new();
         for (idx, (p, r)) in targets.iter().enumerate() {
             if !shown.contains(&idx) {
                 continue;
             }
-            let mark = Mark::BlockOpen { rank: idx }.ch();
-            let row = row_at_mut(&mut root, p);
-            row.insert(r.end, Node::Sym(Mark::BlockClose.ch()));
-            row.insert(r.start, Node::Sym(mark));
-            bump(&mut path, &mut col, p, r.end);
-            bump(&mut path, &mut col, p, r.start);
+            let at = match rows.iter().position(|q| *q == p) {
+                Some(at) => at,
+                None => {
+                    rows.push(p);
+                    events.push(Vec::new());
+                    rows.len() - 1
+                }
+            };
+            events[at].push((r.end, false, idx));
+            events[at].push((r.start, true, idx));
+        }
+        for (p, mut evs) in rows.into_iter().zip(events) {
+            evs.sort_by(|a, b| {
+                b.0.cmp(&a.0).then_with(|| match (a.1, b.1) {
+                    (false, false) => b.2.cmp(&a.2),
+                    (true, true) => a.2.cmp(&b.2),
+                    (false, true) => std::cmp::Ordering::Less,
+                    (true, false) => std::cmp::Ordering::Greater,
+                })
+            });
+            for (pos, open, rank) in evs {
+                let mark = if open {
+                    Mark::BlockOpen { rank }.ch()
+                } else {
+                    Mark::BlockClose.ch()
+                };
+                row_at_mut(&mut root, p).insert(pos, Node::Sym(mark));
+                bump(&mut path, &mut col, p, pos);
+            }
         }
         (root, Some((path, col)))
     }
@@ -622,6 +651,22 @@ impl Editor {
                     col += 2;
                 }
             }
+        } else if let Some((p, m)) = &self.mid_armed
+            && p[..] == self.path[..]
+            && let Some(&(i, Field::Seg(_))) = p.last()
+        {
+            // A │ middle armed for removal: the mark sits at the end
+            // of the segment left of the mid; the display walks right
+            // from there to the │ column and lights it.
+            let seg_path: Vec<(usize, Field)> = p[..p.len() - 1]
+                .iter()
+                .copied()
+                .chain([(i, Field::Seg(*m))])
+                .collect();
+            let row = row_at_mut(&mut root, &seg_path);
+            let end = row.len();
+            row.push(Node::Sym(Mark::MidArm.ch()));
+            bump(&mut path, &mut col, &seg_path, end);
         }
         (root, Some((path, col)))
     }
