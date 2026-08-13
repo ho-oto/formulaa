@@ -366,7 +366,7 @@ by a corpus plus randomized property tests.
 
 ### Short term
 
-- [ ] **ANSI-16 palette audit** — portability: keep the theme within
+- [x] **ANSI-16 palette audit** — portability: keep the theme within
   the standard + bright ANSI colors. Current state: named ANSI colors
   only (green = OK, maroon = errors, purple = selection, white =
   selection-secondary with forced black text, grey = popup ground);
@@ -377,8 +377,8 @@ by a corpus plus randomized property tests.
   with no color of their own (the snap preview blinks); ^B shows only
   the selection and its outward step (the
   inner step is where you just came from); glyphs on any themed ground
-  take a fixed foreground for light-terminal safety. Still to be
-  verified hands-on.
+  take a fixed foreground for light-terminal safety. Verified
+  hands-on, 2026-08.
 - [ ] **Command naming review** — revisit the `\command` vocabulary as
   a whole: the mode-command spellings (`\f` `\b` `\t` `\g` and their
   long forms), `\lr` vs `\delim`, alias coverage, and whether the
