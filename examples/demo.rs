@@ -1,10 +1,10 @@
 //! Prints a few formulas rendered by the layout engine, without the TUI.
 //! Run with: cargo run --example demo
 
-use mascii::ast::{Node, Row};
-use mascii::latex;
-use mascii::render::{RenderCtx, render_row};
-use mascii::symbols::{ColDelim, Radical};
+use formulaa::ast::{Node, Row};
+use formulaa::latex;
+use formulaa::render::{RenderCtx, render_row};
+use formulaa::symbols::{ColDelim, Radical};
 
 fn syms(s: &str) -> Row {
     s.chars().map(Node::Sym).collect()
@@ -91,15 +91,15 @@ fn main() {
     let nested = vec![
         Node::Sym('f'),
         Node::Delim {
-            left: mascii::symbols::Delim::Col(ColDelim::Paren),
-            right: mascii::symbols::Delim::Col(ColDelim::Paren),
+            left: formulaa::symbols::Delim::Col(ColDelim::Paren),
+            right: formulaa::symbols::Delim::Col(ColDelim::Paren),
             mids: 0,
             segs: vec![syms("x")],
         },
         Node::Sym('='),
         Node::Delim {
-            left: mascii::symbols::Delim::Col(ColDelim::Paren),
-            right: mascii::symbols::Delim::Col(ColDelim::Paren),
+            left: formulaa::symbols::Delim::Col(ColDelim::Paren),
+            right: formulaa::symbols::Delim::Col(ColDelim::Paren),
             mids: 0,
             segs: vec![vec![
                 Node::Sym('1'),

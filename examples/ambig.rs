@@ -5,9 +5,9 @@
 //! horizontal extent of limits explicit and the two now differ.
 //! Run: cargo run --example ambig
 
-use mascii::ast::{Node, Row, normalize};
-use mascii::parse::parse;
-use mascii::render::{RenderCtx, render_row};
+use formulaa::ast::{Node, Row, normalize};
+use formulaa::parse::parse;
+use formulaa::render::{RenderCtx, render_row};
 
 fn syms(s: &str) -> Row {
     s.chars().map(Node::Sym).collect()

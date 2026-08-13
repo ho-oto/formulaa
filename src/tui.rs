@@ -1,6 +1,6 @@
 //! Everything that paints: the canvas layout (centering, scrolling),
 //! the marker/selection boxes and the per-cell styling. The formula
-//! itself is rendered by `mascii::render`; this turns that block plus
+//! itself is rendered by `formulaa::render`; this turns that block plus
 //! the editor's zero-width annotations into styled terminal spans.
 
 use ratatui::Frame;
@@ -9,9 +9,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block as UiBlock, Borders, Paragraph};
 
-use mascii::editor::Editor;
-use mascii::glyphs::{Mark, is_display_marker, is_lattice_glyph};
-use mascii::render::{RenderCtx, render_root};
+use formulaa::editor::Editor;
+use formulaa::glyphs::{Mark, is_display_marker, is_lattice_glyph};
+use formulaa::render::{RenderCtx, render_root};
 
 use crate::theme;
 
@@ -24,7 +24,7 @@ const HELP_GRID: &str = "^T table/grid  ^F free move  ^B block select  \\cmd  ^/
 /// Context-sensitive last line: generic keys normally, the relevant
 /// commands when the cursor is inside a grid cell or a delimiter.
 pub fn help_line(ed: &Editor) -> &'static str {
-    use mascii::ast::Field;
+    use formulaa::ast::Field;
     if ed.minibuffer.is_some() {
         return if ed.completion.is_some() {
             "completion: ↑↓/Tab pick  Enter insert  Esc close the list  (keep typing to narrow)"
@@ -33,7 +33,7 @@ pub fn help_line(ed: &Editor) -> &'static str {
         };
     }
     if let Some((kind, _)) = &ed.op_entry {
-        return if *kind == mascii::editor::BoxKind::Tex {
+        return if *kind == formulaa::editor::BoxKind::Tex {
             "latex: type or paste math (no $ needed)  Enter/Tab commit  Esc cancel"
         } else {
             "op name: letters/digits + Space (word pieces)  Enter/Tab commit  Esc cancel"
@@ -47,13 +47,13 @@ pub fn help_line(ed: &Editor) -> &'static str {
     }
     if let Some(gs) = ed.grid {
         return match gs {
-            mascii::editor::GridSel::Cells { .. } => {
+            formulaa::editor::GridSel::Cells { .. } => {
                 "grid: ←→↑↓ cells  ⇧ select (past the edge = lane)  c/| columns  r/- rows  ^C/^X/^V cells  ⌫ clear  Enter edit  Esc/^T exit"
             }
-            mascii::editor::GridSel::Lanes { cols: true, .. } => {
+            formulaa::editor::GridSel::Lanes { cols: true, .. } => {
                 "columns: ←→ gap/column  Enter on gap = insert here  ⌫ delete column  ⇧←→ extend  ↑↓ cells  c/| cells  Esc exit"
             }
-            mascii::editor::GridSel::Lanes { cols: false, .. } => {
+            formulaa::editor::GridSel::Lanes { cols: false, .. } => {
                 "rows: ↑↓ gap/row  Enter on gap = insert here  ⌫ delete row  ⇧↑↓ extend  ←→ cells  r/- cells  Esc exit"
             }
         };
@@ -114,7 +114,7 @@ pub fn draw(f: &mut Frame, ed: &Editor, view: &mut View) -> (u16, u16) {
 fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16, u16) {
     let border = UiBlock::default()
         .borders(Borders::ALL)
-        .title(" mascii ")
+        .title(" formulAA ")
         .border_style(Style::default().fg(theme::BORDER_FG));
     let inner = border.inner(area);
     f.render_widget(border, area);
@@ -327,7 +327,7 @@ enum CaretStyle {
 /// grid cell/lane pairs their own colors, and the ^T frame recolors
 /// the edited grid's border.
 fn marker_boxes(
-    block: &mascii::render::Block,
+    block: &formulaa::render::Block,
     extents: &[(usize, usize, usize)],
     block_selected: Option<usize>,
 ) -> Decor {
@@ -666,7 +666,7 @@ fn overlay_minibuffer(
         }
         let content: Vec<char> = if buf.is_empty() {
             vec!['⬚']
-        } else if *kind == mascii::editor::BoxKind::OpStar {
+        } else if *kind == formulaa::editor::BoxKind::OpStar {
             // Only \op* gives a space meaning (piece separator), so
             // only there it draws as ␣ — matching the committed band.
             buf.replace(' ', "␣").chars().collect()
@@ -702,7 +702,7 @@ fn overlay_minibuffer(
     // green (\ta) as the name grows.
     let color = if ed.command_known(buf) {
         theme::MINIBUF_BG
-    } else if mascii::editor::mode_command(buf).is_some() {
+    } else if formulaa::editor::mode_command(buf).is_some() {
         theme::MINIBUF_MODE_BG
     } else {
         theme::MINIBUF_BAD_BG
@@ -726,7 +726,7 @@ fn overlay_minibuffer(
     // stays put while they type (draw_canvas centers on the formula
     // alone for the same reason).
     if let Some(row) = ed.command_preview_row() {
-        use mascii::render::{RenderCtx, render_root};
+        use formulaa::render::{RenderCtx, render_root};
         let block = render_root(&row, None, &RenderCtx::canonical());
         // The preview is the completion popup with one row, so it is
         // drawn as one: the same ground, the same blank column each
@@ -762,7 +762,7 @@ fn place_below(view: &Viewport, cy: usize) -> bool {
 }
 
 fn overlay_completion(
-    list: &mascii::complete::Completion,
+    list: &formulaa::complete::Completion,
     d: &mut Decor,
     caret: (usize, usize),
     view: Viewport,
@@ -837,7 +837,7 @@ fn overlay_completion(
         let item = &list.items[start + i];
         let mode = item
             .commit()
-            .is_some_and(|c| mascii::editor::mode_command(c).is_some());
+            .is_some_and(|c| formulaa::editor::mode_command(c).is_some());
         let bg = if start + i == list.sel {
             theme::POPUP_SEL_BG
         } else {
@@ -882,8 +882,8 @@ const FENDER_R: char = '\u{F8F1}';
 /// symbols table; the extras are the shapes drawn outside it (angle
 /// arms, mid/norm columns, over/underbrace corners).
 fn is_delim_piece(c: char) -> bool {
-    use mascii::glyphs::{ARM_FALL, ARM_RISE, MID, NORM, is_brace_corner};
-    mascii::symbols::Delim::all_pieces().contains(&c)
+    use formulaa::glyphs::{ARM_FALL, ARM_RISE, MID, NORM, is_brace_corner};
+    formulaa::symbols::Delim::all_pieces().contains(&c)
         || matches!(c, ARM_RISE | ARM_FALL | MID | NORM)
         || is_brace_corner(c)
 }
@@ -893,7 +893,7 @@ fn is_delim_piece(c: char) -> bool {
 /// delim piece). An armed radical lights these the way an armed pair
 /// lights its delimiters.
 fn is_radical_piece(c: char) -> bool {
-    matches!(c, '√' | '∛' | '∜' | mascii::glyphs::OVERLINE_CORNER)
+    matches!(c, '√' | '∛' | '∜' | formulaa::glyphs::OVERLINE_CORNER)
 }
 
 /// Turn a rendered cell row into spans: private-use marker chars become
@@ -1095,7 +1095,7 @@ mod tests {
     }
 
     use super::*;
-    use mascii::input::Key;
+    use formulaa::input::Key;
 
     /// Full display pipeline: decorated AST -> render -> marker_boxes.
     fn display(ed: &Editor) -> Vec<String> {
@@ -1300,9 +1300,9 @@ mod tests {
     /// the enclosing parens stay untinted.
     #[test]
     fn unfused_frame_leaves_the_outer_delimiter_alone() {
-        use mascii::ast::{Field, Node};
-        use mascii::symbols::ColDelim as C;
-        use mascii::symbols::Delim as D;
+        use formulaa::ast::{Field, Node};
+        use formulaa::symbols::ColDelim as C;
+        use formulaa::symbols::Delim as D;
         let mut ed = Editor::new();
         ed.root = vec![Node::Delim {
             left: D::Col(C::Paren),
@@ -1416,7 +1416,7 @@ mod tests {
         let (y, x) = xy.expect("x visible in the ghosted display");
         ed.click(x, y);
         assert!(
-            matches!(ed.path.last(), Some((_, mascii::ast::Field::Cell(0)))),
+            matches!(ed.path.last(), Some((_, formulaa::ast::Field::Cell(0)))),
             "click lands in x's own cell: {:?}",
             ed.path
         );
@@ -1832,7 +1832,7 @@ mod tests {
             assert!(
                 painted
                     .chars()
-                    .all(|c| !mascii::glyphs::is_display_marker(c)),
+                    .all(|c| !formulaa::glyphs::is_display_marker(c)),
                 "cursor={:?}: {:?}",
                 cursor,
                 painted
@@ -1939,7 +1939,7 @@ mod tests {
             (0, 1, Mark::Sel { open: true }.ch()),
             (0, 3, Mark::Sel { open: false }.ch()),
         ];
-        let block = mascii::render::Block {
+        let block = formulaa::render::Block {
             lines: lines.clone(),
             baseline: 0,
             caret: None,
@@ -1972,7 +1972,7 @@ mod tests {
             (1, 0, Mark::Sel { open: true }.ch()),
             (1, 3, Mark::Sel { open: false }.ch()),
         ];
-        let block = |marks: &[(usize, usize, char)]| mascii::render::Block {
+        let block = |marks: &[(usize, usize, char)]| formulaa::render::Block {
             lines: lines.clone(),
             baseline: 1,
             caret: None,
@@ -1990,7 +1990,7 @@ mod tests {
     #[test]
     fn caret_pads_the_row_end() {
         let lines: Vec<Vec<char>> = vec!["xy".chars().collect()];
-        let block = mascii::render::Block {
+        let block = formulaa::render::Block {
             lines: lines.clone(),
             baseline: 0,
             caret: Some((0, 2)),

@@ -340,7 +340,7 @@ by a corpus plus randomized property tests.
     guard undoes an edit whose picture stops parsing (the state before
     it is the last one that survives its own file format); `--debug`
     restores the old behavior (keep the state, dump a report to
-    `mascii_debug/`) for fixing the toolchain.
+    `formulaa_debug/`) for fixing the toolchain.
 
 75. **Docs restructured in English** (2026-08) — README from the
     English draft; `aa-spec.md` rewritten as a self-contained spec for
@@ -349,14 +349,23 @@ by a corpus plus randomized property tests.
     from `commands.md`; `editors.md` folded into the README and the
     roadmap.
 
+76. **Renamed: mascii → formulAA** (2026-08) — "mascii" claimed ASCII
+    while the format is Unicode-first, and read ambiguously. The new
+    name keeps the AA (ASCII-art) identity where it is true — the
+    *picture* — and reads as the word it contains (crate and binary:
+    `formulaa`). Debug artifacts moved to `formulaa_debug/`, property
+    test env vars to `FORMULAA_*`. The editor-extension repositories
+    (mascii-vscode / mascii-obsidian) keep their names until their own
+    rename.
+
 ## Test strategy
 
 - `tests/roundtrip.rs`: a corpus of real formulas (Cardano,
   Cauchy–Schwarz, Vandermonde, Gaussian integral, Schrödinger, Bayes,
   rotation matrices, continued fractions, nested limits …) plus
-  randomized ASTs (2000 per run, scalable via `MASCII_PROP_N`).
+  randomized ASTs (2000 per run, scalable via `FORMULAA_PROP_N`).
 - `tests/ui.rs`: key-script DSL plus random key sequences with a
-  per-keystroke roundtrip check (`MASCII_UI_PROP_N`).
+  per-keystroke roundtrip check (`FORMULAA_UI_PROP_N`).
 - Counterexample hunting: render two candidate ASTs and compare
   pictures (`examples/ambig.rs`).
 - After fixing a bug, revert the fix once to confirm the new test
@@ -379,9 +388,7 @@ by a corpus plus randomized property tests.
   inner step is where you just came from); glyphs on any themed ground
   take a fixed foreground for light-terminal safety. Verified
   hands-on, 2026-08.
-- [ ] **Project name review** — reconsider the name "mascii" itself
-  (the format is Unicode-first, not really ASCII; candidates under
-  discussion).
+
 - [ ] **Command spelling cleanups** — the `\command` vocabulary:
   canonical `\delim` over `\lr`, drop `\tex` (one letter from
   `\text`, different feature), drop the one-letter mode spellings,
@@ -400,7 +407,7 @@ by a corpus plus randomized property tests.
 their own wasm crate and depend on this repo by git; bindings are
 duplicated deliberately (repo independence over sharing). Both are
 prototypes (code-reviewed, not yet field-tested). Zed has no extension
-UI API yet — use CLI tasks (`mascii aa2tex` / `mascii fmt` over
+UI API yet — use CLI tasks (`formulaa aa2tex` / `formulaa fmt` over
 `$ZED_SELECTED_TEXT`) or the TUI in its terminal. Staging toward the
 inline ideal:
 

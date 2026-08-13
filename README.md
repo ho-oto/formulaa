@@ -1,6 +1,6 @@
-# mascii
+# formulAA
 
-**Plain-text math that round-trips.** mascii is a 2D formula format —
+**Plain-text math that round-trips.** formulAA is a 2D formula format —
 Unicode-first "ASCII art" that reads like typeset math — with one unusual
 property: every picture parses back to exactly the syntax tree that drew
 it. It ships with a LyX-style structure editor (TUI and browser) and a
@@ -13,7 +13,7 @@ converter to LaTeX.
             2𝑎            𝑛=1    𝑛²     6         ⎣ sin θ   cos θ  ⎦
 ```
 
-Everything above is plain text. Pipe it into `mascii aa2tex` and you get
+Everything above is plain text. Pipe it into `formulaa aa2tex` and you get
 compilable LaTeX; open it in the editor and you can keep editing it
 structurally.
 
@@ -25,7 +25,7 @@ all share the same dead end: **the output is a picture.** You cannot edit
 it without redrawing it from the original source, and you cannot feed it
 to anything else, because nothing can read it back.
 
-mascii turns the picture itself into the source code:
+formulAA turns the picture itself into the source code:
 
 - **The AA is the single source of truth.** There is no hidden markup the
   picture was generated from. What you see in the file is what gets
@@ -39,14 +39,14 @@ mascii turns the picture itself into the source code:
   arrow keys, paste it back. No LaTeX source to dig up.
 
 In other words: like source code, the format has a grammar, a canonical
-style, and a formatter (`mascii fmt`) that normalizes anything it
+style, and a formatter (`formulaa fmt`) that normalizes anything it
 accepts. Hand-typed input can be sloppy (`x+1`, `E=m c²`); the canonical
 form is what the tools emit.
 
 ## The core idea: what makes a picture parseable
 
 Free-form ASCII art is ambiguous — `a` above `b` could be a fraction, a
-limit, or a coincidence of layout. mascii's format is designed backwards
+limit, or a coincidence of layout. formulAA's format is designed backwards
 from the parser:
 
 1. **Every subexpression owns a rectangle and a baseline row.** Siblings
@@ -138,7 +138,7 @@ edit the tree, and the picture follows.
   matrices (`^T`), undo/redo, mouse support.
 - After every edit the editor re-parses its own output; an edit that
   would break the round trip is refused on the spot (run with `--debug`
-  to capture a report in `mascii_debug/` instead).
+  to capture a report in `formulaa_debug/` instead).
 
 Key reference: [docs/keys.md](docs/keys.md) · command reference:
 [docs/commands.md](docs/commands.md).
@@ -152,10 +152,10 @@ CLI-task based (see the roadmap in [docs/adr.md](docs/adr.md)).
 ## CLI
 
 ```sh
-mascii                       # the TUI editor (^Y copies the AA)
-mascii aa2tex formula.txt    # AA → LaTeX (stdin works too)
-mascii tex2aa formula.tex    # LaTeX → AA, best effort (KaTeX/MathJax dialect)
-mascii fmt    formula.txt    # normalize hand-written AA to canonical form
+formulaa                       # the TUI editor (^Y copies the AA)
+formulaa aa2tex formula.txt    # AA → LaTeX (stdin works too)
+formulaa tex2aa formula.tex    # LaTeX → AA, best effort (KaTeX/MathJax dialect)
+formulaa fmt    formula.txt    # normalize hand-written AA to canonical form
 ```
 
 LaTeX round-trips: everything `aa2tex` emits reads back to the exact
@@ -167,7 +167,7 @@ into (unknown commands are skipped, never an error).
 Because the format is plain text with a strict grammar, language models
 can read and write it directly. [`SKILL.md`](SKILL.md) is a
 self-contained guide that teaches an agent the format, including the
-verification loop (`mascii fmt` to check, `mascii aa2tex` to confirm the
+verification loop (`formulaa fmt` to check, `formulaa aa2tex` to confirm the
 meaning) — useful for embedding re-editable math in Markdown documents
 that both humans and agents maintain.
 

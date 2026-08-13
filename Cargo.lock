@@ -487,6 +487,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
+name = "formulaa"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "phf 0.14.0",
+ "ratatui",
+]
+
+[[package]]
 name = "futures-core"
 version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -754,15 +763,6 @@ checksum = "c0aeb26bf5e836cc1c341c8106051b573f1766dfa05aa87f0b98be5e51b02303"
 dependencies = [
  "nix",
  "winapi",
-]
-
-[[package]]
-name = "mascii"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "phf 0.14.0",
- "ratatui",
 ]
 
 [[package]]

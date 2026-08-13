@@ -1,4 +1,4 @@
-# The mascii AA format
+# The formulAA AA format
 
 This document is the format specification, written for someone who has
 never seen this implementation and wants to build a parser (or renderer)

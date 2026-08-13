@@ -41,4 +41,4 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-      - run: MASCII_PROP_N=50000 MASCII_UI_PROP_N=5000 cargo test --release
+      - run: FORMULAA_PROP_N=50000 FORMULAA_UI_PROP_N=5000 cargo test --release

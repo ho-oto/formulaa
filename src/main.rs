@@ -10,19 +10,19 @@ mod guard;
 mod theme;
 mod tui;
 
-use mascii::editor::Editor;
-use mascii::input::{Effect, Key};
-use mascii::render::{RenderCtx, render_root};
-use mascii::{ast, latex, parse};
+use formulaa::editor::Editor;
+use formulaa::input::{Effect, Key};
+use formulaa::render::{RenderCtx, render_root};
+use formulaa::{ast, latex, parse};
 
 const USAGE: &str = "\
-usage: mascii [--debug]       interactive TUI editor
-       mascii aa2tex   [FILE] AA formula (file or stdin) -> LaTeX
-       mascii tex2aa   [FILE] LaTeX math (file or stdin) -> AA, best effort
-       mascii fmt      [FILE] AA formula -> canonical AA (normalize)
+usage: formulaa [--debug]       interactive TUI editor
+       formulaa aa2tex   [FILE] AA formula (file or stdin) -> LaTeX
+       formulaa tex2aa   [FILE] LaTeX math (file or stdin) -> AA, best effort
+       formulaa fmt      [FILE] AA formula -> canonical AA (normalize)
 
 --debug: on a roundtrip failure, keep the state and dump a report to
-mascii_debug/ (default: refuse the edit)";
+formulaa_debug/ (default: refuse the edit)";
 
 fn main() -> std::io::Result<()> {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
@@ -41,7 +41,7 @@ fn main() -> std::io::Result<()> {
     let mut terminal = ratatui::init();
     let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
     let mut ed = Editor::new();
-    ed.info("mascii — LyX-like math editor");
+    ed.info("formulAA — LyX-like math editor");
 
     let mut guard = guard::RoundtripGuard::new(debug);
     let mut origin = (0u16, 0u16);
@@ -99,7 +99,7 @@ fn convert(mode: &str, file: Option<&str>) -> std::io::Result<()> {
         None => std::io::read_to_string(std::io::stdin())?,
     };
     if mode == "tex2aa" {
-        let row = ast::normalize(&mascii::from_latex::row_from_latex(&text));
+        let row = ast::normalize(&formulaa::from_latex::row_from_latex(&text));
         let block = render_root(&row, None, &RenderCtx::canonical());
         println!("{}", block.to_text());
         return Ok(());
@@ -164,7 +164,7 @@ fn handle_effect(ed: &mut Editor, effect: Effect) -> bool {
         Effect::Quit => return true,
         // Yank: canonical AA to the system clipboard.
         Effect::CopyAa => {
-            let aa = mascii::render::export_aa(&ed.root);
+            let aa = formulaa::render::export_aa(&ed.root);
             match copy_to_clipboard(&aa) {
                 Ok(()) => ed.info("copied AA to clipboard"),
                 Err(e) => ed.error(format!("copy failed: {}", e)),

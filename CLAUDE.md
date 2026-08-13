@@ -1,4 +1,4 @@
-# mascii — guide for AI developers
+# formulAA — guide for AI developers
 
 LyX-style TUI math editor plus AA⇄AST bidirectional converter.
 Rust / ratatui.
@@ -33,12 +33,12 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX (fmt likewise)
    behavior changes start in `tests/ui.rs` (key-script DSL). Key
    meanings live only in `src/input.rs` — never add key branches in
    main.rs or a wasm host (drift). The randomized property tests
-   (`MASCII_PROP_N`/`MASCII_PROP_SEED`, `MASCII_UI_PROP_N`/`_SEED`)
+   (`FORMULAA_PROP_N`/`FORMULAA_PROP_SEED`, `FORMULAA_UI_PROP_N`/`_SEED`)
    catch regressions.
 5. The TUI re-checks the roundtrip after every edit. By default a
    breaking edit is **refused** (undone with an error message); with
    `--debug` it stands and a report lands in
-   **`mascii_debug/roundtrip-N.txt`** (gitignored). When the user says
+   **`formulaa_debug/roundtrip-N.txt`** (gitignored). When the user says
    "it broke", read that directory first — reports contain the
    canonical AA, expected AST, parsed AST, and both LaTeX forms. After
    fixing, add the AA to `tests/roundtrip.rs` as a regression.
@@ -55,7 +55,7 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX (fmt likewise)
 | `src/editor/command.rs` | **`Edit` enum + `resolve`/`apply`** (pure spelling resolution split from application), mode commands (`ModeCmd`), `\op` name box |
 | `src/complete.rs` | **Tab completion** (spelling enumeration, scoring, grouping by identical `Edit`, step rows). **Touches no data sources** — derives everything from table keys and `resolve`/`preview_row`; removable as a unit |
 | `src/input.rs` | **the shared keymap** (`Key`/`Effect`/`Editor::input`). TUI and wasm only translate. Tree-changing keys build an `Edit` and `apply` it |
-| `src/output/latex.rs` | AST → LaTeX (re-exported as `mascii::latex`) |
+| `src/output/latex.rs` | AST → LaTeX (re-exported as `formulaa::latex`) |
 | `src/from_latex.rs` | LaTeX → AST (second path): own output round-trips fully; external LaTeX (KaTeX/MathJax dialect) is best-effort |
 | `src/symbols/` | **home of every table** (one concern per file, re-exported flat): `atoms` (vocabulary + gates: `ATOMS`, `NAMES`, `NEGATIONS`/`UNNEGATIONS`, `is_atom` — every accepted atom has a LaTeX spelling, gap=0 tested), `funcs`, `accents`, `radicals`, `delims`, `arrows`, `grids`, `scripts`, `alphabets` |
 | `src/glyphs.rs` | structural glyph constants + display markers (the `Mark` enum is the only spelling of the private-use area) |

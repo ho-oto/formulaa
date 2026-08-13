@@ -192,7 +192,7 @@ impl Parser {
                 // TeX primitives that split the enclosing group into a
                 // fraction: everything so far is the numerator, the
                 // rest of the group the denominator (\atop draws a bar
-                // too — mascii has no barless stack; best effort).
+                // too — formulAA has no barless stack; best effort).
                 Tok::Cmd(w) if w == "over" || w == "atop" => {
                     let num = std::mem::take(&mut out);
                     let den = self.sub().row(&t[1..]);

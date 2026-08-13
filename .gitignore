@@ -1,8 +1,7 @@
 /target
-mascii_debug/
+formulaa_debug/
 .vscode/
-.mascii-session
 
-# review-pending drafts (kept locally, not published)
-docs/zenn-intro.md
-README.en.md
+# artifacts from before the rename (mascii -> formulAA)
+mascii_debug/
+.mascii-session

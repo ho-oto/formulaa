@@ -1,26 +1,26 @@
 ---
-name: mascii-math
+name: formulaa-math
 description: >
-  Read and write mascii AA math — 2D plain-text formulas (Unicode-first
+  Read and write formulAA AA math — 2D plain-text formulas (Unicode-first
   ASCII art) that map one-to-one to a math AST and convert losslessly to
   LaTeX. Use when asked to write, edit or interpret formulas in
-  mascii AA form, or to embed re-editable math in plain-text documents.
+  formulAA AA form, or to embed re-editable math in plain-text documents.
 ---
 
-# Reading and writing mascii AA math
+# Reading and writing formulAA AA math
 
-The mascii AA format looks like the formula itself while converting
+The formulAA AA format looks like the formula itself while converting
 mechanically to LaTeX. This document alone should let you write correct
 AA.
 
 ## Verification commands (always use them when available)
 
 ```sh
-echo '<AA>' | mascii fmt      # parse and canonicalize (an error means invalid)
-echo '<AA>' | mascii aa2tex   # convert to LaTeX to confirm the meaning
+echo '<AA>' | formulaa fmt      # parse and canonicalize (an error means invalid)
+echo '<AA>' | formulaa aa2tex   # convert to LaTeX to confirm the meaning
 ```
 
-Your AA is correct when `mascii fmt` accepts it and the output matches
+Your AA is correct when `formulaa fmt` accepts it and the output matches
 your intent. Hand-written input is **lenient**: a lone ASCII letter is
 an italic variable (`x+1` → 𝑥+1), but a **run of 2+ letters is
 upright** (`asiny` → \operatorname{asiny}, `sin` → \sin), so write a
@@ -235,7 +235,7 @@ LaTeX `\\`. There is no alignment.
 
 ## Examples
 
-(Real spaces added for readability; `mascii fmt` tightens them.)
+(Real spaces added for readability; `formulaa fmt` tightens them.)
 
 Quadratic formula:
 
@@ -272,5 +272,5 @@ Rotation matrix:
 
 See `docs/aa-spec.md` (the format spec) and `docs/adr.md` (decision
 records). For any structure you are unsure of, generate a reference
-picture first with the `mascii` TUI or the library
-(`mascii::render::render_root` + `RenderCtx::canonical()`).
+picture first with the `formulAA` TUI or the library
+(`formulaa::render::render_root` + `RenderCtx::canonical()`).

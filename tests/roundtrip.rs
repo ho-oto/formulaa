@@ -10,12 +10,12 @@
 //! "Three famous mathematical formulas" (Cardano, Cauchy–Schwarz,
 //! Vandermonde determinant).
 
-use mascii::ast::{Node, Row, normalize, strip_spacers};
-use mascii::latex::row_to_latex;
-use mascii::parse::parse;
-use mascii::render::{RenderCtx, render_root};
-use mascii::symbols::Radical;
-use mascii::symbols::{Accent, Arrow};
+use formulaa::ast::{Node, Row, normalize, strip_spacers};
+use formulaa::latex::row_to_latex;
+use formulaa::parse::parse;
+use formulaa::render::{RenderCtx, render_root};
+use formulaa::symbols::Radical;
+use formulaa::symbols::{Accent, Arrow};
 
 // ----- tiny DSL for building formulas -----
 
@@ -56,7 +56,7 @@ fn sub(arg: Row) -> Node {
 /// Spec-char convenience: the corpus spells pairs visually; the AST
 /// stores the typed kinds.
 fn delim(left: char, right: char, mids: Vec<char>, segs: Vec<Row>) -> Node {
-    use mascii::symbols::Delim;
+    use formulaa::symbols::Delim;
     Node::Delim {
         left: Delim::of_spec_side(left, true).unwrap(),
         right: Delim::of_spec_side(right, false).unwrap(),
@@ -159,7 +159,7 @@ fn roundtrip(name: &str, row: &Row) {
     // The LaTeX we emit reads back to the tree it came from (the
     // second road: AST -> LaTeX -> AST), spacers excepted.
     let tex = row_to_latex(&expected);
-    let from_tex = normalize(&mascii::from_latex::row_from_latex(&tex));
+    let from_tex = normalize(&formulaa::from_latex::row_from_latex(&tex));
     assert_eq!(
         from_tex, expected,
         "[{}] LaTeX roundtrip mismatch\n--- LaTeX ---\n{}",
@@ -167,7 +167,7 @@ fn roundtrip(name: &str, row: &Row) {
     );
     // The export form (⬚ slot marks blanked when safe) reads back to
     // the same tree — over the whole corpus and the random trees.
-    let exported = mascii::render::export_aa(&row);
+    let exported = formulaa::render::export_aa(&row);
     let reparsed = parse(&exported).unwrap_or_else(|e| {
         panic!(
             "[{}] export parse failed: {}\n--- AA ---\n{}",
@@ -216,7 +216,7 @@ fn malformed_pictures_do_not_panic() {
 /// first cell.
 #[test]
 fn foreign_latex_reads_right() {
-    use mascii::from_latex::row_from_latex;
+    use formulaa::from_latex::row_from_latex;
     let tex = |t: &str| row_to_latex(&normalize(&row_from_latex(t)));
     assert_eq!(tex(r"{1 \over 2} + x"), r"\frac{1}{2}+x");
     assert_eq!(tex(r"a \atop b"), r"\frac{a}{b}");
@@ -251,7 +251,7 @@ fn foreign_latex_reads_right() {
 /// disagree.
 #[test]
 fn normalize_is_idempotent() {
-    use mascii::ast::{Field, Node};
+    use formulaa::ast::{Field, Node};
     let cases: Vec<Node> = vec![
         Node::BigOp {
             name: "T".into(),
@@ -286,7 +286,7 @@ fn normalize_is_idempotent() {
         assert_eq!(normalize(&once), once, "not idempotent: {:?}", n);
         // …and nested in an inset, where the same rules run again.
         let mut host = Node::Sqrt {
-            index: mascii::symbols::Radical::Sqrt,
+            index: formulaa::symbols::Radical::Sqrt,
             arg: vec![],
         };
         *host.field_mut(Field::SqrtArg) = vec![n.clone()];
@@ -302,7 +302,7 @@ fn normalize_is_idempotent() {
 
 #[test]
 fn export_blanks_slot_marks_when_safe() {
-    use mascii::render::export_aa;
+    use formulaa::render::export_aa;
     // The fraction bar carries the structure: ⬚ blanks away.
     let row = vec![frac(vec![], s("2"))];
     let ex = export_aa(&row);
@@ -1745,14 +1745,14 @@ fn gen_node(rng: &mut Rng, depth: usize) -> Node {
 }
 
 /// Case count / seed overridable for stress runs:
-/// MASCII_PROP_N=30000 MASCII_PROP_SEED=1234 cargo test property_
+/// FORMULAA_PROP_N=30000 FORMULAA_PROP_SEED=1234 cargo test property_
 #[test]
 fn property_random_asts_roundtrip() {
-    let n: usize = std::env::var("MASCII_PROP_N")
+    let n: usize = std::env::var("FORMULAA_PROP_N")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(2000);
-    let seed: u64 = std::env::var("MASCII_PROP_SEED")
+    let seed: u64 = std::env::var("FORMULAA_PROP_SEED")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(0x8bad_f00d_dead_beef);

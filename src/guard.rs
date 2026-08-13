@@ -8,12 +8,12 @@
 
 use std::fs;
 
-use mascii::editor::Editor;
-use mascii::render::{RenderCtx, render_root};
-use mascii::{ast, latex, parse};
+use formulaa::editor::Editor;
+use formulaa::render::{RenderCtx, render_root};
+use formulaa::{ast, latex, parse};
 
 /// The checker; with `debug`, reports land in
-/// mascii_debug/roundtrip-N.txt so an AI (or human) can load one later
+/// formulaa_debug/roundtrip-N.txt so an AI (or human) can load one later
 /// and fix the toolchain.
 #[derive(Default)]
 pub struct RoundtripGuard {
@@ -87,14 +87,14 @@ fn write_report(
     expected: &ast::Row,
     parsed: Option<&ast::Row>,
 ) -> std::io::Result<String> {
-    fs::create_dir_all("mascii_debug")?;
+    fs::create_dir_all("formulaa_debug")?;
     let path = (1..)
-        .map(|i| format!("mascii_debug/roundtrip-{}.txt", i))
+        .map(|i| format!("formulaa_debug/roundtrip-{}.txt", i))
         .find(|p| !std::path::Path::new(p).exists())
         .unwrap();
     let mut report = String::new();
     use std::fmt::Write as _;
-    let _ = writeln!(report, "mascii roundtrip failure report");
+    let _ = writeln!(report, "formulAA roundtrip failure report");
     let _ = writeln!(report, "kind: {}", kind);
     let _ = writeln!(report, "\n--- canonical AA (fed to parse) ---\n{}", aa);
     let _ = writeln!(
@@ -133,7 +133,7 @@ fn write_report(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mascii::input::Key;
+    use formulaa::input::Key;
 
     /// Without --debug a roundtrip-breaking edit is refused: the guard
     /// undoes it and says so, and no report file is involved. The
@@ -147,12 +147,12 @@ mod tests {
         ed.input(Key::Char('b'), false, false);
         // A bare Roman '(' cannot roundtrip: it renders as the one
         // character every parser must read as a delimiter.
-        ed.root = vec![mascii::ast::Node::Roman('(')];
+        ed.root = vec![formulaa::ast::Node::Roman('(')];
         let mut guard = RoundtripGuard::default();
         guard.check(&mut ed);
         assert_ne!(
             ed.root,
-            vec![mascii::ast::Node::Roman('(')],
+            vec![formulaa::ast::Node::Roman('(')],
             "the broken edit stood"
         );
         assert!(ed.message.contains("refused"), "{:?}", ed.message);

@@ -1,5 +1,5 @@
 [package]
-name = "mascii"
+name = "formulaa"
 version = "0.1.0"
 edition = "2024"
 description = "LyX-like interactive TUI math editor rendering Unicode/ASCII-art formulas"
@@ -19,5 +19,5 @@ ratatui = { version = "0.30", optional = true }
 arboard = { version = "3", optional = true }
 
 [[bin]]
-name = "mascii"
+name = "formulaa"
 required-features = ["tui"]

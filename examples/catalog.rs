@@ -3,11 +3,11 @@
 //! (Formula definitions mirror tests/roundtrip.rs.)
 
 #![allow(dead_code)]
-use mascii::ast::{Node, Row, normalize};
-use mascii::latex::row_to_latex;
-use mascii::render::{RenderCtx, render_row};
-use mascii::symbols::Radical;
-use mascii::symbols::{Accent, Arrow, ColDelim};
+use formulaa::ast::{Node, Row, normalize};
+use formulaa::latex::row_to_latex;
+use formulaa::render::{RenderCtx, render_row};
+use formulaa::symbols::Radical;
+use formulaa::symbols::{Accent, Arrow, ColDelim};
 
 // ----- tiny DSL for building formulas -----
 
@@ -47,8 +47,8 @@ fn sub(arg: Row) -> Node {
 
 fn paren(inner: Row) -> Node {
     Node::Delim {
-        left: mascii::symbols::Delim::Col(ColDelim::Paren),
-        right: mascii::symbols::Delim::Col(ColDelim::Paren),
+        left: formulaa::symbols::Delim::Col(ColDelim::Paren),
+        right: formulaa::symbols::Delim::Col(ColDelim::Paren),
         mids: 0,
         segs: vec![inner],
     }
@@ -89,8 +89,8 @@ fn acc(accent: Accent, base: char) -> Node {
 fn mat(rows: usize, cols: usize, cells: Vec<Row>) -> Node {
     assert_eq!(cells.len(), rows * cols);
     Node::Delim {
-        left: mascii::symbols::Delim::Col(ColDelim::Bracket),
-        right: mascii::symbols::Delim::Col(ColDelim::Bracket),
+        left: formulaa::symbols::Delim::Col(ColDelim::Bracket),
+        right: formulaa::symbols::Delim::Col(ColDelim::Bracket),
         mids: 0,
         segs: vec![vec![Node::Array { rows, cols, cells }]],
     }
@@ -372,7 +372,7 @@ fn continued_fraction() {
 }
 
 fn delim(left: char, right: char, mids: Vec<char>, segs: Vec<Row>) -> Node {
-    use mascii::symbols::Delim;
+    use formulaa::symbols::Delim;
     Node::Delim {
         left: Delim::of_spec_side(left, true).unwrap(),
         right: Delim::of_spec_side(right, false).unwrap(),
@@ -519,7 +519,7 @@ fn main() {
     println!("`tests/roundtrip.rs`. Regenerate with");
     println!("`cargo run --example catalog > docs/examples.md`.\n");
     println!("Every formula satisfies `parse(render(normalize(x))) == normalize(x)`");
-    println!("and `render(parse(aa)) == aa` (the AA feeds straight into `mascii aa2tex`).\n");
+    println!("and `render(parse(aa)) == aa` (the AA feeds straight into `formulaa aa2tex`).\n");
     println!("## MDN's three famous mathematical formulas\n");
     cardano_formula();
     cauchy_schwarz_inequality();

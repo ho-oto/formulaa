@@ -9,12 +9,12 @@
 //!   - named keys: Left Right Up Down Home End Tab Enter Backspace
 //!     Delete Esc Space, with `S-` (shift) / `C-` (ctrl) prefixes
 
-use mascii::ast::{normalize, strip_spacers};
-use mascii::editor::Editor;
-use mascii::input::{Effect, Key};
-use mascii::latex::row_to_latex;
-use mascii::parse::parse;
-use mascii::render::{RenderCtx, render_root};
+use formulaa::ast::{normalize, strip_spacers};
+use formulaa::editor::Editor;
+use formulaa::input::{Effect, Key};
+use formulaa::latex::row_to_latex;
+use formulaa::parse::parse;
+use formulaa::render::{RenderCtx, render_root};
 
 fn named(tok: &str) -> Option<Key> {
     Some(match tok {
@@ -209,7 +209,7 @@ fn minibuffer_previews_the_commit() {
     assert_eq!(ed.command_preview(), Some('α'));
     assert_eq!(
         ed.command_preview_row(),
-        Some(vec![mascii::ast::Node::Sym('α')])
+        Some(vec![formulaa::ast::Node::Sym('α')])
     );
     // …∑-class commands their operator…
     let mut ed = Editor::new();
@@ -221,7 +221,7 @@ fn minibuffer_previews_the_commit() {
     assert_eq!(ed.command_preview(), None);
     assert!(matches!(
         ed.command_preview_row().as_deref(),
-        Some([mascii::ast::Node::Frac { .. }])
+        Some([formulaa::ast::Node::Frac { .. }])
     ));
     // An unknown spelling previews nothing…
     let mut ed = Editor::new();
@@ -233,7 +233,7 @@ fn minibuffer_previews_the_commit() {
     type_script(&mut ed, r"\ t e x");
     assert_eq!(
         ed.command_preview_row(),
-        Some(vec![mascii::ast::Node::Sym('⬚')])
+        Some(vec![formulaa::ast::Node::Sym('⬚')])
     );
     // …and the commands that act on their surroundings preview
     // nothing, because what they do depends on where the cursor is.
@@ -394,21 +394,23 @@ fn aliases_resolve_to_the_same_command() {
         ("limits", "op*"),
         ("delim", "lr"),
     ];
-    let symbol_aliases = mascii::symbols::NAMES.entries().filter_map(|(&from, &ch)| {
-        // A spelling an earlier resolve stage claims (\ch is the
-        // hyperbolic function, not χ) only acts as this char in \^ch
-        // positions; a styled shortcut (\RR) has no canonical command
-        // spelling. Neither has a command to compare against here.
-        if mascii::symbols::is_func_name(from) {
-            return None;
-        }
-        let to = mascii::symbols::latex_name(ch)?;
-        // Compound `\not\xxx` spellings are not typeable as one name.
-        if to.contains('\\') {
-            return None;
-        }
-        (from != to).then_some((from, to))
-    });
+    let symbol_aliases = formulaa::symbols::NAMES
+        .entries()
+        .filter_map(|(&from, &ch)| {
+            // A spelling an earlier resolve stage claims (\ch is the
+            // hyperbolic function, not χ) only acts as this char in \^ch
+            // positions; a styled shortcut (\RR) has no canonical command
+            // spelling. Neither has a command to compare against here.
+            if formulaa::symbols::is_func_name(from) {
+                return None;
+            }
+            let to = formulaa::symbols::latex_name(ch)?;
+            // Compound `\not\xxx` spellings are not typeable as one name.
+            if to.contains('\\') {
+                return None;
+            }
+            (from != to).then_some((from, to))
+        });
     for (from, to) in command_aliases.into_iter().chain(symbol_aliases) {
         // The box commands open a mode rather than insert; compare the
         // mode instead of the formula.
@@ -533,7 +535,7 @@ fn grid_selection_promotes_and_clears() {
     assert!(
         matches!(
             ed.grid,
-            Some(mascii::editor::GridSel::Lanes {
+            Some(formulaa::editor::GridSel::Lanes {
                 cols: true,
                 pos: 1,
                 ..
@@ -746,7 +748,7 @@ fn enter_inside_an_inset_is_inert() {
     assert!(
         !ed.root
             .iter()
-            .any(|n| matches!(n, mascii::ast::Node::Break))
+            .any(|n| matches!(n, formulaa::ast::Node::Break))
     );
     // \addrow still works.
     type_script(&mut ed, r"\addrow");
@@ -831,7 +833,7 @@ fn free_cursor_mode_snaps_on_enter() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"x + \frac 1 Down 2 Tab C-f Down Enter");
     assert!(
-        matches!(ed.path.last(), Some((_, mascii::ast::Field::FracDen))),
+        matches!(ed.path.last(), Some((_, formulaa::ast::Field::FracDen))),
         "path: {:?}",
         ed.path
     );
@@ -865,7 +867,7 @@ fn free_cursor_auto_expands_collapsed_elements() {
     assert!(
         ed.ghost
             .iter()
-            .any(|p| matches!(p.last(), Some((_, mascii::ast::Field::SupArg)))),
+            .any(|p| matches!(p.last(), Some((_, formulaa::ast::Field::SupArg)))),
         "ghosts: {:?}",
         ed.ghost
     );
@@ -888,7 +890,7 @@ fn click_moves_the_cursor() {
     type_script(&mut ed, r"x + \frac 1 Down 22 Tab");
     ed.click(4, 2);
     assert!(
-        matches!(ed.path.last(), Some((_, mascii::ast::Field::FracDen))),
+        matches!(ed.path.last(), Some((_, formulaa::ast::Field::FracDen))),
         "path: {:?}",
         ed.path
     );
@@ -989,7 +991,7 @@ fn block_select_mode_selects_a_structure() {
     assert!(cursor.is_some(), "cursor stays threaded during modes");
     assert!(
         root.iter().any(
-            |n| matches!(n, mascii::ast::Node::Sym(c) if (0xE000..0xE0F0).contains(&(*c as u32)))
+            |n| matches!(n, formulaa::ast::Node::Sym(c) if (0xE000..0xE0F0).contains(&(*c as u32)))
         ),
         "block mark missing: {:?}",
         root
@@ -1222,11 +1224,11 @@ fn assert_roundtrip(ed: &Editor, history: &[String]) {
 
 #[test]
 fn property_random_key_sequences_roundtrip() {
-    let n: usize = std::env::var("MASCII_UI_PROP_N")
+    let n: usize = std::env::var("FORMULAA_UI_PROP_N")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(200);
-    let seed: u64 = std::env::var("MASCII_UI_PROP_SEED")
+    let seed: u64 = std::env::var("FORMULAA_UI_PROP_SEED")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(0xDEC0DE);
@@ -1379,8 +1381,8 @@ fn shift_selecting_a_bracket_arms_the_pair() {
     type_script(&mut ed, "( foo ) Home S-Right");
     let (root, _) = ed.decorated();
     let has_mark = root.iter().any(|n| {
-        matches!(n, mascii::ast::Node::Sym(c)
-            if mascii::glyphs::Mark::decode(*c) == Some(mascii::glyphs::Mark::Delims { open: true }))
+        matches!(n, formulaa::ast::Node::Sym(c)
+            if formulaa::glyphs::Mark::decode(*c) == Some(formulaa::glyphs::Mark::Delims { open: true }))
     });
     assert!(has_mark, "no armed marks in {:?}", root);
 
@@ -1472,7 +1474,7 @@ fn unwrap_leaves_middles_and_grids_alone() {
     type_script(&mut ed, r"\set x Home");
     assert_eq!(ed.col, 0, "cursor is against the opening brace");
     assert!(
-        matches!(ed.path.last(), Some((_, mascii::ast::Field::Seg(0)))),
+        matches!(ed.path.last(), Some((_, formulaa::ast::Field::Seg(0)))),
         "cursor is in the delimiter's segment: {:?}",
         ed.path
     );
@@ -1489,7 +1491,7 @@ fn unwrap_leaves_middles_and_grids_alone() {
     let mut ed = Editor::new();
     type_script(&mut ed, r"\pmatrix22 x Tab Home");
     assert!(
-        matches!(ed.path.last(), Some((_, mascii::ast::Field::Seg(0)))),
+        matches!(ed.path.last(), Some((_, formulaa::ast::Field::Seg(0)))),
         "cursor is in the delimiter's segment: {:?}",
         ed.path
     );
@@ -1581,7 +1583,7 @@ fn tab_completion_with_no_matches_says_so() {
 /// step is always where the selection just came from.
 #[test]
 fn block_select_paints_only_a_step_in_each_direction() {
-    use mascii::glyphs::Mark;
+    use formulaa::glyphs::Mark;
     let mut ed = Editor::new();
     // Nest deeply: a matrix cell inside a fraction inside a bracket.
     type_script(&mut ed, r"( 1 // \pmatrix22 x");
@@ -1591,9 +1593,9 @@ fn block_select_paints_only_a_step_in_each_direction() {
 
     let painted = |ed: &Editor| -> Vec<usize> {
         let (root, _) = ed.decorated();
-        fn walk(row: &mascii::ast::Row, out: &mut Vec<usize>) {
+        fn walk(row: &formulaa::ast::Row, out: &mut Vec<usize>) {
             for n in row {
-                if let mascii::ast::Node::Sym(c) = n
+                if let formulaa::ast::Node::Sym(c) = n
                     && let Some(Mark::BlockOpen { rank }) = Mark::decode(*c)
                 {
                     out.push(rank);
@@ -1646,10 +1648,10 @@ fn arming_does_not_survive_undo_or_a_click() {
     // layer at all. The arming must go with it — otherwise the pair
     // stays lit while Backspace does something else entirely.
     let lit = |ed: &Editor| {
-        use mascii::glyphs::Mark;
-        fn walk(row: &mascii::ast::Row, out: &mut bool) {
+        use formulaa::glyphs::Mark;
+        fn walk(row: &formulaa::ast::Row, out: &mut bool) {
             for n in row {
-                if let mascii::ast::Node::Sym(c) = n
+                if let formulaa::ast::Node::Sym(c) = n
                     && matches!(Mark::decode(*c), Some(Mark::Delims { .. }))
                 {
                     *out = true;
