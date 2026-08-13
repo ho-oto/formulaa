@@ -26,8 +26,8 @@
 //! - **green** — OK / actionable: known commands, the grid frame,
 //!   insert ghosts, normal messages.
 //! - **maroon** — errors: unknown commands, error messages.
-//! - **gray** — chrome and neutral grounds: help line, the ␣ glyph,
-//!   the floating-box ground; never carries meaning.
+//! - **gray** — neutral: the ␣ glyph, the floating-box ground; never
+//!   carries meaning.
 
 use ratatui::style::Color;
 
@@ -54,10 +54,9 @@ const DEFAULT: Color = Color::Reset;
 pub const MESSAGE_FG: Color = GREEN;
 /// … the same line when the message is an error.
 pub const MESSAGE_ERR_FG: Color = MAROON;
-/// The usage/help bottom line and other secondary chrome.
-pub const CHROME_FG: Color = GRAY;
-/// The canvas border: the default foreground, same as the formula
-/// text — the frame is part of the page, not chrome.
+/// The canvas border and the usage/help bottom line: the default
+/// foreground, same as the formula text — the frame is part of the
+/// page, not chrome.
 pub const BORDER_FG: Color = DEFAULT;
 /// The visible space atom ␣ (on a themed ground it turns `GROUND_FG`
 /// like any other glyph).

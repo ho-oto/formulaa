@@ -15,7 +15,11 @@ use mascii::render::{RenderCtx, render_root};
 
 use crate::theme;
 
-const HELP: &str = "^F free move  ^B block select  \\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ⇧←→/⇧↑ select  ^T table/grid  ^Z/^R undo/redo  ^Y copy AA  Esc/^Q quit";
+const HELP: &str = "^F free move  ^B block select  \\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ⇧←→/⇧↑ select  ^Z/^R undo/redo  ^Y copy AA  Esc/^Q quit";
+
+/// The same line with ^T leading, shown only where ^T would work
+/// (anywhere inside a matrix — the chord is noise everywhere else).
+const HELP_GRID: &str = "^T table/grid  ^F free move  ^B block select  \\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ⇧←→/⇧↑ select  ^Z/^R undo/redo  ^Y copy AA  Esc/^Q quit";
 
 /// Context-sensitive last line: generic keys normally, the relevant
 /// commands when the cursor is inside a grid cell or a delimiter.
@@ -61,6 +65,7 @@ pub fn help_line(ed: &Editor) -> &'static str {
         Some((_, Field::Seg(_))) => {
             "delim: \\mid adds a │ segment  ) ] } close  \\lr<spec> visual pairs (\\lr(] \\lr{|}, . = none)"
         }
+        _ if ed.in_grid() => HELP_GRID,
         _ => HELP,
     }
 }
@@ -98,7 +103,7 @@ pub fn draw(f: &mut Frame, ed: &Editor, view: &mut View) -> (u16, u16) {
     } else {
         Line::from(Span::styled(
             format!(" {}", help_line(ed)),
-            Style::default().fg(theme::CHROME_FG),
+            Style::default().fg(theme::BORDER_FG),
         ))
     };
     f.render_widget(bottom, help_area);

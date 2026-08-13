@@ -1280,6 +1280,13 @@ impl Editor {
     }
 
     /// Innermost enclosing Array: (path index, node index, cell index).
+    /// Whether the cursor sits inside a matrix — i.e. whether ^T
+    /// (grid edit) would do anything here. The help line shows or
+    /// hides the chord by this.
+    pub fn in_grid(&self) -> bool {
+        self.enclosing_array().is_some()
+    }
+
     pub(crate) fn enclosing_array(&self) -> Option<(usize, usize, usize)> {
         self.path
             .iter()

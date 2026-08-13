@@ -379,10 +379,15 @@ by a corpus plus randomized property tests.
   inner step is where you just came from); glyphs on any themed ground
   take a fixed foreground for light-terminal safety. Verified
   hands-on, 2026-08.
-- [ ] **Command naming review** — revisit the `\command` vocabulary as
-  a whole: the mode-command spellings (`\f` `\b` `\t` `\g` and their
-  long forms), `\lr` vs `\delim`, alias coverage, and whether the
-  short forms earn their keystrokes.
+- [ ] **Project name review** — reconsider the name "mascii" itself
+  (the format is Unicode-first, not really ASCII; candidates under
+  discussion).
+- [ ] **Command spelling cleanups** — the `\command` vocabulary:
+  canonical `\delim` over `\lr`, drop `\tex` (one letter from
+  `\text`, different feature), drop the one-letter mode spellings,
+  `\grid` as the mode's canonical name, `\negate` alias for `\!`,
+  `\sqrt3`/`\sqrt4` as the shown spellings, `\roman` alias,
+  `\xRightarrow` shown over `\xTo`.
 - [ ] **Paste behavior** — ^V only reads the internal clipboard;
   terminal paste arrives as keystrokes and multi-line LaTeX into the
   `\tex` box commits at the first newline (no bracketed paste).
