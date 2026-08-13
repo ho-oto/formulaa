@@ -1576,9 +1576,9 @@ fn tab_completion_with_no_matches_says_so() {
     assert_eq!(ed.minibuffer.as_deref(), Some("qqzz"));
 }
 
-/// ^B paints the highlighted ancestor and the one step each way, not
-/// the whole chain: the arrows move one step at a time, so that is all
-/// that has to be on screen (and two shades cover it).
+/// ^B paints the highlighted ancestor and the one step outward, not
+/// the whole chain: the arrows move one step at a time, and the inner
+/// step is always where the selection just came from.
 #[test]
 fn block_select_paints_only_a_step_in_each_direction() {
     use mascii::glyphs::Mark;
@@ -1609,18 +1609,19 @@ fn block_select_paints_only_a_step_in_each_direction() {
         out
     };
 
-    // Innermost: itself and the one outside it.
+    // Itself and the one step *outward*, never the whole chain and
+    // never the inner step — selection starts at the innermost
+    // ancestor, so the way back in needs no announcing.
     assert_eq!(painted(&ed), vec![0, 1]);
-    // One step out: the three around it — never the whole chain.
     type_script(&mut ed, "Up");
-    assert_eq!(painted(&ed), vec![0, 1, 2]);
+    assert_eq!(painted(&ed), vec![1, 2]);
     type_script(&mut ed, "Up");
-    assert_eq!(painted(&ed), vec![1, 2, 3]);
-    // Outermost: itself and the one inside it.
+    assert_eq!(painted(&ed), vec![2, 3]);
+    // Outermost: itself alone (nothing further out to step to).
     for _ in 0..depth {
         type_script(&mut ed, "Up");
     }
-    assert_eq!(painted(&ed), vec![depth - 2, depth - 1]);
+    assert_eq!(painted(&ed), vec![depth - 1]);
 }
 
 /// The pending unwrap is a one-shot that belongs to the tree and the

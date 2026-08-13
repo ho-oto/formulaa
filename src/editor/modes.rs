@@ -288,9 +288,11 @@ impl Editor {
     pub fn block_shown(&self) -> Vec<usize> {
         let len = self.block.as_ref().map_or(0, Vec::len);
         let sel = self.block_sel;
-        (sel.saturating_sub(1)..=sel + 1)
-            .filter(|&r| r < len)
-            .collect()
+        // The selection and the one step *outward*. The inner step is
+        // not shown: selection starts at the innermost ancestor, so
+        // "one step in" is always where you just came from — the
+        // outer ring is the only step that needs announcing.
+        (sel..=sel + 1).filter(|&r| r < len).collect()
     }
 
     pub fn block_cancel(&mut self) {

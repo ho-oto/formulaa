@@ -119,6 +119,12 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
         &ed.marker_extents(),
         ed.block.is_some().then_some(ed.block_sel),
     );
+    // ^B: the caret disappears — the blinking block IS the position,
+    // and the parked cursor would just sit as a stray white cell
+    // inside it (it never moves in this mode anyway).
+    if ed.block.is_some() {
+        d.caret = None;
+    }
     // ^F: the free cursor itself gets the prominent caret style; the
     // snap preview is the subtler colored cell.
     if let Some(f) = &ed.free {
@@ -126,7 +132,10 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
         if sy < d.height() {
             d.widen(sy, sx);
             let last = d.bg[sy].len().saturating_sub(1);
-            d.bg[sy][sx.min(last)] = Some(theme::FREE_BG);
+            // The snap preview is provisional and secondary: blinking
+            // reverse video, no color of its own.
+            d.invert[sy][sx.min(last)] = true;
+            d.flash[sy][sx.min(last)] = true;
         }
         let (fy, fx) = f.at;
         if fy < d.height() {
@@ -248,6 +257,14 @@ struct Decor {
     bg: Vec<Vec<Option<Color>>>,
     /// Cells drawn bold (the completion's `[^F]` chord markers).
     bold: Vec<Vec<bool>>,
+    /// Cells whose ground blinks: the selection layer — the linear
+    /// Shift selection, ^B's highlighted ancestor (purple), ^F's snap
+    /// preview (inverted).
+    flash: Vec<Vec<bool>>,
+    /// Cells drawn in reverse video: the secondary marks (^B's
+    /// one-step-outward ring, ^F's snap preview). No color of their
+    /// own, so they read on light and dark terminals alike.
+    invert: Vec<Vec<bool>>,
     caret: Option<(usize, usize)>,
     /// The edited grid's frame rectangle (x0, x1, top, bottom).
     frame: Option<(usize, usize, usize, usize)>,
@@ -262,6 +279,8 @@ impl Decor {
             self.lines[y].resize(x + 1, ' ');
             self.bg[y].resize(x + 1, None);
             self.bold[y].resize(x + 1, false);
+            self.flash[y].resize(x + 1, false);
+            self.invert[y].resize(x + 1, false);
         }
     }
 
@@ -273,6 +292,8 @@ impl Decor {
             self.lines.push(Vec::new());
             self.bg.push(Vec::new());
             self.bold.push(Vec::new());
+            self.flash.push(Vec::new());
+            self.invert.push(Vec::new());
         }
     }
 
@@ -313,7 +334,14 @@ fn marker_boxes(
     // each row, nesting by position. Selection pairs consume extents in
     // encounter order (rows top-down, columns left-right) — the same
     // order the editor lists them in (one per grid cell, or one).
-    let mut boxes: Vec<(usize, usize, Color, usize, usize)> = Vec::new();
+    #[derive(Clone, Copy)]
+    enum BoxKind {
+        /// The selection ground: purple, blinking.
+        Sel,
+        /// The secondary step: reverse video, steady.
+        Step,
+    }
+    let mut boxes: Vec<(usize, usize, BoxKind, usize, usize)> = Vec::new();
     let mut order: Vec<usize> = Vec::new(); // paint order key: depth
     let mut by_row: std::collections::BTreeMap<usize, Vec<(usize, char)>> =
         std::collections::BTreeMap::new();
@@ -410,26 +438,28 @@ fn marker_boxes(
                         (k, o) => Some(k) == o,
                     };
                     if let Some((o, oc)) = pop_matching(&mut stack, matches_opener) {
-                        let (color, depth, t, b) = match oc {
+                        let (kind, depth, t, b) = match oc {
                             Mark::BlockOpen { rank } => {
-                                // Only the highlighted ancestor and its
-                                // neighbours are marked at all, so two
-                                // shades say everything: this one, and
-                                // the step you can take from it.
+                                // Only the highlighted ancestor and
+                                // the one step outward are marked:
+                                // the provisional selection blinks
+                                // purple, the step is a steady
+                                // reverse-video ring.
                                 let (t, b, d) = extent(Some(rank));
-                                let color = if block_selected == Some(rank) {
-                                    theme::SELECTION_BG
+                                if block_selected == Some(rank) {
+                                    (BoxKind::Sel, d, t, b)
                                 } else {
-                                    theme::BLOCK_STEP_BG
-                                };
-                                (color, d, t, b)
+                                    (BoxKind::Step, d, t, b)
+                                }
                             }
                             _ => {
+                                // The linear Shift selection blinks
+                                // like ^B's: one look for "selected".
                                 let (t, b, _) = extent(None);
-                                (theme::SELECTION_BG, 0, t, b)
+                                (BoxKind::Sel, 0, t, b)
                             }
                         };
-                        boxes.push((o, x, color, t, b));
+                        boxes.push((o, x, kind, t, b));
                         order.push(depth);
                     }
                 }
@@ -446,12 +476,32 @@ fn marker_boxes(
     // descending rank: outermost ancestors below, inner ones on top.
     let mut idx: Vec<usize> = (0..boxes.len()).collect();
     idx.sort_by_key(|&i| std::cmp::Reverse(order[i]));
+    // Flash (the provisional selection) and the bg grounds paint in
+    // one outer-to-inner pass, each overwriting the other: the
+    // selected ancestor covers its outer neighbour's ground, and the
+    // inner step box then punches through the flash. A separate later
+    // flash pass loses the first half of that — the outer white
+    // ground swallows the purple whenever the selection is not the
+    // outermost ancestor.
+    let mut flash_grid: Vec<Vec<bool>> = bg.iter().map(|r| vec![false; r.len()]).collect();
+    let mut invert_grid: Vec<Vec<bool>> = bg.iter().map(|r| vec![false; r.len()]).collect();
     for i in idx {
-        let (o, close, color, t, b) = boxes[i];
-        for row in bg.iter_mut().take(b + 1).skip(t) {
+        let (o, close, kind, t, b) = boxes[i];
+        for y in t..=b.min(bg.len().saturating_sub(1)) {
             for x in o..close {
-                if x < row.len() {
-                    row[x] = Some(color);
+                if x < bg[y].len() {
+                    match kind {
+                        BoxKind::Sel => {
+                            bg[y][x] = Some(theme::SELECTION_BG);
+                            flash_grid[y][x] = true;
+                            invert_grid[y][x] = false;
+                        }
+                        BoxKind::Step => {
+                            bg[y][x] = None;
+                            flash_grid[y][x] = false;
+                            invert_grid[y][x] = true;
+                        }
+                    }
                 }
             }
         }
@@ -533,6 +583,8 @@ fn marker_boxes(
         lines: grid,
         bg,
         bold,
+        flash: flash_grid,
+        invert: invert_grid,
         caret: None,
         frame,
         armed,
@@ -860,9 +912,12 @@ fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec
             .fg(theme::BOX_CURSOR_FG)
             .bg(theme::BOX_CURSOR_BG)
             .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK),
+        // The free cursor keeps the selection purple (fixed white
+        // glyph, so it reads on light terminals too); the blink is
+        // what says "provisional".
         CaretStyle::Free => Style::default()
-            .fg(theme::FREE_CURSOR_FG)
-            .bg(theme::FREE_CURSOR_BG)
+            .fg(theme::GROUND_FG)
+            .bg(theme::SELECTION_BG)
             .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK),
         CaretStyle::Normal => Style::default()
             .add_modifier(Modifier::REVERSED | Modifier::BOLD | Modifier::SLOW_BLINK),
@@ -874,7 +929,10 @@ fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec
         if !buf.is_empty() {
             let s = std::mem::take(buf);
             spans.push(match buf_bg {
-                Some(color) => Span::styled(s, Style::default().bg(color)),
+                // A themed ground fixes its glyph color too: the
+                // terminal's own foreground (black, on a light theme)
+                // has no contrast guarantee against it.
+                Some(color) => Span::styled(s, Style::default().bg(color).fg(theme::GROUND_FG)),
                 None => Span::raw(s),
             });
         }
@@ -900,6 +958,26 @@ fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec
                 _ => cursor_style,
             };
             spans.push(Span::styled(cell, style));
+        } else if d.invert.get(y).and_then(|r| r.get(i)).copied() == Some(true) {
+            // A secondary mark: reverse video (blinking when it is
+            // also provisional — the ^F snap preview). No fixed color,
+            // so it reads under any terminal theme.
+            flush(&mut buf, buf_bg, &mut spans);
+            let mut m = Modifier::REVERSED;
+            if d.flash.get(y).and_then(|r| r.get(i)).copied() == Some(true) {
+                m |= Modifier::SLOW_BLINK;
+            }
+            spans.push(Span::styled(cell, Style::default().add_modifier(m)));
+        } else if d.flash.get(y).and_then(|r| r.get(i)).copied() == Some(true) {
+            // A provisional ground blinks: ^B's highlighted ancestor
+            // (purple) and ^F's snap preview (white) keep their own
+            // color, and the blink is what says "not committed yet".
+            flush(&mut buf, buf_bg, &mut spans);
+            let mut style = Style::default().add_modifier(Modifier::SLOW_BLINK);
+            if let Some(color) = cell_bg {
+                style = style.bg(color).fg(theme::GROUND_FG);
+            }
+            spans.push(Span::styled(cell, style));
         } else if c == FENDER_L || c == FENDER_R {
             // The open box's fenders: green glyphs, no ground.
             flush(&mut buf, buf_bg, &mut spans);
@@ -913,9 +991,12 @@ fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec
         } else if c == '␣' {
             // Explicit space atom: keep visible but unobtrusive.
             flush(&mut buf, buf_bg, &mut spans);
+            // The ␣ glyph dims on the open canvas; on a themed
+            // ground it turns white like any other glyph there (dim
+            // gray on dark purple reads as a hole).
             let mut style = Style::default().fg(theme::SPACE_FG);
             if let Some(color) = cell_bg {
-                style = style.bg(color);
+                style = style.bg(color).fg(theme::GROUND_FG);
             }
             spans.push(Span::styled(cell, style));
         } else if d.bold.get(y).and_then(|r| r.get(i)).copied() == Some(true) {
@@ -924,7 +1005,7 @@ fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec
             flush(&mut buf, buf_bg, &mut spans);
             let mut style = Style::default().add_modifier(Modifier::BOLD);
             if let Some(color) = cell_bg {
-                style = style.bg(color);
+                style = style.bg(color).fg(theme::GROUND_FG);
             }
             spans.push(Span::styled(cell, style));
         } else if d.armed.is_some_and(|(o, close, t, b)| {
@@ -940,6 +1021,7 @@ fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec
                 cell,
                 Style::default()
                     .bg(theme::SELECTION_BG)
+                    .fg(theme::GROUND_FG)
                     .add_modifier(Modifier::BOLD),
             ));
         } else if d.frame.is_some_and(|(o, close, t, b)| {
@@ -1738,6 +1820,8 @@ mod tests {
                 lines: vec![vec![ghost, Mark::Gap { cols: true }.ch()]],
                 bg: vec![vec![None, None]],
                 bold: vec![vec![false, false]],
+                flash: vec![vec![false, false]],
+                invert: vec![vec![false, false]],
                 caret: cursor.map(|x| (0, x)),
                 frame: None,
                 armed: None,
@@ -2041,6 +2125,63 @@ mod tests {
                 .contains(ratatui::style::Modifier::BOLD),
             "the chord marker is not bold"
         );
+    }
+
+    /// ^B's provisional selection is the selection purple with a
+    /// blink (the caret is bold reverse video; flash cells are
+    /// non-bold, which is what the filter below keys on).
+    #[test]
+    fn block_select_flashes_in_reverse_video() {
+        use ratatui::style::Modifier;
+        use ratatui::{Terminal, backend::TestBackend};
+        // Nested pairs: the innermost ancestor is selected, and the
+        // one step OUTWARD shows as a white ring around it — the
+        // configuration where a wrong paint order once let the outer
+        // ground swallow the purple.
+        let mut ed = Editor::new();
+        for c in "((x".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        ed.input(Key::Char('b'), false, true); // ^B (inside the pairs)
+        assert!(ed.block.is_some());
+        let mut view = View::default();
+        let mut term = Terminal::new(TestBackend::new(30, 8)).unwrap();
+        term.draw(|f| {
+            draw(f, &ed, &mut view);
+        })
+        .unwrap();
+        let buf = term.backend().buffer().clone();
+        let flashing = (0..buf.area.height)
+            .flat_map(|y| (0..buf.area.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let c = &buf[(x, y)];
+                c.bg == theme::SELECTION_BG
+                    && c.style().add_modifier.contains(Modifier::SLOW_BLINK)
+                    && !c.style().add_modifier.contains(Modifier::BOLD)
+            })
+            .count();
+        assert!(flashing > 0, "no flashing purple cells in ^B");
+        // …and the outward step shows as a steady reverse-video ring
+        // (the inner step is deliberately not drawn — selection starts
+        // at the innermost ancestor, so it needs no announcing). The
+        // parked caret is hidden in this mode, so every reversed cell
+        // is the ring: steady (no blink) and never bold.
+        let ring = (0..buf.area.height)
+            .flat_map(|y| (0..buf.area.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let m = buf[(x, y)].style().add_modifier;
+                m.contains(Modifier::REVERSED)
+            })
+            .collect::<Vec<_>>();
+        assert!(!ring.is_empty(), "no outward step ring");
+        for &(x, y) in &ring {
+            let m = buf[(x, y)].style().add_modifier;
+            assert!(
+                !m.contains(Modifier::BOLD) && !m.contains(Modifier::SLOW_BLINK),
+                "a reversed cell that is not the steady ring at {:?}",
+                (x, y)
+            );
+        }
     }
 
     fn shot_at(ed: &Editor, w: u16, h: u16) -> Vec<String> {

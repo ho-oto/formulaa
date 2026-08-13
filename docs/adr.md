@@ -367,9 +367,18 @@ by a corpus plus randomized property tests.
 ### Short term
 
 - [ ] **ANSI-16 palette audit** — portability: keep the theme within
-  the standard + bright ANSI colors? Currently it does *not* — the
-  palette uses 256-color indexed values (54, 97, 22, 88, 238 in
-  `theme.rs`). To be verified hands-on before deciding.
+  the standard + bright ANSI colors. Current state: named ANSI colors
+  only (green = OK, maroon = errors, purple = selection, white =
+  selection-secondary with forced black text, grey = popup ground);
+  the caret is blinking reverse video; the ^F free cursor and ^B's
+  provisional selection stay selection-purple and blink (the linear
+  Shift selection blinks too); the secondary marks — ^B's
+  one-step-outward ring and the ^F snap preview — are reverse video
+  with no color of their own (the snap preview blinks); ^B shows only
+  the selection and its outward step (the
+  inner step is where you just came from); glyphs on any themed ground
+  take a fixed foreground for light-terminal safety. Still to be
+  verified hands-on.
 - [ ] **Command naming review** — revisit the `\command` vocabulary as
   a whole: the mode-command spellings (`\f` `\b` `\t` `\g` and their
   long forms), `\lr` vs `\delim`, alias coverage, and whether the
