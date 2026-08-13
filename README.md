@@ -145,8 +145,8 @@ Key reference: [docs/keys.md](docs/keys.md) · command reference:
 
 The same editor core compiles to WebAssembly; prototype integrations for
 VS Code and Obsidian live in their own repositories
-([mascii-vscode](https://github.com/ho-oto/mascii-vscode),
-[mascii-obsidian](https://github.com/ho-oto/mascii-obsidian)); Zed is
+([formulaa-vscode](https://github.com/ho-oto/formulaa-vscode),
+[formulaa-obsidian](https://github.com/ho-oto/formulaa-obsidian)); Zed is
 CLI-task based (see the roadmap in [docs/adr.md](docs/adr.md)).
 
 ## CLI

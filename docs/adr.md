@@ -354,9 +354,10 @@ by a corpus plus randomized property tests.
     name keeps the AA (ASCII-art) identity where it is true — the
     *picture* — and reads as the word it contains (crate and binary:
     `formulaa`). Debug artifacts moved to `formulaa_debug/`, property
-    test env vars to `FORMULAA_*`. The editor-extension repositories
-    (mascii-vscode / mascii-obsidian) keep their names until their own
-    rename.
+    test env vars to `FORMULAA_*`. The GitHub repositories and the
+    editor extensions followed suit (formulaa, formulaa-vscode,
+    formulaa-obsidian — old URLs redirect, and the legacy ```mascii
+    fence stays accepted in the extensions).
 
 ## Test strategy
 
@@ -402,8 +403,8 @@ by a corpus plus randomized property tests.
 
 ### Editor integrations (own repositories)
 
-[mascii-vscode](https://github.com/ho-oto/mascii-vscode) and
-[mascii-obsidian](https://github.com/ho-oto/mascii-obsidian) each carry
+[formulaa-vscode](https://github.com/ho-oto/formulaa-vscode) and
+[formulaa-obsidian](https://github.com/ho-oto/formulaa-obsidian) each carry
 their own wasm crate and depend on this repo by git; bindings are
 duplicated deliberately (repo independence over sharing). Both are
 prototypes (code-reviewed, not yet field-tested). Zed has no extension

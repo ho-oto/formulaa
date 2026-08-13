@@ -66,7 +66,7 @@ echo '...' | cargo run -q -- aa2tex    # AA → LaTeX (fmt likewise)
 | `tests/roundtrip.rs` | formula corpus + randomized property tests |
 | `tests/ui.rs` | key-driven UI tests (script DSL + random key sequences) |
 | `tools/merge_math_font.py` | merged-font generator (fontTools) |
-| (wasm) | wasm bindings live in the **extension repositories** (mascii-vscode / mascii-obsidian); this repo is lib + CLI only |
+| (wasm) | wasm bindings live in the **extension repositories** (formulaa-vscode / formulaa-obsidian); this repo is lib + CLI only |
 | `SKILL.md` | guide for AI agents reading/writing AA directly |
 | `docs/examples.md` | corpus catalog (regenerate via `examples/catalog.rs`) |
 
