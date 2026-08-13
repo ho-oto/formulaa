@@ -359,6 +359,48 @@ by a corpus plus randomized property tests.
     formulaa-obsidian — old URLs redirect, and the legacy ```mascii
     fence stays accepted in the extensions).
 
+77. **Command vocabulary cleanup; grid edit moves to ^G** (2026-08) —
+    after examining what "canonical" actually touches (only the
+    completion's commit string and a few UI messages — spellings never
+    reach the format), the cleanup kept the changes with substance:
+    `\tex` dropped (one letter from `\text`, a different feature);
+    `\Vert` dropped (read as `\vert`'s sibling while doing something
+    unrelated); standalone `\langle` dropped for consistency with the
+    other `\lr`-only side names (a lone angle pair is `\lr<>`), with
+    `\bra`/`\ket` added; `\smallmatrix` dropped as a command (its AA
+    equals `\matrix`, so the smallness was silently lost — it still
+    reads from LaTeX); `\negate` added as `\!`'s word form. Mode
+    spellings: grid edit is `\g` `\G` `\grid` on **^G** (freeing ^T;
+    `\t` was one letter from τ's `\ta`), block select gains `\block`
+    and loses `\bs`. The `\lr`/`\delim` usage message now answers in
+    whichever spelling was typed. The `\op*` box commits on Space (the
+    band name is one piece — a typed space used to vanish silently).
+    Help lines: the base line gains a context prefix (`\mid` in a
+    pair, `^G` in a grid) instead of being replaced wholesale.
+
+78. **Message and help overhaul; ^B ends on the whole formula**
+    (2026-08) — one term per concept: "grid" everywhere (no more
+    matrix/array vs grid drift), "clipboard" only for the system
+    clipboard (^Y), the internal ^C/^X/^V store is "the buffer". The
+    `\lr` message dropped its `usage:` prefix ("\lr takes a spec …"),
+    and errors answer in the alias actually typed (`\negate`,
+    `\limits` — an `executing`/`op_cmd` spelling is threaded through
+    `execute` and the open box). The name-box help line is per-kind
+    (the shared line claimed Space commits inside `\text`, where Space
+    is content). ^B gained a final whole-formula target, so it works
+    at the top level and the "no enclosing block" message is gone, as
+    is the mode-entry info that duplicated the help line; obvious
+    chords (⇧ selection) left the base help line. Second pass, on the
+    "an experienced user shouldn't be lectured" principle: the startup
+    greeting, the no-completion notice, and every ^C/^X/^V/^Z/^R
+    message (success and whiff alike) are gone — the chords act or
+    don't; the `\lr` message is one line with no examples (the
+    completion is the manual); negate whiffs read like accent whiffs
+    ("negation needs a symbol before the cursor"); errors are
+    subject-first ("\X is not a command"); ^Y failure says "could not
+    reach the system clipboard"; the box help lines only *name* the
+    open box instead of teaching its keys.
+
 ## Test strategy
 
 - `tests/roundtrip.rs`: a corpus of real formulas (Cardano,
@@ -390,12 +432,15 @@ by a corpus plus randomized property tests.
   take a fixed foreground for light-terminal safety. Verified
   hands-on, 2026-08.
 
-- [ ] **Command spelling cleanups** — the `\command` vocabulary:
-  canonical `\delim` over `\lr`, drop `\tex` (one letter from
-  `\text`, different feature), drop the one-letter mode spellings,
-  `\grid` as the mode's canonical name, `\negate` alias for `\!`,
-  `\sqrt3`/`\sqrt4` as the shown spellings, `\roman` alias,
-  `\xRightarrow` shown over `\xTo`.
+- [ ] **Accent deletion behavior** — deleting backward past an
+  accented atom should peel the accent first (the inverse of how it
+  was typed). WideAccent: let the cursor into the base; a delete at
+  the inner edge arms the accent itself, a second delete removes it
+  and selects the contents; from outside, the first delete selects
+  the whole thing and the second removes it (align with the
+  structure-delete grammar).
+- [ ] **Deferred spellings** — `\roman` alias for `\rm` (on hold);
+  `\divides` for the ∣ atom (unclear); ≥10 grid sizes (not needed).
 - [ ] **Paste behavior** — ^V only reads the internal clipboard;
   terminal paste arrives as keystrokes and multi-line LaTeX into the
   `\tex` box commits at the first newline (no bracketed paste).

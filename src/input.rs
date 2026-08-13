@@ -224,7 +224,9 @@ impl Editor {
                             None if query.is_empty() => {
                                 self.info("type a command name (\\frac, \\alpha, …)")
                             }
-                            None => self.info(format!("no completion for \\{}", query)),
+                            // No matches: silence — the popup simply
+                            // does not open, which says the same.
+                            None => {}
                         },
                     }
                 }
@@ -365,11 +367,11 @@ impl Editor {
                     return None;
                 }
             }
-            // Space is content only where it means something: \op*
-            // pieces, \text prose, \tex source. \op and \rm commit.
-            Key::Char(' ') if matches!(kind, BoxKind::OpStar | BoxKind::Text | BoxKind::Tex) => {
-                self.op_type(' ')
-            }
+            // Space is content only where it survives the commit:
+            // \text prose and \latex source. In \op and \op* it
+            // commits — the band name is one piece, so a typed space
+            // would silently vanish from the result.
+            Key::Char(' ') if matches!(kind, BoxKind::Text | BoxKind::Tex) => self.op_type(' '),
             Key::Char('\\') if !ctrl && kind == BoxKind::Text => self.op_escape = true,
             Key::Char('"') if !ctrl && kind == BoxKind::Text => self.op_commit(),
             Key::Char(c) if !ctrl && kind == BoxKind::Text && text_char(c) => self.op_type(c),
@@ -518,8 +520,8 @@ impl Editor {
                 Key::Char('v') => self.paste(),
                 // Emacs pairing: ^A start, ^E end of the formula.
                 Key::Char('e') => self.document_end(),
-                // ^T: grid edit mode (inside a matrix).
-                Key::Char('t') => self.grid_mode_toggle(),
+                // ^G: grid edit mode (inside a matrix).
+                Key::Char('g') => self.grid_mode_toggle(),
                 // ^D: delete forward, the Emacs pairing for Backspace
                 // (and the only forward delete on keyboards without a
                 // Delete key).

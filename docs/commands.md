@@ -4,9 +4,9 @@ Everything typed after `\` in the minibuffer. The overlay is drawn at
 the cursor and its color says what the spelling currently means:
 **green** — runs as an edit; **purple** — a mode command (below);
 **red** — not yet anything (a half-typed name, or `\lr`/`\matrix`
-still waiting for arguments). Typing `\tau` walks red (`\`) → purple
-(`\t`, grid edit) → green (`\ta`, τ). A known name previews its result
-in place; `Enter`/`Space` commits, `Esc` cancels.
+still waiting for arguments). Typing `\bar` walks red (`\`) → purple
+(`\b`, block select) → red (`\ba`) → green (`\bar`). A known name
+previews its result in place; `Enter`/`Space` commits, `Esc` cancels.
 
 ## Completion
 
@@ -46,22 +46,22 @@ inserted symbol beside its spellings:
 
 ## Mode commands
 
-The ctrl chords `^F` `^B` `^T` `^Y` `^Q` may be stolen by the terminal
+The ctrl chords `^F` `^B` `^G` `^Y` `^Q` may be stolen by the terminal
 or host. The same operations have spellings:
 
 | Spelling | Action |
 | --- | --- |
 | `\f` `\F` `\free` | free cursor mode (`^F`) |
-| `\b` `\B` `\bs` `\blockselect` | block select mode (`^B`) |
-| `\t` `\T` `\g` `\G` `\tableedit` `\gridedit` | grid edit (`^T`) |
+| `\b` `\B` `\block` `\blockselect` | block select mode (`^B`) |
+| `\g` `\G` `\grid` | grid edit (`^G`) |
 | `\clipboard` | canonical AA to the **system** clipboard (`^Y`) — no one-letter form, it would read like the internal `^C` |
 | `\quit` | quit (`^Q`) — no one-letter form, one typo shouldn't quit |
 
 Mode commands show apart: purple in the minibuffer, and a bold chord
 marker in the completion's symbol column (`[^F]  f[ree], F (free
 cursor)`). They commit only on an explicit `Enter`/`Space`, never on
-`Tab`. Short spellings never shadow symbol names (`\t` is a mode, `\ta`
-is still τ — a test enforces this).
+`Tab`. Short spellings never shadow symbol names (`\b` is a mode, `\bar`
+is still the accent — a test enforces this).
 
 ## Structure
 
@@ -69,19 +69,19 @@ is still τ — a test enforces this).
 | --- | --- |
 | `\frac` | fraction (a selection becomes the numerator) |
 | `\sqrt` `\cbrt` `\qdrt` | √ ∛ ∜ |
-| `\matrix34` `\array34` `\smallmatrix34` | bare grid, 3 rows × 4 columns — **the size is part of the spelling**; bare `\matrix` doesn't run, the completion asks `matrix{1…9}{1…9}` |
+| `\matrix34` (= `\array34`) | bare grid, 3 rows × 4 columns — **the size is part of the spelling**; bare `\matrix` doesn't run, the completion asks `matrix{1…9}{1…9}`. (No `\smallmatrix` — the AA cannot keep the smallness, so the spelling would lie) |
 | `\pmatrix22` `\bmatrix..` `\Bmatrix..` `\vmatrix..` `\Vmatrix..` `\cases..` `\rcases..` | delimited matrices, same size suffix |
 | `\overbrace` `\underbrace` | `╭──╮` / `╰──╯` with a label |
 | `\xto` `\xfrom` / `\xTo` `\xFrom` | labelled stretchy arrows → ← / ⇒ ⇐ |
-| `\tex` / `\latex` | paste-LaTeX box (best effort, KaTeX/MathJax dialect) |
+| `\latex` | paste-LaTeX box (best effort, KaTeX/MathJax dialect). No `\tex` — one letter from `\text`, a different feature |
 
 ## Delimiters
 
 | Command | Action |
 | --- | --- |
 | `\lr(]` `\lr{\|}` `\lr\lceil\rfloor` … | delimiter spec **in visual order**: left, middles, right. Tokens are one spec character or a `\name` (`\lparen` `\lceil` `\langle` `\vert` `\none` and the `r…` twins) — those names work only inside `\lr` |
-| `\ceil` `\floor` `\abs` `\norm` | ⌈ ⌉, ⌊ ⌋, ⎢ ⎥, ‖ ‖ |
-| `\langle` `\braket` `\set` | ⟨ ⟩, ⟨·│·⟩, {·│·} |
+| `\ceil` `\floor` `\abs` `\norm` | ⌈ ⌉, ⌊ ⌋, ⎢ ⎥, ‖ ‖ (no `\Vert` — it read like `\vert`'s sibling while doing something else) |
+| `\bra` `\ket` `\braket` `\set` | ⟨·│, │·⟩, ⟨·│·⟩, {·│·} — a lone ⟨ ⟩ pair is `\lr<>` (`\langle` is an `\lr` token only, like `\lceil`) |
 | `\mid` | inside a pair: add a `│` segment; elsewhere: the ∣ atom |
 
 ## Operators and functions
@@ -91,7 +91,7 @@ is still τ — a test enforces this).
 | `\sum` `\int` `\prod` … | big-operator atoms (`↑`/`↓` promote to the band with limits) |
 | `\lim` `\max` `\det` `\argmax` `\limsup` … | `┈band┈` operators, cursor enters the lower limit |
 | `\op` | name box: type a name, confirm → upright run / function |
-| `\op*` (`\limits`, `\operatorname*`) | same, but becomes a `┈band┈`; spaces separate pieces (`ess sup`) |
+| `\op*` (`\limits`, `\operatorname*`) | same, but becomes a `┈band┈` and enters the lower limit. Space commits (a band name is one piece) |
 
 ## Text, spaces, accents, symbols
 
@@ -102,4 +102,4 @@ is still τ — a test enforces this).
 | `\^z` `\_10` `\^gamma` | insert an explicit script node |
 | `\hat` `\vec` `\bar` `\dot` `\tilde` … | accent the previous character (repeat to stack); with a selection, the wide form (`┈┈˰┈┈`) |
 | `\alpha` `\infty` `\to` `\in` `\bbR` … | ~450 symbol spellings plus styled alphabets, ASCII forms included (`\->`, `\+-`, `\oo`) |
-| `\!name` / `\name!` | the slashed negation (`\!in` → ∉, `\subset!` → ⊄); bare `\!` toggles the symbol left of the cursor |
+| `\!name` / `\name!` | the slashed negation (`\!in` → ∉, `\subset!` → ⊄); bare `\!` (= `\negate`) toggles the symbol left of the cursor |

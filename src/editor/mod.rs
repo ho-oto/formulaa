@@ -9,7 +9,11 @@ pub use crate::symbols::{GRID_ENVS, GridWrap};
 /// A cursor position: path into nested rows plus a column.
 pub type CursorPos = (Vec<(usize, Field)>, usize);
 /// A block-select target: (parent row path, node index).
-pub type BlockRef = (Vec<(usize, Field)>, usize);
+/// One ^B target: the row that holds it (as a cursor path) and the
+/// node range it covers. Ancestor nodes are one-node ranges; the last
+/// target is the whole top-level row, so walking outward ends on
+/// "select everything".
+pub type BlockRef = (Vec<(usize, Field)>, std::ops::Range<usize>);
 use crate::symbols::{Accent, ColDelim, Delim, is_bigop, is_func_name, symbol_by_name};
 
 mod command;
@@ -32,6 +36,12 @@ pub struct Editor {
     /// Some((kind, content)) while an in-place name box (\op \op* \rm
     /// \text \tex) is open.
     pub op_entry: Option<(BoxKind, String)>,
+    /// The spelling currently being executed (set around `apply`), so
+    /// an error can answer in the alias the user actually typed.
+    pub(crate) executing: Option<String>,
+    /// The spelling that opened the current box (`\op*` vs `\limits`),
+    /// kept until commit for the same reason.
+    pub(crate) op_cmd: Option<String>,
     /// Caret inside the open box, as a char index into its content
     /// (←/→ move it; stepping past either edge commits the box).
     pub op_cursor: usize,
@@ -408,6 +418,12 @@ pub fn grid_env_name(left: Delim, right: Delim, cols: usize) -> Option<&'static 
 /// dimensions.
 fn grid_command(cmd: &str) -> Option<(GridWrap, usize, usize)> {
     for (name, &delims) in GRID_ENVS.entries() {
+        // `smallmatrix` is a LaTeX reading, not a command: its AA is
+        // identical to `matrix`, so the name could not survive the
+        // roundtrip anyway.
+        if *name == "smallmatrix" {
+            continue;
+        }
         let Some(rest) = cmd.strip_prefix(name) else {
             continue;
         };
@@ -453,6 +469,8 @@ impl Editor {
             col: 0,
             minibuffer: None,
             op_entry: None,
+            executing: None,
+            op_cmd: None,
             op_cursor: 0,
             op_escape: false,
             grid: None,
@@ -946,8 +964,10 @@ impl Editor {
     /// `\!`: toggle the symbol atom left of the cursor with its
     /// slashed negation (= → ≠ → = …) when the tables have one.
     pub fn negate_prev(&mut self) {
+        // Same shape as the accent whiffs: say what is missing, not
+        // which spelling was typed.
         let Some(col) = self.col.checked_sub(1) else {
-            self.error("\\! toggles the negation of the symbol left of the cursor");
+            self.error("negation needs a symbol before the cursor");
             return;
         };
         match self.cur_row()[col] {
@@ -957,7 +977,7 @@ impl Editor {
                     None => self.error(format!("{} has no slashed negation", c)),
                 }
             }
-            _ => self.error("\\! toggles the negation of the symbol left of the cursor"),
+            _ => self.error("negation needs a symbol before the cursor"),
         }
     }
 
@@ -1217,7 +1237,7 @@ impl Editor {
     /// mismatched-pair scan inside any delimiter would misread it.
     pub fn close_paren(&mut self) {
         if !self.close_delim(Delim::Col(ColDelim::Paren)) {
-            self.info("not inside a ( ) inset (( inserts one)");
+            self.info("not inside a ( ) pair (( inserts one)");
         }
     }
 
@@ -1231,14 +1251,14 @@ impl Editor {
             self.col = i + 1;
             self.select_anchor = None;
         } else {
-            self.info("not inside a [ ] block ([ inserts one; \\matrix for grids)");
+            self.info("not inside a [ ] pair ([ inserts one)");
         }
     }
 
     /// `}` leaves the innermost { … } block.
     pub fn close_brace(&mut self) {
         if !self.close_delim(Delim::Col(ColDelim::Brace)) {
-            self.info("not inside a { } block ({ inserts one)");
+            self.info("not inside a { } pair ({ inserts one)");
         }
     }
 
@@ -1306,7 +1326,7 @@ impl Editor {
         op: impl FnOnce(usize, usize, &mut Vec<Row>, usize) -> Option<(usize, usize, usize)>,
     ) {
         let Some((k, i, c)) = self.enclosing_array() else {
-            self.info("not inside a matrix/array");
+            self.info("not inside a grid");
             return;
         };
         let parent_path = self.path[..k].to_vec();
@@ -1491,7 +1511,6 @@ impl Editor {
     /// Copy the selected cell rectangle (or lane) into the clipboard.
     pub fn grid_copy_cells(&mut self) {
         let Some((r0, j0, r1, j1)) = self.grid_rect() else {
-            self.info("nothing to copy here (a gap has no cells)");
             return;
         };
         let Some((k, i, rows, cols, _)) = self.grid_info() else {
@@ -1513,7 +1532,6 @@ impl Editor {
             cols: cw,
             cells: out,
         };
-        self.info(format!("copied {}×{} cell(s)", ch, cw));
     }
 
     /// Cut = copy + clear.
@@ -1715,30 +1733,23 @@ impl Editor {
 
     /// Copy the selection into the editor clipboard (kept on selection).
     pub fn copy_selection(&mut self) {
-        match self.selection() {
-            Some((lo, hi)) => {
-                self.clip = Clip::Nodes(self.cur_row()[lo..hi].to_vec());
-                self.info(format!("copied {} node(s)", hi - lo));
-            }
-            None => self.info("nothing selected (⇧←/→ or ⇧↑)"),
+        // Silent either way: the chords are muscle memory, and a
+        // message would just repaint the help line (adr §78).
+        if let Some((lo, hi)) = self.selection() {
+            self.clip = Clip::Nodes(self.cur_row()[lo..hi].to_vec());
         }
     }
 
     /// Cut the selection into the editor clipboard.
     pub fn cut_selection(&mut self) {
-        match self.take_selection() {
-            Some(content) => {
-                self.info(format!("cut {} node(s)", content.len()));
-                self.clip = Clip::Nodes(content);
-            }
-            None => self.info("nothing selected (⇧←/→ or ⇧↑)"),
+        if let Some(content) = self.take_selection() {
+            self.clip = Clip::Nodes(content);
         }
     }
 
     /// Paste the editor clipboard at the cursor.
     pub fn paste(&mut self) {
         if self.clip.is_empty() {
-            self.info("clipboard is empty (^C copies, ^X cuts)");
             return;
         }
         self.select_anchor = None;
@@ -1875,7 +1886,7 @@ mod tests {
         let mut ed = Editor::new();
         ed.execute("lr");
         assert!(ed.root.is_empty());
-        assert!(ed.message.contains("usage"), "{:?}", ed.message);
+        assert!(ed.message.contains("takes delimiters"), "{:?}", ed.message);
         // A `lr…` name that is not a spec still falls through to the
         // symbol table rather than being read as one.
         assert_eq!(lr_spec("lrfoo"), None);

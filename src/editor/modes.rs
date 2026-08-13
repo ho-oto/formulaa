@@ -259,10 +259,25 @@ impl Editor {
     /// The cursor's enclosing structure nodes, innermost first: one
     /// (parent row path, node index) per ancestor.
     pub fn block_targets(&self) -> Vec<BlockRef> {
-        (0..self.path.len())
+        let mut targets: Vec<BlockRef> = (0..self.path.len())
             .rev()
-            .map(|k| (self.path[..k].to_vec(), self.path[k].0))
-            .collect()
+            .map(|k| {
+                let i = self.path[k].0;
+                (self.path[..k].to_vec(), i..i + 1)
+            })
+            .collect();
+        // The outermost step is the whole formula — walking ↑ always
+        // ends on "select everything", and ^B at the top level starts
+        // there. Skipped when the outermost ancestor already IS the
+        // whole row (a single root node), which would paint the same
+        // box twice.
+        let all = 0..self.root.len();
+        if !self.root.is_empty()
+            && targets.last().map(|(p, r)| (p.as_slice(), r)) != Some((&[], &all))
+        {
+            targets.push((Vec::new(), all));
+        }
+        targets
     }
 
     pub fn start_block_select(&mut self) {
@@ -273,12 +288,12 @@ impl Editor {
         }
         let targets = self.block_targets();
         if targets.is_empty() {
-            self.info("no enclosing block (cursor is at the top level)");
+            // An empty formula has nothing to select; the help line
+            // explains the mode, so silence is enough here.
             return;
         }
         self.block_sel = 0;
         self.block = Some(targets);
-        self.info("block: ↑/→ wider  ↓/← narrower  Enter select  ^B/Esc cancel");
     }
 
     /// The ancestor ranks ^B paints: the highlighted one and its
@@ -315,12 +330,12 @@ impl Editor {
     pub fn block_commit(&mut self) {
         let sel = self.block_sel;
         if let Some(targets) = self.block.take()
-            && let Some((p, i)) = targets.get(sel)
+            && let Some((p, r)) = targets.get(sel)
         {
             self.path = p.clone();
-            self.select_anchor = Some(*i);
+            self.select_anchor = Some(r.start);
             self.select_path = p.clone();
-            self.col = i + 1;
+            self.col = r.end;
             self.select_whole = true;
         }
         self.clear_message();
@@ -346,29 +361,30 @@ impl Editor {
             targets
                 .iter()
                 .enumerate()
-                .map(|(rank, (p, i))| {
+                .map(|(rank, (p, r))| {
                     // An Array fused into its delimiter has no isolated
                     // layout of its own: measure the parent Delim slice
                     // instead (the fused interior spans its full height).
-                    let (p, i) = if self.fused_in_delim(p, *i) {
-                        (&p[..p.len() - 1], p.last().unwrap().0)
+                    let (p, r) = if r.len() == 1 && self.fused_in_delim(p, r.start) {
+                        let i = p.last().unwrap().0;
+                        (&p[..p.len() - 1], i..i + 1)
                     } else {
-                        (&p[..], *i)
+                        (&p[..], r.clone())
                     };
                     // If the cursor is inside this block, lay the slice
                     // out in its editing view (matches the display).
                     let cur = (self.path.len() > p.len()
                         && self.path[..p.len()] == p[..]
-                        && self.path[p.len()].0 == i)
-                        .then(|| {
-                            let mut rel = self.path[p.len()..].to_vec();
-                            rel[0].0 = 0;
-                            (rel, self.col)
-                        });
+                        && r.contains(&self.path[p.len()].0))
+                    .then(|| {
+                        let mut rel = self.path[p.len()..].to_vec();
+                        rel[0].0 -= r.start;
+                        (rel, self.col)
+                    });
                     // Ranked by ancestry (innermost first); the display
                     // indexes this list by rank, so every target keeps an
                     // entry whether or not it is painted.
-                    extent(&row_at(&self.root, p)[i..i + 1], cur, rank)
+                    extent(&row_at(&self.root, p)[r], cur, rank)
                 })
                 .collect()
         } else if let Some(gs) = self.grid
@@ -453,16 +469,16 @@ impl Editor {
         // marker right after it, so the display can paint its extent.
         // Targets are innermost first = deepest first: inserting into
         // a deep row never shifts a shallower target's position.
-        for (idx, (p, i)) in targets.iter().enumerate() {
+        for (idx, (p, r)) in targets.iter().enumerate() {
             if !shown.contains(&idx) {
                 continue;
             }
             let mark = Mark::BlockOpen { rank: idx }.ch();
             let row = row_at_mut(&mut root, p);
-            row.insert(i + 1, Node::Sym(Mark::BlockClose.ch()));
-            row.insert(*i, Node::Sym(mark));
-            bump(&mut path, &mut col, p, i + 1);
-            bump(&mut path, &mut col, p, *i);
+            row.insert(r.end, Node::Sym(Mark::BlockClose.ch()));
+            row.insert(r.start, Node::Sym(mark));
+            bump(&mut path, &mut col, p, r.end);
+            bump(&mut path, &mut col, p, r.start);
         }
         (root, Some((path, col)))
     }
@@ -633,7 +649,7 @@ impl Editor {
             self.grid = Some(GridSel::Cells { anchor: None });
             self.select_anchor = None;
         } else {
-            self.info("^T works inside a matrix/array");
+            self.info("not inside a grid");
         }
     }
 
@@ -840,7 +856,6 @@ impl Editor {
         // take, so it would otherwise survive onto a different tree.
         self.unwrap_armed = None;
         let Some((root, path, col)) = self.undo.pop() else {
-            self.info("nothing to undo");
             return;
         };
         self.select_anchor = None;
@@ -861,7 +876,6 @@ impl Editor {
         // take, so it would otherwise survive onto a different tree.
         self.unwrap_armed = None;
         let Some((root, path, col)) = self.redo.pop() else {
-            self.info("nothing to redo");
             return;
         };
         self.select_anchor = None;

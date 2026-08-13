@@ -136,7 +136,8 @@ const STRUCTURAL: &[&str] = &[
     "ceil",
     "floor",
     "abs",
-    "langle",
+    "bra",
+    "ket",
     "braket",
     "set",
     "mid",
@@ -148,14 +149,13 @@ const STRUCTURAL: &[&str] = &[
     "op*",
     "rm",
     "text",
-    "tex",
     // The negation toggle, and the alternative spellings `resolve`
     // accepts as extra patterns on an arm. A spelling that resolves
     // but is missing here is worse than one nobody can complete: the
     // popup offers a *different* command under it, and Enter takes
     // that one.
     "!",
-    "Vert",
+    "negate",
     "operatorname",
     "operatorname*",
     "limits",
@@ -529,6 +529,10 @@ fn grid_hints(query: &str) -> Vec<(u32, Item)> {
     // the family apart.
     symbols::GRID_ENVS
         .keys()
+        // `smallmatrix` reads from LaTeX but is not a command: the AA
+        // draws it exactly like `matrix`, so the smallness would be
+        // silently lost on the roundtrip — a spelling that lies.
+        .filter(|env| **env != "smallmatrix")
         .filter_map(|env| {
             // A name with half its size typed keeps its row up: the
             // rows digit is chosen, the columns one still owed, and
@@ -704,7 +708,9 @@ mod tests {
     fn completing_a_command_keeps_its_meaning() {
         for cmd in [
             "!",
-            "Vert",
+            "negate",
+            "bra",
+            "ket",
             "operatorname",
             "operatorname*",
             "limits",

@@ -170,7 +170,7 @@ fn tex_box_reads_latex_in_place() {
     // \tex opens a box; typing (or pasting) LaTeX and committing
     // splices the parsed nodes at the cursor.
     let mut ed = Editor::new();
-    ed.execute("tex");
+    ed.execute("latex");
     assert!(ed.op_entry.is_some());
     for c in r"\frac{1}{2}+\alpha".chars() {
         ed.op_type(c);
@@ -192,7 +192,7 @@ fn tex_box_reads_latex_in_place() {
     // Keys reach the box through the shared keymap too: space is
     // content, Enter commits.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\ t e x Space");
+    type_script(&mut ed, r"\ l a t e x Space");
     assert!(ed.op_entry.is_some(), "{:?}", ed.op_entry);
     for c in r"x ^ 2".chars() {
         ed.input(Key::Char(c), false, false);
@@ -230,7 +230,7 @@ fn minibuffer_previews_the_commit() {
     // …a name box previews the slot it opens, since that is what
     // committing gives you…
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\ t e x");
+    type_script(&mut ed, r"\ l a t e x");
     assert_eq!(
         ed.command_preview_row(),
         Some(vec![formulaa::ast::Node::Sym('⬚')])
@@ -279,7 +279,7 @@ fn ctrl_e_jumps_to_the_end_outside_grids() {
     assert_eq!((ed.path.len(), ed.col), (0, 3), "formula end");
     // ^E is the end jump even inside a grid cell (grid mode is ^O).
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix22 x C-t");
+    type_script(&mut ed, r"\bmatrix22 x C-g");
     assert!(ed.grid.is_some());
 }
 
@@ -384,7 +384,7 @@ fn aliases_resolve_to_the_same_command() {
     let command_aliases = [
         ("sqrt3", "cbrt"),
         ("sqrt4", "qdrt"),
-        ("Vert", "norm"),
+        ("negate", "!"),
         ("xrightarrow", "xto"),
         ("xleftarrow", "xfrom"),
         ("xRightarrow", "xTo"),
@@ -486,14 +486,14 @@ fn grid_edit_mode() {
     let mut ed = Editor::new();
     type_script(
         &mut ed,
-        r"\bmatrix22 a C-t Right Enter b C-t Down Left Enter c C-t Right Enter d",
+        r"\bmatrix22 a C-g Right Enter b C-g Down Left Enter c C-g Right Enter d",
     );
     assert_eq!(
         latex(&ed),
         "\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}"
     );
     // Row lanes: r selects the cursor's row (purple), ⌫ deletes it.
-    type_script(&mut ed, "C-t r Backspace");
+    type_script(&mut ed, "C-g r Backspace");
     assert_eq!(latex(&ed), "\\begin{bmatrix} a & b \\end{bmatrix}");
     // Column lanes from row mode: c switches axis; ⌫ deletes the
     // column; a 1x1 grid inside brackets normalizes to plain content.
@@ -503,14 +503,14 @@ fn grid_edit_mode() {
     // (green), Enter inserts a column there and lands on it; a
     // cross-axis arrow drops back to cell selection of that lane.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix22 x C-t | Left Enter Up Enter y");
+    type_script(&mut ed, r"\bmatrix22 x C-g | Left Enter Up Enter y");
     assert_eq!(
         latex(&ed),
         "\\begin{bmatrix}  & x &  \\\\ y &  &  \\end{bmatrix}"
     );
     // Undo works inside grid mode (row deletion is one step).
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix22 a Down b C-t r Backspace C-z");
+    type_script(&mut ed, r"\bmatrix22 a Down b C-g r Backspace C-z");
     assert!(
         latex(&ed).contains("\\\\"),
         "undo restored the row: {}",
@@ -518,7 +518,7 @@ fn grid_edit_mode() {
     );
     // ^O outside a grid only reports.
     let mut ed = Editor::new();
-    type_script(&mut ed, "x C-t d");
+    type_script(&mut ed, "x C-g d");
     assert_eq!(latex(&ed), "xd");
 }
 
@@ -526,12 +526,12 @@ fn grid_edit_mode() {
 fn grid_selection_promotes_and_clears() {
     // Backspace on a full-column CELL selection clears the contents…
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix22 a Down b C-t S-Up Backspace");
+    type_script(&mut ed, r"\bmatrix22 a Down b C-g S-Up Backspace");
     assert_eq!(latex(&ed), "\\begin{bmatrix}  &  \\\\  &  \\end{bmatrix}");
     // …while pushing the selection past the edge promotes it to the
     // column itself, where Backspace deletes the column.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix22 a Down b C-t S-Up S-Up");
+    type_script(&mut ed, r"\bmatrix22 a Down b C-g S-Up S-Up");
     assert!(
         matches!(
             ed.grid,
@@ -551,7 +551,7 @@ fn grid_selection_promotes_and_clears() {
 #[test]
 fn esc_exits_grid_mode_from_lane_mode() {
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix22 x C-t c Esc");
+    type_script(&mut ed, r"\bmatrix22 x C-g c Esc");
     assert!(ed.grid.is_none(), "{:?}", ed.grid);
 }
 
@@ -567,7 +567,7 @@ fn grid_state_survives_undo_redo_and_clicks() {
     // Undo shrinks the grid under a lane cursor parked past the end:
     // used to drain past the cells vec / index out of bounds.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix22 a C-t | Right Right Right Enter C-z");
+    type_script(&mut ed, r"\bmatrix22 a C-g | Right Right Right Enter C-z");
     redraw(&ed);
     type_script(&mut ed, "Backspace");
     redraw(&ed);
@@ -577,7 +577,7 @@ fn grid_state_survives_undo_redo_and_clicks() {
     let mut ed = Editor::new();
     type_script(
         &mut ed,
-        r"\bmatrix22 a C-t S-Down C-c Down Right C-v Down Down Right S-Up C-z",
+        r"\bmatrix22 a C-g S-Down C-c Down Right C-v Down Down Right S-Up C-z",
     );
     redraw(&ed);
     type_script(&mut ed, "C-c C-v Backspace");
@@ -588,7 +588,7 @@ fn grid_state_survives_undo_redo_and_clicks() {
     type_script(&mut ed, r"\bmatrix22 a Tab Tab + x");
     type_script(&mut ed, "C-a"); // back to formula start…
     // …enter the matrix and grid mode with an anchor:
-    type_script(&mut ed, r"Right C-t S-Down");
+    type_script(&mut ed, r"Right C-g S-Down");
     ed.click(1000, 1000); // far away: lands at the formula edge
     redraw(&ed);
     type_script(&mut ed, "C-c C-v");
@@ -598,10 +598,9 @@ fn grid_state_survives_undo_redo_and_clicks() {
 #[test]
 fn lane_selection_copies_its_cells() {
     // ^C on a purple lane copies the lane's cells (it used to be a
-    // silent no-op).
+    // no-op). The chords are silent, so the paste is the proof.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix22 a Down b C-t S-Up S-Up C-c");
-    assert!(ed.message.contains("copied"), "{}", ed.message);
+    type_script(&mut ed, r"\bmatrix22 a Down b C-g S-Up S-Up C-c");
     type_script(&mut ed, "Esc Tab Tab C-v");
     assert!(
         latex(&ed).ends_with("\\begin{matrix} a \\\\ b \\end{matrix}"),
@@ -615,7 +614,7 @@ fn cell_clip_pastes_over_cells_even_outside_grid_mode() {
     // With the cursor in a grid cell but ^O off, a cell clipboard
     // still pastes as an overwrite — never a nested matrix.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix22 a Down b C-t S-Up C-c Esc Right C-v");
+    type_script(&mut ed, r"\bmatrix22 a Down b C-g S-Up C-c Esc Right C-v");
     assert_eq!(
         latex(&ed),
         "\\begin{bmatrix} a & a \\\\ b & b \\end{bmatrix}"
@@ -635,7 +634,7 @@ fn grid_cells_copy_paste() {
     // Copy a 2x1 block, paste at the far corner: overwrite semantics,
     // and the grid grows to fit the overhang.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\bmatrix22 a Down b C-t S-Up C-c Down Right C-v");
+    type_script(&mut ed, r"\bmatrix22 a Down b C-g S-Up C-c Down Right C-v");
     assert_eq!(
         latex(&ed),
         "\\begin{bmatrix} a &  \\\\ b & a \\\\  & b \\end{bmatrix}"
@@ -700,11 +699,21 @@ fn undo_redo() {
 
 #[test]
 fn op_box_via_keys() {
-    // \op* opens the in-place name box; Space separates band pieces,
-    // Enter commits into the lower limit.
+    // \op* opens the in-place name box; the band name is one piece,
+    // so Space commits (it used to pose as a piece separator and then
+    // silently vanish from the name). Enter commits into the lower
+    // limit.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\op* ess Space sup Enter n Tab");
+    type_script(&mut ed, r"\op* esssup Enter n Tab");
     assert_eq!(latex(&ed), "\\operatorname*{esssup}_{n}");
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\op* ess Space");
+    // (The empty-limit band normalizes to the bare name, hence no *.)
+    assert_eq!(
+        latex(&ed),
+        "\\operatorname{ess}",
+        "Space did not commit the \\op* box"
+    );
     // Arrow keys (anything not part of the name) commit the box too.
     let mut ed = Editor::new();
     type_script(&mut ed, r"\op vol Right +1");
@@ -1569,11 +1578,13 @@ fn tab_completion_follows_the_query() {
 /// A query nothing matches leaves the popup closed and says so,
 /// rather than opening an empty box.
 #[test]
-fn tab_completion_with_no_matches_says_so() {
+fn tab_completion_with_no_matches_stays_quiet() {
+    // No matches: the popup simply does not open — that already says
+    // everything, so there is no notice to read or to clear.
     let mut ed = Editor::new();
     type_script(&mut ed, r"\ q q z z Tab");
     assert!(ed.completion.is_none());
-    assert!(!ed.message.is_empty(), "no message");
+    assert!(ed.message.is_empty(), "{:?}", ed.message);
     // The minibuffer is untouched, so the typing can be fixed.
     assert_eq!(ed.minibuffer.as_deref(), Some("qqzz"));
 }
@@ -1736,14 +1747,7 @@ fn the_popup_tracks_the_query_and_both_commit_keys_take_it() {
     // An empty list commits the typed text rather than nothing.
     let mut ed = Editor::new();
     type_script(&mut ed, r"\ a l Down q q z Enter");
-    assert!(ed.message.contains("unknown command"), "{:?}", ed.message);
-
-    // …and the "no completion" notice does not outlive its keystroke.
-    let mut ed = Editor::new();
-    type_script(&mut ed, r"\ q q z z Tab");
-    assert!(!ed.message.is_empty(), "no notice");
-    type_script(&mut ed, "Backspace");
-    assert!(ed.message.is_empty(), "stale notice: {:?}", ed.message);
+    assert!(ed.message.contains("is not a command"), "{:?}", ed.message);
 }
 
 /// Tab finishes, the arrows browse. A name that is already a command
@@ -1763,14 +1767,12 @@ fn tab_finishes_and_the_arrows_browse() {
     type_script(&mut ed, r"\ a l Tab");
     assert_eq!(latex(&ed), "\\alpha ");
 
-    // \alp… is not: Tab asks for the list instead of running anything.
+    // \xyzz is not: Tab runs nothing (and with no matches at all,
+    // shows nothing either — the closed popup is the answer).
     let mut ed = Editor::new();
     type_script(&mut ed, r"\ x y z z Tab");
     assert_eq!(latex(&ed), "", "Tab executed a non-command");
-    assert!(
-        ed.completion.is_some() || !ed.message.is_empty(),
-        "Tab neither listed nor explained"
-    );
+    assert!(ed.minibuffer.is_some(), "the typing was lost");
 
     // An arrow opens the list on the first press without skipping its
     // first row, and Tab then takes whatever is highlighted.
@@ -1895,7 +1897,7 @@ fn delimiter_names_are_spec_tokens() {
         let mut ed = Editor::new();
         ed.execute(cmd);
         assert!(
-            ed.message.contains("unknown"),
+            ed.message.contains("is not a command"),
             "\\{}: {:?}",
             cmd,
             ed.message
@@ -2033,7 +2035,7 @@ fn grid_mode_exits_on_backslash_and_enter_keeps_the_cell() {
     // `\` leaves the mode like it leaves ^F/^B (consumed, no
     // minibuffer yet — the next `\` opens it).
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\pmatrix22 ab C-t");
+    type_script(&mut ed, r"\pmatrix22 ab C-g");
     assert!(ed.grid.is_some());
     type_script(&mut ed, r"\");
     assert!(ed.grid.is_none(), "backslash did not leave grid mode");
@@ -2045,7 +2047,7 @@ fn grid_mode_exits_on_backslash_and_enter_keeps_the_cell() {
     // Enter: out of the mode with the cell's contents selected —
     // `\norm` can wrap them immediately.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\pmatrix22 ab C-t Enter");
+    type_script(&mut ed, r"\pmatrix22 ab C-g Enter");
     assert!(ed.grid.is_none());
     assert_eq!(ed.selection(), Some((0, 2)), "the cell is not selected");
     type_script(&mut ed, r"\norm");
@@ -2053,7 +2055,7 @@ fn grid_mode_exits_on_backslash_and_enter_keeps_the_cell() {
 
     // A multi-cell rectangle has no linear reading: Enter just leaves.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\pmatrix22 ab C-t S-Right Enter");
+    type_script(&mut ed, r"\pmatrix22 ab C-g S-Right Enter");
     assert!(ed.grid.is_none());
     assert_eq!(ed.selection(), None);
 }
@@ -2089,4 +2091,32 @@ fn clicking_a_completion_row_accepts_it() {
     type_script(&mut ed, r"\ a l Down");
     ed.completion_click(99);
     assert!(ed.completion.is_some() && latex(&ed).is_empty());
+}
+
+/// ^B walks outward all the way to the whole formula: it works at the
+/// top level (no "no enclosing block" message needed), ↑ from any
+/// depth ends on everything, and a single root node does not get the
+/// same box twice.
+#[test]
+fn block_select_reaches_the_whole_formula() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, "x+y C-b");
+    assert!(ed.block.is_some());
+    type_script(&mut ed, "Enter");
+    assert_eq!(ed.selection(), Some((0, 3)));
+
+    let mut ed = Editor::new();
+    type_script(&mut ed, "x+ ( y C-b Up Up Up Enter");
+    assert_eq!(ed.selection(), Some((0, 3)));
+
+    // A single root node: the outermost ancestor already is the whole
+    // formula, so no duplicate target is added.
+    let mut ed = Editor::new();
+    type_script(&mut ed, "( x C-b");
+    assert_eq!(ed.block.as_ref().map(Vec::len), Some(1));
+
+    // An empty formula: silent no-op.
+    let mut ed = Editor::new();
+    type_script(&mut ed, "C-b");
+    assert!(ed.block.is_none() && ed.message.is_empty());
 }

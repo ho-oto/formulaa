@@ -12,6 +12,7 @@ impl Editor {
     pub fn op_start(&mut self, kind: BoxKind) {
         self.select_anchor = None;
         self.op_entry = Some((kind, String::new()));
+        self.op_cmd = self.executing.clone();
         self.op_cursor = 0;
     }
 
@@ -131,7 +132,10 @@ impl Editor {
                     // a named operator), so the picture has no way to
                     // spell this and the parser rejects it.
                     if name.chars().count() < 2 {
-                        self.error("\\op* needs a name of two or more characters");
+                        // Answer in the spelling that opened the box
+                        // (\op* / \limits / \operatorname*).
+                        let cmd = self.op_cmd.take().unwrap_or_else(|| "op*".into());
+                        self.error(format!("\\{cmd} needs a name of two or more characters"));
                         return;
                     }
                     self.insert_and_enter(Node::BigOp {
@@ -195,13 +199,27 @@ impl Editor {
             return;
         }
         match resolve(cmd) {
-            Some(edit) => self.apply(edit),
-            None if cmd.starts_with("delim") || cmd.starts_with("lr") => {
-                self.message =
-                    "usage: \\lr<left>[|s]<right> in visual order, e.g. \\lr(] \\lr{|} \\lr\\langle||\\rangle"
-                        .into();
+            Some(edit) => {
+                // Errors raised while applying (and later, when an
+                // opened box commits) answer in this spelling.
+                self.executing = Some(cmd.to_string());
+                self.apply(edit);
+                self.executing = None;
             }
-            None => self.error(format!("unknown command: \\{}", cmd)),
+            None if cmd.starts_with("delim") || cmd.starts_with("lr") => {
+                // The message answers in the spelling the user chose.
+                let p = if cmd.starts_with("delim") {
+                    "delim"
+                } else {
+                    "lr"
+                };
+                // Short on purpose: the completion is the manual for
+                // the token vocabulary.
+                self.message = format!(
+                    "\\{p} takes delimiters in visual order: opening, (middle vertical lines,) closing"
+                );
+            }
+            None => self.error(format!("\\{} is not a command", cmd)),
         }
     }
 
@@ -435,18 +453,17 @@ pub enum ModeCmd {
 /// spelling.
 pub const MODE_COMMANDS: &[(&[&str], ModeCmd, &str, &str)] = &[
     (&["f", "F", "free"], ModeCmd::Free, "^F", "free cursor"),
+    // No `\bs` — it reads as "backslash" as easily as "block
+    // select".
     (
-        &["b", "B", "bs", "blockselect"],
+        &["b", "B", "block", "blockselect"],
         ModeCmd::BlockSelect,
         "^B",
         "block select",
     ),
-    (
-        &["t", "T", "g", "G", "tableedit", "gridedit"],
-        ModeCmd::GridEdit,
-        "^T",
-        "grid edit",
-    ),
+    // `\t` would sit one letter from τ's `\ta`; the g family
+    // matches the chord.
+    (&["g", "G", "grid"], ModeCmd::GridEdit, "^G", "grid edit"),
     // Only the full word: \c beside ^C (the *internal* copy) would
     // read as the same thing, and it is not.
     (&["clipboard"], ModeCmd::CopyAa, "^Y", "AA to clipboard"),
@@ -485,7 +502,7 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
             num: vec![],
             den: vec![],
         }),
-        "norm" | "Vert" => wrap(Node::Norm { arg: vec![] }),
+        "norm" => wrap(Node::Norm { arg: vec![] }),
         "overbrace" | "underbrace" => wrap(Node::Brace {
             over: cmd == "overbrace",
             arg: vec![],
@@ -494,11 +511,14 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
         "ceil" => delim(Delim::Col(ColDelim::Ceil), Delim::Col(ColDelim::Ceil), 0),
         "floor" => delim(Delim::Col(ColDelim::Floor), Delim::Col(ColDelim::Floor), 0),
         "abs" => delim(Delim::Col(ColDelim::Bar), Delim::Col(ColDelim::Bar), 0),
-        "langle" => delim(Delim::Angle, Delim::Angle, 0),
+        // A lone angle pair is spelled \lr<> — `\langle` stays an
+        // \lr token only, like \lceil (one rule for every side name).
+        "bra" => delim(Delim::Angle, Delim::Col(ColDelim::Bar), 0),
+        "ket" => delim(Delim::Col(ColDelim::Bar), Delim::Angle, 0),
         "braket" => delim(Delim::Angle, Delim::Angle, 1),
         "set" => delim(Delim::Col(ColDelim::Brace), Delim::Col(ColDelim::Brace), 1),
         "mid" => Some(Edit::Mid),
-        "!" => Some(Edit::Negate),
+        "!" | "negate" => Some(Edit::Negate),
         "addrow" => Some(Edit::AddRow),
         "addcol" => Some(Edit::AddCol),
         "delrow" => Some(Edit::DelRow),
@@ -510,7 +530,7 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
         "op*" | "operatorname*" | "limits" => Some(Edit::OpenBox(BoxKind::OpStar)),
         "rm" => Some(Edit::OpenBox(BoxKind::Rm)),
         "text" => Some(Edit::OpenBox(BoxKind::Text)),
-        "tex" | "latex" => Some(Edit::OpenBox(BoxKind::Tex)),
+        "latex" => Some(Edit::OpenBox(BoxKind::Tex)),
         _ => {
             if let Some(index) = Radical::of_name(cmd) {
                 // The root signs (\sqrt \cbrt \qdrt) wrap a selection.
@@ -607,7 +627,8 @@ mod tests {
                 assert!(resolve(n).is_none(), "\\{} is also an edit", n);
             }
         }
-        assert!(mode_command("t").is_some() && resolve("ta").is_some());
-        assert!(mode_command("ta").is_none());
+        assert!(mode_command("t").is_none(), "\\t came back");
+        assert!(mode_command("b").is_some() && resolve("bar").is_some());
+        assert!(mode_command("ba").is_none());
     }
 }

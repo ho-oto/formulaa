@@ -15,59 +15,58 @@ use formulaa::render::{RenderCtx, render_root};
 
 use crate::theme;
 
-const HELP: &str = "^F free move  ^B block select  \\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ⇧←→/⇧↑ select  ^Z/^R undo/redo  ^Y copy AA  Esc/^Q quit";
-
-/// The same line with ^T leading, shown only where ^T would work
-/// (anywhere inside a matrix — the chord is noise everywhere else).
-const HELP_GRID: &str = "^T table/grid  ^F free move  ^B block select  \\cmd  ^/_ ( [ { // insets  Tab exit  ←→↑↓/click move  ⇧←→/⇧↑ select  ^Z/^R undo/redo  ^Y copy AA  Esc/^Q quit";
+const HELP: &str = "^F free move  ^B block select  ^ sup  _ sub  // frac  ( [ { pairs  \\ command  ^Y AA to system clipboard  Esc/^Q quit";
 
 /// Context-sensitive last line: generic keys normally, the relevant
 /// commands when the cursor is inside a grid cell or a delimiter.
-pub fn help_line(ed: &Editor) -> &'static str {
-    use formulaa::ast::Field;
-    if ed.minibuffer.is_some() {
-        return if ed.completion.is_some() {
-            "completion: ↑↓/Tab pick  Enter insert  Esc close the list  (keep typing to narrow)"
-        } else {
-            "command: type at the cursor  Tab complete  Enter/Space execute  Esc cancel"
-        };
-    }
+pub fn help_line(ed: &Editor) -> String {
+    // The minibuffer and its completion explain themselves; only the
+    // boxes announce *which* box is open (their contents all look like
+    // a green [bracketed] run).
     if let Some((kind, _)) = &ed.op_entry {
-        return if *kind == formulaa::editor::BoxKind::Tex {
-            "latex: type or paste math (no $ needed)  Enter/Tab commit  Esc cancel"
-        } else {
-            "op name: letters/digits + Space (word pieces)  Enter/Tab commit  Esc cancel"
-        };
+        use formulaa::editor::BoxKind;
+        return match kind {
+            BoxKind::Tex => "latex box (insert or paste a LaTeX snippet)",
+            BoxKind::Text => "text box",
+            BoxKind::Rm => "rm box (upright run)",
+            BoxKind::Op => "op box (operator name)",
+            BoxKind::OpStar => "op* box (operator name, takes limits)",
+        }
+        .into();
     }
     if ed.free.is_some() {
-        return "free move: ←→↑↓ cells  Enter snap  Esc cancel";
+        return "free move: ←→↑↓ cells  Enter snap  Esc cancel".into();
     }
     if ed.block.is_some() {
-        return "block: ↑/→ wider  ↓/← narrower  Enter select  ⇧←→ select + extend  ^B/Esc cancel";
+        return "block: ↑/→ wider  ↓/← narrower  Enter select  ⇧←→ select + extend  ^B/Esc cancel"
+            .into();
     }
     if let Some(gs) = ed.grid {
         return match gs {
+            // Only the state's name and the transitions nobody
+            // guesses: arrows, ⌫ and Enter explain themselves.
             formulaa::editor::GridSel::Cells { .. } => {
-                "grid: ←→↑↓ cells  ⇧ select (past the edge = lane)  c/| columns  r/- rows  ^C/^X/^V cells  ⌫ clear  Enter edit  Esc/^T exit"
+                "grid cell select: c/| column select  r/- row select"
             }
             formulaa::editor::GridSel::Lanes { cols: true, .. } => {
-                "columns: ←→ gap/column  Enter on gap = insert here  ⌫ delete column  ⇧←→ extend  ↑↓ cells  c/| cells  Esc exit"
+                "grid column select: ↑↓ back to cell select"
             }
             formulaa::editor::GridSel::Lanes { cols: false, .. } => {
-                "rows: ↑↓ gap/row  Enter on gap = insert here  ⌫ delete row  ⇧↑↓ extend  ←→ cells  r/- cells  Esc exit"
+                "grid row select: ←→ back to cell select"
             }
-        };
-    }
-    match ed.path.last() {
-        Some((_, Field::Cell(_))) => {
-            "grid: ^T edit mode (move cells, add/delete rows & cols)  ] exit  (then ^/_ etc. as usual)"
         }
-        Some((_, Field::Seg(_))) => {
-            "delim: \\mid adds a │ segment  ) ] } close  \\lr<spec> visual pairs (\\lr(] \\lr{|}, . = none)"
-        }
-        _ if ed.in_grid() => HELP_GRID,
-        _ => HELP,
+        .into();
     }
+    // The base line, with the context-relevant command prepended: the
+    // full mode manuals above replace it, but ordinary editing keeps
+    // one line and just learns the one extra thing this position
+    // offers.
+    let mut line = String::new();
+    if ed.in_grid() {
+        line.push_str("^G grid edit  ");
+    }
+    line.push_str(HELP);
+    line
 }
 
 #[derive(Default)]
@@ -659,18 +658,16 @@ fn overlay_minibuffer(
     // like the minibuffer: content cells at the cursor, caret at the
     // box's own cursor. Drawing it as cells (not AST nodes) keeps the
     // run free of the reparse-quoting rules — no stray '…' quotes.
-    if let Some((kind, buf)) = &ed.op_entry {
+    if let Some((_, buf)) = &ed.op_entry {
         let (cy, cx) = d.caret?;
         if cy >= d.height() {
             return None;
         }
         let content: Vec<char> = if buf.is_empty() {
             vec!['⬚']
-        } else if *kind == formulaa::editor::BoxKind::OpStar {
-            // Only \op* gives a space meaning (piece separator), so
-            // only there it draws as ␣ — matching the committed band.
-            buf.replace(' ', "␣").chars().collect()
         } else {
+            // No box holds meaningful spaces except \text/\latex,
+            // which show them as-is.
             buf.chars().collect()
         };
         // The box shows as [content]: bracket fenders drawn as green
@@ -1130,7 +1127,7 @@ mod tests {
         for c in "\\bmatrix22 a".chars() {
             ed.input(Key::Char(c), false, false);
         }
-        ed.input(Key::Char('t'), false, true); // ^T grid
+        ed.input(Key::Char('g'), false, true); // ^G grid
         // Cell cursor: the current (top-left) cell is painted.
         let d = bg_of(&ed);
         let painted =
@@ -1236,7 +1233,7 @@ mod tests {
         for c in r"\bmatrix22 a".chars() {
             ed.input(Key::Char(c), false, false);
         }
-        ed.input(Key::Char('t'), false, true);
+        ed.input(Key::Char('g'), false, true);
         ed.input(Key::Char('r'), false, false);
         ed.input(Key::Down, false, false); // the gap between the rows
         let (root, cursor) = ed.decorated();
@@ -1260,7 +1257,7 @@ mod tests {
         for c in r"\pmatrix22 a".chars() {
             ed.input(Key::Char(c), false, false);
         }
-        ed.input(Key::Char('t'), false, true); // ^T grid
+        ed.input(Key::Char('g'), false, true); // ^G grid
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
@@ -1319,7 +1316,7 @@ mod tests {
         }];
         ed.path = vec![(0, Field::Seg(0)), (0, Field::Cell(0))];
         ed.col = 0;
-        ed.input(Key::Char('t'), false, true); // ^T grid
+        ed.input(Key::Char('g'), false, true); // ^G grid
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
@@ -1362,11 +1359,11 @@ mod tests {
         for c in r"\pmatrix22 x".chars() {
             ed.input(Key::Char(c), false, false);
         }
-        ed.input(Key::Char('t'), false, true); // grid mode on the INNER grid
+        ed.input(Key::Char('g'), false, true); // grid mode on the INNER grid
         ed.input(Key::Esc, false, false);
         ed.input(Key::Tab, false, false); // out of inner seg…
         ed.input(Key::Tab, false, false); // …back into the outer cell
-        ed.input(Key::Char('t'), false, true); // grid mode on the OUTER grid
+        ed.input(Key::Char('g'), false, true); // grid mode on the OUTER grid
         let (root, cursor) = ed.decorated();
         let cursor_ref = cursor.as_ref().map(|(p, c)| (p.as_slice(), *c));
         let block = render_root(&root, cursor_ref, &RenderCtx { italic: true });
@@ -1401,7 +1398,7 @@ mod tests {
         for c in r"\bmatrix22 x".chars() {
             ed.input(Key::Char(c), false, false);
         }
-        ed.input(Key::Char('t'), false, true);
+        ed.input(Key::Char('g'), false, true);
         ed.input(Key::Char('|'), false, false);
         ed.input(Key::Left, false, false); // gap 0: ghost left of column 0
         let (root, cursor) = ed.decorated();

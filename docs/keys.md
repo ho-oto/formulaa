@@ -38,8 +38,8 @@ and the mode spellings for stolen ctrl chords) are in
 | --- | --- |
 | `Shift+←` `Shift+→` | grow / shrink the selection |
 | `Shift+↑` | select the parent block |
-| `Ctrl+B` | block-select mode: walk the ancestor chain with the arrows, `Enter` selects |
-| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | copy / cut / paste (editor clipboard) |
+| `Ctrl+B` | block-select mode: walk the ancestor chain with the arrows — outward it ends on the whole formula — `Enter` selects |
+| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | copy / cut / paste (the internal buffer — the system clipboard is `Ctrl+Y`) |
 | structure keys, with a selection | containers (`(`, `\frac`, `\sqrt`, `\norm`, `\abs`, `\lr…`) wrap it; content inserts (symbols, functions, matrices) replace it |
 
 ## Deleting
@@ -69,7 +69,7 @@ press.
 Move anywhere on the grid with the arrows; the nearest edit position is
 shown as a snap target. `Enter` lands there; `Esc` cancels.
 
-## Grid edit (`Ctrl+T`, inside a matrix)
+## Grid edit (`Ctrl+G`, inside a matrix)
 
 The edited matrix's frame turns green.
 
@@ -81,4 +81,4 @@ The edited matrix's frame turns green.
 | `Backspace` / `Delete` | clear the selected cells |
 | `c` / `\|`, `r` / `-` | column / row lane mode: walk gaps and lanes, `Enter` on a gap inserts a lane, `Backspace` on a lane deletes it |
 | `Enter` | leave the mode with the cell's contents selected |
-| `Esc` / `Tab` / `\` / `Ctrl+T` | leave the mode |
+| `Esc` / `Tab` / `\` / `Ctrl+G` | leave the mode |

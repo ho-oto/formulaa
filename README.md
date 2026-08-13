@@ -135,7 +135,7 @@ edit the tree, and the picture follows.
   promote a bare `∑`/`lim` to its band form. Select with `Shift+←/→`,
   wrap the selection in `\frac`, `\sqrt`, parentheses, a norm…
 - Free 2D cursor (`^F`), block selection (`^B`), grid editing for
-  matrices (`^T`), undo/redo, mouse support.
+  matrices (`^G`), undo/redo, mouse support.
 - After every edit the editor re-parses its own output; an edit that
   would break the round trip is refused on the spot (run with `--debug`
   to capture a report in `formulaa_debug/` instead).

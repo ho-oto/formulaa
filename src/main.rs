@@ -41,7 +41,6 @@ fn main() -> std::io::Result<()> {
     let mut terminal = ratatui::init();
     let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
     let mut ed = Editor::new();
-    ed.info("formulAA — LyX-like math editor");
 
     let mut guard = guard::RoundtripGuard::new(debug);
     let mut origin = (0u16, 0u16);
@@ -130,10 +129,10 @@ fn copy_to_clipboard(text: &str) -> Result<(), String> {
 
 /// Returns true when the app should quit.
 fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers) -> bool {
-    // F2 aliases ^T (grid edit) for terminals that capture the chord.
+    // F2 aliases ^G (grid edit) for terminals that capture the chord.
     let key = match code {
         KeyCode::F(2) => {
-            let _ = ed.input(Key::Char('t'), false, true);
+            let _ = ed.input(Key::Char('g'), false, true);
             return false;
         }
         KeyCode::Char(c) => Key::Char(c),
@@ -167,7 +166,7 @@ fn handle_effect(ed: &mut Editor, effect: Effect) -> bool {
             let aa = formulaa::render::export_aa(&ed.root);
             match copy_to_clipboard(&aa) {
                 Ok(()) => ed.info("copied AA to clipboard"),
-                Err(e) => ed.error(format!("copy failed: {}", e)),
+                Err(e) => ed.error(format!("could not reach the system clipboard: {}", e)),
             }
         }
         Effect::None => {}
