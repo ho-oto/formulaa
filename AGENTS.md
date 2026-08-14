@@ -12,8 +12,7 @@ cargo check --no-default-features --target wasm32-unknown-unknown  # wasm build 
 cargo clippy --all-targets      # keep zero warnings
 cargo fmt                       # always format before committing
 cargo run                       # the TUI editor
-cargo run --example demo        # render samples without the TUI
-cargo run --example ambig       # regression demo for the ambiguity the band solved
+cargo run --example demo        # the library's three entry points, no TUI
 cargo run -q --example catalog > docs/examples.md   # regenerate the corpus catalog
 echo '...' | cargo run -q -- aa2tex    # AA → LaTeX (fmt likewise)
 npx markdownlint-cli2 "**/*.md" "!target"   # docs lint (config: .markdownlint.yaml)

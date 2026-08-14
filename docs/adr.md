@@ -29,7 +29,8 @@ by a corpus plus randomized property tests.
 
 3. **The band `┈┈∑┈┈` for limits** — unmarked above/below limits are
    provably ambiguous (`∑_{n=1}^{∫}` vs `∫_{∑_{n=1}}` draw the same
-   picture; `examples/ambig.rs`). The band marks the range and carries
+   picture; `parse.rs`'s `ambiguity_counterexample_is_now_distinguishable`
+   is that pair). The band marks the range and carries
    the baseline, like a fraction bar.
 
 4. **Compact (script-style) typesetting — removed** (2026-07).
@@ -457,7 +458,7 @@ by a corpus plus randomized property tests.
 - `tests/ui.rs`: key-script DSL plus random key sequences with a
   per-keystroke roundtrip check (`FORMULAA_UI_PROP_N`).
 - Counterexample hunting: render two candidate ASTs and compare
-  pictures (`examples/ambig.rs`).
+  pictures (`ambiguity_counterexample_is_now_distinguishable`).
 - After fixing a bug, revert the fix once to confirm the new test
   fails (several vacuous tests were caught this way).
 

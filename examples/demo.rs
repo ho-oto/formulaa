@@ -1,122 +1,39 @@
-//! Prints a few formulas rendered by the layout engine, without the TUI.
-//! Run with: cargo run --example demo
+//! The library in one page: AA in, AA and LaTeX out, and the LaTeX
+//! road back. Run with: cargo run --example demo
 
-use formulaa::ast::{Node, Row};
-use formulaa::latex;
-use formulaa::render::{RenderCtx, render_row};
-use formulaa::symbols::{ColDelim, Radical};
+use formulaa::ast::{Row, normalize};
+use formulaa::render::{RenderCtx, render_root};
+use formulaa::{from_latex, latex, parse};
 
-fn syms(s: &str) -> Row {
-    s.chars().map(Node::Sym).collect()
-}
-
+/// A formula as the tools spell it: the canonical picture, then LaTeX.
 fn show(title: &str, row: &Row) {
     println!("== {} ==", title);
-    println!("LaTeX: {}", latex::row_to_latex(row));
-    let block = render_row(row, None, false, &RenderCtx::canonical());
-    for line in block.to_strings() {
+    for line in render_root(row, None, &RenderCtx::canonical()).to_strings() {
         println!("  {}", line);
     }
-    println!();
+    println!("  LaTeX: {}\n", latex::row_to_latex(row));
 }
 
 fn main() {
-    // Gaussian integral: ∫_{-∞}^{∞} e^{-x²} dx = √π
-    let gaussian = vec![
-        Node::BigOpSym {
-            op: '∫',
-            lower: vec![Node::Sym('-'), Node::Sym('∞')],
-            upper: vec![Node::Sym('∞')],
-        },
-        Node::Sym('e'),
-        Node::Sup {
-            arg: vec![Node::Sym('-'), Node::Sym('x'), Node::Sup { arg: syms("2") }],
-        },
-        Node::Sym('d'),
-        Node::Sym('x'),
-        Node::Sym('='),
-        Node::Sqrt {
-            arg: vec![Node::Sym('π')],
-            index: Radical::Sqrt,
-        },
-    ];
-    show("Gaussian integral", &gaussian);
+    // 1. AA -> AST. Input may be hand-written — plain ASCII letters
+    //    for the math italics, loose spacing; the render below answers
+    //    in canonical form, which is what `formulaa fmt` writes.
+    let row = parse::parse("x²+2x+1 = (x+1)²").expect("hand-written AA");
+    show("parsed from hand-written AA", &row);
 
-    // Quadratic formula: x = (-b ± √(b²-4ac)) / 2a
-    let quadratic = vec![
-        Node::Sym('x'),
-        Node::Sym('='),
-        Node::Frac {
-            num: vec![
-                Node::Sym('-'),
-                Node::Sym('b'),
-                Node::Sym('±'),
-                Node::Sqrt {
-                    index: Radical::Sqrt,
-                    arg: vec![
-                        Node::Sym('b'),
-                        Node::Sup { arg: syms("2") },
-                        Node::Sym('-'),
-                        Node::Sym('4'),
-                        Node::Sym('a'),
-                        Node::Sym('c'),
-                    ],
-                },
-            ],
-            den: syms("2a"),
-        },
-    ];
-    show("Quadratic formula", &quadratic);
+    // 2. A 2D picture is ordinary text too — this is the source, not a
+    //    rendering of some hidden markup.
+    let aa = " ∞    -𝑥²   ┌─\n┈∫┈┈ 𝑒   𝑑𝑥=√π\n -∞";
+    let row = parse::parse(aa).expect("canonical AA");
+    show("parsed from a 2D picture", &row);
 
-    // Basel problem: ∑_{n=1}^{∞} 1/n² = π²/6
-    let basel = vec![
-        Node::BigOpSym {
-            op: '∑',
-            lower: syms("n=1"),
-            upper: vec![Node::Sym('∞')],
-        },
-        Node::Frac {
-            num: syms("1"),
-            den: vec![Node::Sym('n'), Node::Sup { arg: syms("2") }],
-        },
-        Node::Sym('='),
-        Node::Frac {
-            num: vec![Node::Sym('π'), Node::Sup { arg: syms("2") }],
-            den: syms("6"),
-        },
-    ];
-    show("Basel problem", &basel);
+    // …and it reads back to exactly the tree that drew it — the
+    // contract the editor re-checks after every keystroke.
+    let redrawn = render_root(&row, None, &RenderCtx::canonical()).to_text();
+    assert_eq!(parse::parse(&redrawn).unwrap(), normalize(&row));
 
-    // Nested: f(x) = (1 + 1/(1 + 1/x))
-    let nested = vec![
-        Node::Sym('f'),
-        Node::Delim {
-            left: formulaa::symbols::Delim::Col(ColDelim::Paren),
-            right: formulaa::symbols::Delim::Col(ColDelim::Paren),
-            mids: 0,
-            segs: vec![syms("x")],
-        },
-        Node::Sym('='),
-        Node::Delim {
-            left: formulaa::symbols::Delim::Col(ColDelim::Paren),
-            right: formulaa::symbols::Delim::Col(ColDelim::Paren),
-            mids: 0,
-            segs: vec![vec![
-                Node::Sym('1'),
-                Node::Sym('+'),
-                Node::Frac {
-                    num: syms("1"),
-                    den: vec![
-                        Node::Sym('1'),
-                        Node::Sym('+'),
-                        Node::Frac {
-                            num: syms("1"),
-                            den: syms("x"),
-                        },
-                    ],
-                },
-            ]],
-        },
-    ];
-    show("Nested fractions in parens", &nested);
+    // 3. The other road: LaTeX -> AST -> picture (best effort for
+    //    outside dialects; everything `aa2tex` emits comes back whole).
+    let row = from_latex::row_from_latex(r"\frac{-b\pm\sqrt{b^2-4ac}}{2a}");
+    show("parsed from LaTeX", &normalize(&row));
 }

@@ -173,5 +173,3 @@ meaning) — useful for embedding re-editable math in Markdown documents
 that both humans and agents maintain.
 
 MIT licensed.
-
-<!-- TODO before release: add the install line once published to crates.io. -->
