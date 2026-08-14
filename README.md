@@ -172,13 +172,6 @@ verification loop (`formulaa fmt` to check, `formulaa aa2tex` to confirm the
 meaning) — useful for embedding re-editable math in Markdown documents
 that both humans and agents maintain.
 
-## Status
-
-Working and tested (a corpus of real formulas plus randomized
-property tests over trees and key sequences), but young — the AA
-format may still evolve. LaTeX conversion runs in both directions;
-MathML output is on the roadmap ([docs/adr.md](docs/adr.md)).
-
 MIT licensed.
 
 <!-- TODO before release: add the install line once published to crates.io. -->

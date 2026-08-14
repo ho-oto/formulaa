@@ -16,10 +16,13 @@ use formulaa::render::{RenderCtx, render_root};
 use formulaa::{ast, latex, parse};
 
 const USAGE: &str = "\
-usage: formulaa                  interactive TUI editor
-       formulaa aa2tex   [FILE] AA formula (file or stdin) -> LaTeX
-       formulaa tex2aa   [FILE] LaTeX math (file or stdin) -> AA, best effort
-       formulaa fmt      [FILE] AA formula -> canonical AA (normalize)";
+WYSIWYG TUI math editor rendering Unicode/ASCII-art formulas
+
+usage:
+    formulaa                  interactive TUI editor
+    formulaa aa2tex [FILE]    AA formula (file or stdin) -> LaTeX
+    formulaa tex2aa [FILE]    LaTeX math (file or stdin) -> AA, best effort
+    formulaa fmt    [FILE]    AA formula -> canonical AA (normalize)";
 
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
