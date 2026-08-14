@@ -16,20 +16,13 @@ use formulaa::render::{RenderCtx, render_root};
 use formulaa::{ast, latex, parse};
 
 const USAGE: &str = "\
-usage: formulaa [--debug] [--print]   interactive TUI editor
+usage: formulaa                  interactive TUI editor
        formulaa aa2tex   [FILE] AA formula (file or stdin) -> LaTeX
        formulaa tex2aa   [FILE] LaTeX math (file or stdin) -> AA, best effort
-       formulaa fmt      [FILE] AA formula -> canonical AA (normalize)
-
---debug: on a roundtrip failure, keep the state and dump a report to
-formulaa_debug/ (default: refuse the edit)
---print: print the formula's canonical AA to stdout on exit";
+       formulaa fmt      [FILE] AA formula -> canonical AA (normalize)";
 
 fn main() -> std::io::Result<()> {
-    let mut args: Vec<String> = std::env::args().skip(1).collect();
-    let debug = args.iter().any(|a| a == "--debug");
-    let print_on_exit = args.iter().any(|a| a == "--print");
-    args.retain(|a| a != "--debug" && a != "--print");
+    let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some(m @ ("aa2tex" | "tex2aa" | "fmt")) => {
             return convert(m, args.get(1).map(String::as_str));
@@ -51,7 +44,8 @@ fn main() -> std::io::Result<()> {
     let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
     let mut ed = Editor::new();
 
-    let mut guard = guard::RoundtripGuard::new(debug);
+    let mut guard = guard::RoundtripGuard::default();
+    let mut print_on_exit = false;
     let mut origin = (0u16, 0u16);
     let mut view = tui::View::default();
     // The copy acknowledgement: a ~120ms inverted blip of the
@@ -80,7 +74,7 @@ fn main() -> std::io::Result<()> {
         }
         match event::read() {
             Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => {
-                if handle_key(&mut ed, key.code, key.modifiers) {
+                if handle_key(&mut ed, key.code, key.modifiers, &mut print_on_exit) {
                     break Ok(());
                 }
                 guard.check(&mut ed);
@@ -101,7 +95,7 @@ fn main() -> std::io::Result<()> {
                     match picked {
                         Some(idx) => {
                             let fx = ed.completion_click(idx);
-                            if handle_effect(&mut ed, fx) {
+                            if handle_effect(&mut ed, fx, &mut print_on_exit) {
                                 break Ok(());
                             }
                             guard.check(&mut ed);
@@ -166,7 +160,12 @@ fn copy_to_clipboard(text: &str) -> Result<(), String> {
 }
 
 /// Returns true when the app should quit.
-fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers) -> bool {
+fn handle_key(
+    ed: &mut Editor,
+    code: KeyCode,
+    mods: KeyModifiers,
+    print_on_exit: &mut bool,
+) -> bool {
     // F2 aliases ^G (grid edit) for terminals that capture the chord.
     let key = match code {
         KeyCode::F(2) => {
@@ -192,13 +191,17 @@ fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers) -> bool {
         mods.contains(KeyModifiers::SHIFT),
         mods.contains(KeyModifiers::CONTROL),
     );
-    handle_effect(ed, effect)
+    handle_effect(ed, effect, print_on_exit)
 }
 
 /// Run an `Effect` the shared keymap returned; true means quit.
-fn handle_effect(ed: &mut Editor, effect: Effect) -> bool {
+fn handle_effect(ed: &mut Editor, effect: Effect, print_on_exit: &mut bool) -> bool {
     match effect {
         Effect::Quit => return true,
+        Effect::PrintAa => {
+            *print_on_exit = true;
+            return true;
+        }
         Effect::CopyAa => {
             let aa = formulaa::render::export_aa(&ed.root);
             match copy_to_clipboard(&aa) {

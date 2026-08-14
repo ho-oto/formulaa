@@ -46,8 +46,8 @@ inserted symbol beside its spellings:
 
 ## Mode commands
 
-The ctrl chords `^F` `^B` `^G` `^Y` `^Q` may be stolen by the terminal
-or host. The same operations have spellings:
+The ctrl chords `^F` `^B` `^G` `^Y` `^O` `^Q` may be stolen by the
+terminal or host. The same operations have spellings:
 
 | Spelling | Action |
 | --- | --- |
@@ -55,6 +55,7 @@ or host. The same operations have spellings:
 | `\b` `\B` `\block` `\blockselect` | block select mode (`^B`) |
 | `\g` `\G` `\grid` | grid edit (`^G`) |
 | `\clipboard` | canonical AA to the **system** clipboard (`^Y`) — no one-letter form, it would read like the internal `^C` |
+| `\stdout` | canonical AA to stdout, then quit (`^O`) — spelled out for the same reason as `\quit` |
 | `\quit` | quit (`^Q`) — no one-letter form, one typo shouldn't quit |
 
 Mode commands show apart: purple in the minibuffer, and a bold chord

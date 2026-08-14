@@ -11,7 +11,7 @@ cargo test                      # all tests (unit + roundtrip + UI)
 cargo check --no-default-features --target wasm32-unknown-unknown  # wasm build of the lib (extensions depend on it)
 cargo clippy --all-targets      # keep zero warnings
 cargo fmt                       # always format before committing
-cargo run                       # the TUI editor (--debug: keep roundtrip breakage and dump reports)
+cargo run                       # the TUI editor
 cargo run --example demo        # render samples without the TUI
 cargo run --example ambig       # regression demo for the ambiguity the band solved
 cargo run -q --example catalog > docs/examples.md   # regenerate the corpus catalog
@@ -44,13 +44,12 @@ test fails — vacuous tests have slipped through more than once.
    behavior changes start in `tests/ui.rs` (key-script DSL). Key
    meanings live only in `src/input.rs` — never add key branches in
    main.rs or a wasm host (drift).
-5. The TUI re-checks the roundtrip after every edit. By default a
-   breaking edit is **refused** (undone with an error message); with
-   `--debug` it stands and a report lands in
-   **`formulaa_debug/roundtrip-N.txt`** (gitignored). When the user says
-   "it broke", read that directory first — reports contain the
-   canonical AA, expected AST, parsed AST, and both LaTeX forms. After
-   fixing, add the AA to `tests/roundtrip.rs` as a regression.
+5. The TUI re-checks the roundtrip after every edit: a breaking edit is
+   **refused** (undone, with an error message naming the failure —
+   parse error, AST mismatch, re-render mismatch). Nothing is written
+   to disk, so when the user says "it broke", ask for the picture on
+   screen and the keys they pressed; reproduce it in `tests/ui.rs` or
+   `tests/roundtrip.rs`, and keep that test as the regression.
 6. **Never commit or push without an explicit instruction** — each
    authorization covers that one batch only, and never extends to the
    next piece of work.
@@ -72,9 +71,9 @@ test fails — vacuous tests have slipped through more than once.
 | `src/symbols/` | **home of every table** (one concern per file, re-exported flat): `atoms` (vocabulary + gates: `ATOMS`, `NAMES`, `NEGATIONS`/`UNNEGATIONS`, `is_atom` — every accepted atom has a LaTeX spelling, gap=0 tested), `funcs`, `accents` (incl. one-line `preview` glyphs), `radicals`, `delims`, `arrows`, `grids`, `scripts`, `alphabets` |
 | `src/glyphs.rs` | structural glyph constants + display markers (the `Mark` enum is the only spelling of the private-use area) |
 | `src/theme.rs` | TUI colors, two layers: a named-ANSI palette (the only place a `Color` literal may appear) and role constants assigned through it. The ground rule: fills are dark colors with white glyphs, everything else is reverse video |
-| `src/main.rs` | main loop + CLI subcommands (`--debug` flag), mouse → click / completion pick |
+| `src/main.rs` | main loop + CLI subcommands, mouse → click / completion pick, the `Effect` handlers (clipboard, stdout, quit) |
 | `src/tui.rs` | drawing: layout, scrolling, marker/selection painting, popup/preview overlay, help line |
-| `src/guard.rs` | per-edit roundtrip check: refuse by default, report with `--debug` |
+| `src/guard.rs` | per-edit roundtrip check: a breaking edit is undone and reported on the message line |
 | `tests/roundtrip.rs` | formula corpus + randomized property tests |
 | `tests/ui.rs` | key-driven UI tests (script DSL + random key sequences) |
 | `tools/merge_math_font.py` | merged-font generator (fontTools) |

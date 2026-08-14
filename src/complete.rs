@@ -565,11 +565,11 @@ fn grid_hints(query: &str) -> Vec<(u32, Item)> {
         .collect()
 }
 
-/// The mode commands (^F, ^B, ^G, ^Y, ^Q) have minibuffer spellings
-/// for terminals that steal those chords; the popup lists them like
-/// anything else, told apart by the symbol column: `[^F]`, drawn
-/// bold, not tinted — a tinted row under the selection highlight
-/// stops reading as either.
+/// The mode commands (^F, ^B, ^G, ^Y, ^O, ^Q) have minibuffer
+/// spellings for terminals that steal those chords; the popup lists
+/// them like anything else, told apart by the symbol column: `[^F]`,
+/// drawn bold, not tinted — a tinted row under the selection
+/// highlight stops reading as either.
 fn mode_hints(query: &str) -> Vec<(u32, Item)> {
     crate::editor::MODE_COMMANDS
         .iter()

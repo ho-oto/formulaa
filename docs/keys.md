@@ -64,7 +64,12 @@ press.
 | --- | --- |
 | `Ctrl+Z` / `Ctrl+R` | undo / redo |
 | `Ctrl+Y` | copy the canonical AA to the system clipboard |
+| `Ctrl+O` | write the canonical AA to stdout and quit (`\stdout`) |
 | `Esc` | dismiss mode → clear selection → quit |
+
+An edit that would break the AA roundtrip is refused on the spot and
+the message line says why — if you meet one, the picture plus the keys
+you pressed is the whole bug report.
 
 ## Free cursor (`Ctrl+F`)
 

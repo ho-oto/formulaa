@@ -137,8 +137,8 @@ edit the tree, and the picture follows.
 - Free 2D cursor (`^F`), block selection (`^B`), grid editing for
   matrices (`^G`), undo/redo, mouse support.
 - After every edit the editor re-parses its own output; an edit that
-  would break the round trip is refused on the spot (run with `--debug`
-  to capture a report in `formulaa_debug/` instead).
+  would break the round trip is refused on the spot, and the message
+  line says what failed.
 
 Key reference: [docs/keys.md](docs/keys.md) · command reference:
 [docs/commands.md](docs/commands.md).
@@ -153,14 +153,14 @@ CLI-task based (see the roadmap in [docs/adr.md](docs/adr.md)).
 
 ```sh
 formulaa                       # the TUI editor (^Y copies the AA;
-                             #   --print writes it to stdout on exit)
+                             #   ^O writes it to stdout and quits)
 formulaa aa2tex formula.txt    # AA → LaTeX (stdin works too)
 formulaa tex2aa formula.tex    # LaTeX → AA, best effort (KaTeX/MathJax dialect)
 formulaa fmt    formula.txt    # normalize hand-written AA to canonical form
 ```
 
 LaTeX round-trips: everything `aa2tex` emits reads back to the exact
-same tree, and `\tex` in the editor opens a box you can paste LaTeX
+same tree, and `\latex` in the editor opens a box you can paste LaTeX
 into (unknown commands are skipped, never an error).
 
 ## For AI agents

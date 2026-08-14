@@ -15,7 +15,7 @@ use formulaa::render::{RenderCtx, render_root};
 
 use crate::theme;
 
-const HELP: &str = "⌃F free move ¦ ⌃B block select ¦ \\ command ¦ // frac ¦ ^ sup ¦ _ sub ¦ ( [ { pairs ¦ ⌃Y to clipboard ¦ Esc/⌃Q quit";
+const HELP: &str = "⌃F free move ¦ ⌃B block select ¦ \\ command ¦ // frac ¦ ^ sup ¦ _ sub ¦ ⌃Y to clipboard ¦ ⌃O to stdout (quits) ¦ Esc/⌃Q quit";
 
 /// Context-sensitive last line: a mode's own manual while one is
 /// active, else the generic key list (plus ⌃G when the cursor sits in

@@ -336,11 +336,10 @@ by a corpus plus randomized property tests.
     The minibuffer color is three-valued: green = runs, purple = mode,
     red = not yet anything.
 
-74. **Roundtrip failures refuse the edit** (2026-08) — by default the
-    guard undoes an edit whose picture stops parsing (the state before
-    it is the last one that survives its own file format); `--debug`
-    restores the old behavior (keep the state, dump a report to
-    `formulaa_debug/`) for fixing the toolchain.
+74. **Roundtrip failures refuse the edit** (2026-08) — the guard undoes
+    an edit whose picture stops parsing (the state before it is the
+    last one that survives its own file format). `--debug` kept the
+    broken state and dumped a report instead; both are gone (§82).
 
 75. **Docs restructured in English** (2026-08) — README from the
     English draft; `aa-spec.md` rewritten as a self-contained spec for
@@ -437,6 +436,17 @@ by a corpus plus randomized property tests.
     recovery (§4) names brace vertices only. The prose calls the editor
     WYSIWYG rather than LyX-style — the model is the common one, not
     that program's.
+
+82. **`^O` replaces the CLI flags; the debug reports are gone**
+    (2026-08) — `--print` and `--debug` are both removed, so `formulaa`
+    takes a subcommand or nothing. `^O` (`\stdout`) writes the
+    canonical AA to stdout and quits, the pipe-side twin of `^Y`:
+    whether the formula should go to stdout is known when you are
+    done, not before the first keystroke. The debug mode of §74 is
+    withdrawn along with the report files — writing to the user's
+    working directory uninvited is not the program's business, and a
+    refusal that names its failure kind, next to the picture on
+    screen, is what a bug report needed from it anyway.
 
 ## Test strategy
 

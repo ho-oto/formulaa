@@ -442,13 +442,16 @@ pub enum ModeCmd {
     /// means; the editor-internal ^C/^X have selection semantics of
     /// their own.
     CopyAa,
+    /// Write the canonical AA to the host's output and leave (^O) —
+    /// the pipe-friendly twin of the clipboard copy.
+    PrintAa,
     Quit,
 }
 
 /// One row per mode command — its spellings, the chord it stands in
-/// for, and a one-line gloss — for the completion list. `mode_command`
-/// is the dispatch; a test keeps the two agreeing spelling by
-/// spelling.
+/// for, and a one-line gloss — for the completion list.
+/// `mode_command` is the dispatch; a test keeps the two agreeing
+/// spelling by spelling.
 pub const MODE_COMMANDS: &[(&[&str], ModeCmd, &str, &str)] = &[
     (&["f", "F", "free"], ModeCmd::Free, "^F", "free cursor"),
     // No `\bs` — it reads as "backslash" as easily as "block
@@ -465,6 +468,13 @@ pub const MODE_COMMANDS: &[(&[&str], ModeCmd, &str, &str)] = &[
     // Only the full word: \c beside ^C (the *internal* copy) would
     // read as the same thing, and it is not.
     (&["clipboard"], ModeCmd::CopyAa, "^Y", "AA to clipboard"),
+    // Spelled out for the same reason as \quit: it ends the session.
+    (
+        &["stdout"],
+        ModeCmd::PrintAa,
+        "^O",
+        "AA to stdout, then quit",
+    ),
     // Quit alone has no one-letter spelling: \q is one typo from
     // quitting, and nothing else here is that irreversible.
     (&["quit"], ModeCmd::Quit, "^Q", "quit"),

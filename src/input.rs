@@ -34,6 +34,8 @@ pub enum Effect {
     Quit,
     /// Put the canonical AA on the host's clipboard.
     CopyAa,
+    /// Write the canonical AA to the host's output, then quit.
+    PrintAa,
 }
 
 impl Editor {
@@ -140,6 +142,7 @@ impl Editor {
             Some(ModeCmd::BlockSelect) => self.start_block_select(),
             Some(ModeCmd::GridEdit) => self.grid_mode_toggle(),
             Some(ModeCmd::CopyAa) => return Effect::CopyAa,
+            Some(ModeCmd::PrintAa) => return Effect::PrintAa,
             Some(ModeCmd::Quit) => return Effect::Quit,
             None => self.execute(cmd),
         }
@@ -516,6 +519,7 @@ impl Editor {
             match key {
                 Key::Char('q') => return Effect::Quit,
                 Key::Char('y') => return Effect::CopyAa,
+                Key::Char('o') => return Effect::PrintAa,
                 Key::Char('a') => self.document_start(),
                 Key::Char('f') => self.start_free(),
                 Key::Char('b') => self.start_block_select(),

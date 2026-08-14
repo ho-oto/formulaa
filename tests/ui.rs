@@ -251,6 +251,7 @@ fn ctrl_keys_return_host_effects() {
     let mut ed = Editor::new();
     assert_eq!(ed.input(Key::Char('q'), false, true), Effect::Quit);
     assert_eq!(ed.input(Key::Char('y'), false, true), Effect::CopyAa);
+    assert_eq!(ed.input(Key::Char('o'), false, true), Effect::PrintAa);
     // Plain typing never asks the host for anything.
     assert_eq!(ed.input(Key::Char('q'), false, false), Effect::None);
 }
@@ -1997,6 +1998,15 @@ fn mode_commands_run_from_the_minibuffer() {
     let mut ed = Editor::new();
     let fx = type_script(&mut ed, r"ab \c");
     assert!(!fx.contains(&Effect::CopyAa), "\\c still copies");
+
+    // \stdout hands the AA to the host's output and leaves; like
+    // \quit it is spelled out, since it ends the session.
+    let mut ed = Editor::new();
+    let fx = type_script(&mut ed, r"ab \stdout");
+    assert!(fx.contains(&Effect::PrintAa), "{:?}", fx);
+    let mut ed = Editor::new();
+    let fx = type_script(&mut ed, r"ab \o");
+    assert!(!fx.contains(&Effect::PrintAa), "\\o still prints");
 
     // \quit quits: the effect reaches the host. The one-letter \q
     // does not — a quit one typo away is the wrong price for brevity.
