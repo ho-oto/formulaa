@@ -187,7 +187,6 @@ fn node_to_latex(node: &Node) -> String {
             s
         }
         Node::Arrow { op, over, under } => {
-            // \xRightarrow / \xLeftarrow need mathtools.
             let cmd = op.latex();
             let mut s = format!("\\{}", cmd);
             if !under.is_empty() {
@@ -202,7 +201,6 @@ fn node_to_latex(node: &Node) -> String {
             mids,
             segs,
         } => {
-            // Single grid seg with a well-known pair -> a matrix environment.
             if *mids == 0
                 && let [seg] = &segs[..]
                 && let [Node::Array { cols, cells, .. }] = &seg[..]

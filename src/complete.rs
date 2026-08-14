@@ -193,15 +193,15 @@ fn all_names() -> Vec<String> {
     names
 }
 
-/// How well `name` answers `query` — lower ranks first, `None` is no
-/// match. The tiers are exact, prefix, substring, then subsequence:
-/// `in` finds `int` by prefix, `!in` by substring and `liminf` by
-/// subsequence, in that order.
 /// The score tiers, named so a caller can say which ones it wants.
 const PREFIX: u32 = 100;
 const SUBSTRING: u32 = 10_000;
 const SUBSEQUENCE: u32 = 1_000_000;
 
+/// How well `name` answers `query` — lower ranks first, `None` is no
+/// match. The tiers are exact, prefix, substring, then subsequence:
+/// `in` finds `int` by prefix, `!in` by substring and `liminf` by
+/// subsequence, in that order.
 fn score(name: &str, query: &str) -> Option<u32> {
     if name == query {
         return Some(0);
@@ -568,9 +568,8 @@ fn grid_hints(query: &str) -> Vec<(u32, Item)> {
 /// The mode commands (^F, ^B, ^G, ^Y, ^Q) have minibuffer spellings
 /// for terminals that steal those chords; the popup lists them like
 /// anything else, told apart by the symbol column: `[^F]`, drawn
-/// bold — a chord where the edits show a glyph. (A row tint was
-/// tried and dropped: a tinted row under the selection highlight
-/// stops reading as either.)
+/// bold, not tinted — a tinted row under the selection highlight
+/// stops reading as either.
 fn mode_hints(query: &str) -> Vec<(u32, Item)> {
     crate::editor::MODE_COMMANDS
         .iter()
@@ -598,10 +597,9 @@ fn mode_hints(query: &str) -> Vec<(u32, Item)> {
 /// spellings matches, and ranks by its best one — so `\al` finds the
 /// α row and the row still shows every way to spell it.
 pub fn complete(query: &str) -> Vec<Item> {
-    // An empty query matches everything and ranks nothing: what came
-    // out was an arbitrary sample of the vocabulary (the shortest
-    // names, as it happened, plus every alphabet family). No list is
-    // honest — the popup waits for a first letter to have an opinion.
+    // An empty query matches everything and ranks nothing — any list
+    // would be an arbitrary sample of the vocabulary, so the popup
+    // waits for a first letter to have an opinion.
     if query.is_empty() {
         return Vec::new();
     }

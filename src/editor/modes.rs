@@ -41,11 +41,9 @@ impl Editor {
             f.at.0.saturating_add_signed(dy as isize),
             f.at.1.saturating_add_signed(dx as isize),
         );
-        // Collapsed elements (inline scripts, invisible slots) expand
-        // automatically while the free cursor is near them. Proximity is
-        // measured in the *current display frame* against the element's
-        // always-visible anchor (the position before its node in the
-        // parent row), with hysteresis (FREE_EXPAND_IN/OUT) so the expansion
+        // Collapsed elements (inline scripts, invisible slots) auto-
+        // expand while the free cursor is near their always-visible
+        // anchor, with hysteresis (FREE_EXPAND_IN/OUT) so the expansion
         // shift cannot make the test oscillate.
         let cands = self.jump_candidates();
         let disp = self.coords_displayed(&cands);
@@ -396,7 +394,6 @@ impl Editor {
                 unreachable!()
             };
             let _ = (gs, rows, c);
-            // one extent per cell, in the same row-major order.
             let sel: Vec<usize> = self
                 .grid_rect()
                 .map(|(r0, j0, r1, j1)| {
@@ -459,11 +456,6 @@ impl Editor {
 
         let mut path = self.path.clone();
         let mut col = self.col;
-        // Only the highlighted ancestor and its two neighbours are
-        // painted. The arrows walk the chain one step at a time, so one
-        // step in each direction is all that has to be visible — and
-        // three boxes need two shades where the whole chain needed a
-        // gradient nobody could read the depth off anyway.
         let shown = self.block_shown();
         // The open mark sits immediately left of its block and a close
         // marker right after it, so the display can paint its extent.
@@ -884,8 +876,8 @@ impl Editor {
         }
     }
 
-    /// A modal state is capturing keys (free/minibuffer/op box) —
-    /// undo/redo chords stay out of the way there.
+    /// A modal state is capturing keys — undo/redo chords stay out
+    /// of the way there.
     pub fn mode_active(&self) -> bool {
         self.free.is_some()
             || self.block.is_some()
@@ -925,10 +917,7 @@ impl Editor {
     }
 
     pub fn redo(&mut self) {
-        // The pending unwrap and armed mid belong to the tree that is
-        // being replaced: `input` returns before the key layer's
-        // one-shot take, so they would otherwise survive onto a
-        // different tree.
+        // Same one-shot shedding as `undo`.
         self.unwrap_armed = None;
         self.mid_armed = None;
         let Some((root, path, col)) = self.redo.pop() else {

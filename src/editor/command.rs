@@ -176,11 +176,8 @@ impl Editor {
         resolve(cmd).is_some()
     }
 
-    /// What the open minibuffer would insert on commit, as a row the
-    /// display can render (empty slots show as ⬚): \alpha previews α,
-    /// \frac the empty fraction, \pmatrix the delimited grid. Mode
-    /// openers and grid surgery preview as nothing. Pure, like
-    /// `resolve`.
+    /// `preview_row` for the open minibuffer's text (None when no
+    /// minibuffer is open). Pure, like `resolve`.
     pub fn command_preview_row(&self) -> Option<Row> {
         preview_row(self.minibuffer.as_deref()?)
     }
@@ -485,8 +482,8 @@ pub fn mode_command(cmd: &str) -> Option<ModeCmd> {
 
 /// Resolve a command spelling to the edit it performs. Pure: this is
 /// the whole input side of the command layer, so "is it valid" and
-/// "what would it do" (the preview) come for free. Order matters and
-/// mirrors the old dispatch: structural names (alternative spellings
+/// "what would it do" (the preview) come for free. Order matters:
+/// structural names (alternative spellings
 /// as extra patterns on their arm), grids, `\lr` specs, then the name
 /// tables (funcs -> accents -> scripts -> symbols), and the `\rm<x>` /
 /// `\text<x>` attached forms last.
@@ -526,9 +523,8 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
         "addcol" => Some(Edit::AddCol),
         "delrow" => Some(Edit::DelRow),
         "delcol" => Some(Edit::DelCol),
-        // The exact spelling `\delim` is `\lr` in every way — including
-        // the way a bare `\lr` falls through the spec parser onto the
-        // ext symbol `lr` (↔).
+        // `\delim` and `\lr` are one spec language read by `lr_spec`
+        // (adr.md §27), so neither needs an arm here.
         "op" | "operatorname" => Some(Edit::OpenBox(BoxKind::Op)),
         "op*" | "operatorname*" | "limits" => Some(Edit::OpenBox(BoxKind::OpStar)),
         "rm" => Some(Edit::OpenBox(BoxKind::Rm)),

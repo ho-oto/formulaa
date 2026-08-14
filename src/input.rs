@@ -151,9 +151,9 @@ impl Editor {
     /// Enter takes it, so the list behaves like any editor's.
     fn minibuffer_keys(&mut self, key: Key, ctrl: bool) -> Option<Effect> {
         self.minibuffer.is_some().then(|| {
-            // Every other key layer clears the status line first; this
-            // one used to keep a "no completion for \x" notice up while
-            // the very next keystroke opened a populated list.
+            // This layer clears the status line too, or a stale "no
+            // completion for \x" notice outlives the very keystroke
+            // that opens a populated list.
             self.clear_message();
             let mut fx = Effect::None;
             match key {
@@ -284,11 +284,9 @@ impl Editor {
                     }
                 }
                 // Graphic chars (not just alphanumerics): the symbol
-                // table has names like "->", "+-", "oo".
-                // A ctrl chord is not typing: it falls to the
-                // catch-all and is swallowed (^V once appended a
-                // literal v to the query, and ^Z/^Y did nothing but
-                // corrupt it).
+                // table has names like "->", "+-", "oo". A ctrl chord
+                // is not typing — it falls to the catch-all rather
+                // than pushing its letter into the query.
                 Key::Char(c) if !ctrl && c.is_ascii_graphic() => {
                     self.minibuffer.as_mut().unwrap().push(c);
                     self.refresh_completion();
@@ -335,8 +333,7 @@ impl Editor {
         let kind = self.op_entry.as_ref()?.0;
         // What may be typed into the box: operator/roman names are
         // alphanumerics plus dots (i.i.d.); \text takes any glyph but
-        // the quotes. Space separates \op* pieces, is content in \rm
-        // and \text, and commits a plain \op (one-word name).
+        // the quotes.
         let name_char = |c: char| c.is_ascii_alphanumeric() || c == '.';
         // Inside \text, a backslash escapes the next key (so a literal
         // " or \ can be typed); a bare " closes the box. Brackets stay

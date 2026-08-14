@@ -157,9 +157,7 @@ pub(super) fn hcat(blocks: &[Block]) -> Block {
 }
 
 /// The zero-width annotation channels of a Block (caret, display
-/// marks), accumulated as children are centered into a parent. One
-/// `centered` call per child replaces the per-channel translations
-/// every composite node used to spell out.
+/// marks), accumulated as children are centered into a parent.
 #[derive(Default)]
 pub(super) struct Annots {
     caret: Option<(usize, usize)>,

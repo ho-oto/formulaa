@@ -17,8 +17,6 @@ use crate::symbols::{Accent, Delim, DrawnForm, subscript_char, superscript_char}
 pub use block::Block;
 use block::{Annots, center_pad, hcat, vstack};
 
-// The structural glyph vocabulary lives in crate::glyphs; re-exported
-// here for the callers that grew up importing it from the render side.
 pub use crate::glyphs::CURSOR_CHAR;
 
 /// A display-marker atom (zero-width; transparent to layout decisions).
@@ -38,8 +36,8 @@ fn italic_char(c: char) -> char {
 
 /// Inverse of the render-time character styling (used by the parser).
 pub fn unstyle_char(c: char) -> char {
-    // Each arm maps one math-italic block back onto its plain range by
-    // offset (Latin both cases, then the lenient-input Greek).
+    // The Greek arms are lenient-input only: italic_char styles just
+    // Latin, but hand-typed math-italic Greek must still unstyle.
     let shift = |plain: char, styled: char| {
         char::from_u32(plain as u32 + (c as u32 - styled as u32)).unwrap()
     };
@@ -113,10 +111,9 @@ type CursorRef<'a> = (&'a [(usize, Field)], usize);
 /// the same run: >= 2 ASCII letters, dots only where the run lexer
 /// keeps them (i.i.d.). Anything else is 'single-quoted'.
 fn func_block(t: &str) -> Block {
-    // A dotted run (i.i.d.) is bare exactly when the run lexer reads it
-    // back as one token: starts with a letter, every interior dot is
-    // followed by a letter, and a trailing dot only with an interior
-    // dot before it.
+    // Bare exactly when parse.rs's letter-run lexer reads it back as
+    // one token (its dotted-run rules mirror this predicate — change
+    // them in lockstep).
     let chars: Vec<char> = t.chars().collect();
     let dotted_ok = chars.first().is_some_and(|c| c.is_ascii_alphabetic())
         && chars.iter().all(|&c| c.is_ascii_alphabetic() || c == '.')
@@ -255,9 +252,6 @@ pub fn render_row(
             script: matches!(node, Node::Sup { .. } | Node::Sub { .. }),
         };
         let mut block = match node {
-            // Single upright letters drop their quotes when a neighbour
-            // makes the bare reading unambiguous (d𝑦); the quotes come
-            // back automatically when the context changes.
             Node::Roman(c) => {
                 let glue = row[..i]
                     .iter()
@@ -281,10 +275,6 @@ pub fn render_row(
         }
         blocks.push((block, info));
     }
-    // A FRAME pair wraps a node whose frame the display recolors (grid
-    // mode). The render owns the geometry, so the pair converts to the
-    // node's exact corners here — the display reads the rectangle
-    // straight off the two marks, whatever later compositions do.
     // A FRAME or DELIMS pair wraps a node whose own frame the display
     // recolors (grid mode; a delimiter armed for unwrapping). The
     // render owns the geometry, so the pair converts to the node's
@@ -609,12 +599,8 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
         // render math-italic), which is what makes them parseable.
         Node::Func(name) => func_block(name),
 
-        // Upright run. \mathrm draws bare when self-identifying (>= 2
-        // ASCII letters, not a dictionary word), else 'single-quoted';
-        // \text always "double-quotes". Interior spaces are ␣ so quotes
-        // never contain structurally meaningful blank columns.
         // Reached only for rows not built by render_row (which decides
-        // glue from the neighbours); standalone = never glued.
+        // Roman glue from the neighbours): standalone = never glued.
         Node::Text(t) => quoted(t, '"'),
         Node::Roman(c) => roman_block(*c, false),
 
@@ -688,13 +674,9 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             base,
         } => {
             let b = display_char(*base, ctx);
-            // Every mark hugs the base like the wide-band forms: over
-            // marks draw low in their cell (bar ¯ as _, tilde ˜ as ˷,
-            // hat ^ as ˰, check ˇ as ˯, ring ˚ as ˳, dot ˙ as the
-            // leader ․ U+2024, distinct from the '.' atom), under marks
-            // draw high (bar ‗ as ¯, tilde ˷ as ˜ — the tilde pair
-            // swaps between AST mark and drawn glyph). The ddot draws
-            // as ․․ overhanging one column right of the base; the spill
+            // Marks hug the base with the same glyphs as the wide
+            // bands (the table is Accent::cells/drawn); the ddot's ․․
+            // overhangs one column right of the base, and that spill
             // column keeps a blank baseline so the pair reads back
             // uniquely.
             let w = overs
@@ -1174,9 +1156,6 @@ fn render_fused_grid(
     let rcol = delim_column(right, false, h, bl);
     let mut out = Vec::with_capacity(h);
     for (r, line) in lines.into_iter().enumerate() {
-        // Single-column grids dig their row junctions into the
-        // delimiter columns as ├ ┤ (U+251C/2524 — the light joints; the
-        // heavy ┠ ┨ stood out as the only heavy strokes in the format).
         let (lc, rc) = if junction && sep_rows.contains(&r) {
             (ROW_JUNCTION_L, ROW_JUNCTION_R)
         } else {

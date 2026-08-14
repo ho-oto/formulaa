@@ -17,8 +17,9 @@ use crate::theme;
 
 const HELP: &str = "⌃F free move ¦ ⌃B block select ¦ \\ command ¦ // frac ¦ ^ sup ¦ _ sub ¦ ( [ { pairs ¦ ⌃Y to clipboard ¦ Esc/⌃Q quit";
 
-/// Context-sensitive last line: generic keys normally, the relevant
-/// commands when the cursor is inside a grid cell or a delimiter.
+/// Context-sensitive last line: a mode's own manual while one is
+/// active, else the generic key list (plus ⌃G when the cursor sits in
+/// a grid cell).
 pub fn help_line(ed: &Editor) -> String {
     // The minibuffer and its completion explain themselves; only the
     // boxes announce *which* box is open (their contents all look like
@@ -56,10 +57,8 @@ pub fn help_line(ed: &Editor) -> String {
         }
         .into();
     }
-    // The base line, with the context-relevant command prepended: the
-    // full mode manuals above replace it, but ordinary editing keeps
-    // one line and just learns the one extra thing this position
-    // offers.
+    // Ordinary editing: the one base line, plus the one extra command
+    // this position offers.
     let mut line = String::new();
     if ed.in_grid() {
         line.push_str("⌃G grid edit ¦ ");
@@ -179,8 +178,6 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
         if sy < d.height() {
             d.widen(sy, sx);
             let last = d.bg[sy].len().saturating_sub(1);
-            // The snap preview is provisional and secondary: blinking
-            // reverse video, no color of its own.
             d.invert[sy][sx.min(last)] = true;
             d.flash[sy][sx.min(last)] = true;
         }
@@ -216,10 +213,10 @@ fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16,
         (_, Some((_, buf))) => cx + buf.chars().count() + 2,
         _ => cx,
     });
-    // A formula larger than the canvas scrolls, following the cursor
-    // (the free cursor included) with a few cells of margin; one that
-    // fits is centered on that axis and its scroll resets. `scroll`
-    // returns the offset, `pad` the centering pad.
+    // Per axis: an oversized formula scrolls to keep the cursor (the
+    // free cursor included) visible with a few cells of margin; one
+    // that fits is centered and its offset resets. `scroll` writes the
+    // offset through `off` and returns the centering pad.
     let scroll = |size: u16, avail: u16, cur: Option<usize>, off: &mut usize| -> u16 {
         if size <= avail {
             *off = 0;
@@ -408,8 +405,9 @@ fn marker_boxes(
     let mut lane_boxes: Vec<(usize, usize, usize, usize)> = Vec::new();
     let mut row_lane_boxes: Vec<(usize, usize, usize, usize)> = Vec::new();
     // The frame rectangle comes straight off its corner marks — the
-    // render places FRAME_OPEN on the framed block's top-left cell and
-    // FRAME_CLOSE on its bottom-right (delimiters included when fused).
+    // render puts `Mark::Frame{open:true}` on the framed block's
+    // top-left cell and the close mark on its bottom-right (delimiters
+    // included when fused).
     let tl = marks
         .iter()
         .find(|&&(_, _, c)| Mark::decode(c) == Some(Mark::Frame { open: true }));
@@ -682,11 +680,6 @@ fn marker_boxes(
     decor
 }
 
-/// Draw the open minibuffer as an overlay at the caret cell: the typed
-/// `\command` covers the glyphs to the right of the cursor without
-/// moving them (zero layout shift — the eye stays on the formula), and
-/// the caret sits after the text. With a selection active the caret is
-/// at the selection's moving end, so the overlay shows next to it.
 /// Where the canvas sits on screen, so a floating layer can tell how
 /// much room it has: canvas cell (y, x) is drawn at screen
 /// (top + y - scroll_y, left + x - scroll_x), inside `width`x`height`.
@@ -994,10 +987,6 @@ fn is_accent_band_piece(c: char) -> bool {
 fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec<Span<'static>> {
     let (line, bg) = (&d.lines[y], &d.bg[y]);
     let cursor = d.caret.and_then(|(cy, cx)| (cy == y).then_some(cx));
-    // The ordinary caret is terminal-style reverse video; the free
-    // cursor is a solid colored block instead (reverse video would swap
-    // the tint onto the glyph, which reads as "the character changed
-    // color", not "the cursor changed color").
     let cursor_style = match caret {
         // Inside a name box: the caret turns green so the modal layer
         // is visible at the cursor itself.
@@ -1096,7 +1085,6 @@ fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec
             }
             spans.push(Span::styled(cell, style));
         } else if c == '␣' {
-            // Explicit space atom: keep visible but unobtrusive.
             flush(&mut buf, buf_bg, &mut spans);
             // The ␣ glyph dims on the open canvas; on a themed
             // ground it turns white like any other glyph there (dim

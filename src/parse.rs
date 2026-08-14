@@ -566,7 +566,6 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
 
     let first = *occupied.first().unwrap();
     let last = *occupied.last().unwrap();
-    // Most arms defer to a sub-region: one rule, one line.
     let dive = |t, b, l, r| find_baseline(g, Rect { t, b, l, r });
     match g.at(first, c) {
         // Delimiter columns (any baseline-capable head, or the norm):
@@ -826,8 +825,6 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
                     region_above(span, bl).map_or(Ok(vec![]), |r| parse_region(g, r, None))?;
                 let lower =
                     region_below(span, bl).map_or(Ok(vec![]), |r| parse_region(g, r, None))?;
-                // One char that names a ∑-class operator is the symbol
-                // band; anything else is a named one.
                 let one = base.chars().count() == 1;
                 let c0 = base.chars().next().unwrap_or(' ');
                 out.push(if one && crate::symbols::is_bigop(c0) {
@@ -1114,7 +1111,8 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
     Ok(out)
 }
 
-/// Last column <= `max` such that all of `from..=result` satisfy `pred`.
+/// Extends right from `from` while `pred` holds, never past `max`.
+/// `from` itself is assumed to qualify — it is returned untested.
 fn scan_while(g: &Grid, row: usize, from: usize, max: usize, pred: impl Fn(char) -> bool) -> usize {
     let mut c = from;
     while c < max && pred(g.at(row, c + 1)) {
@@ -1847,9 +1845,8 @@ fn vertical_extent(g: &Grid, rect: Rect, col: usize, bl: usize, chars: &[char]) 
 
 /// Parse a formula from its AA text form.
 pub fn parse(text: &str) -> Result<Row> {
-    // Combining strike overlays (the old \cancel form) are refused up
-    // front with a pointed message: they would otherwise occupy cells
-    // and desync every column.
+    // Combining strike overlays would desync every column, so they
+    // are refused up front with a pointed message (adr.md §67).
     let mut lines: Vec<Vec<char>> = Vec::new();
     for (r, raw) in text.lines().enumerate() {
         let mut line = Vec::new();

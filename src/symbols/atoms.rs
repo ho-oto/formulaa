@@ -13,9 +13,8 @@ use super::alphabets;
 /// together.
 ///
 /// Every non-ASCII char the format accepts appears here or in the
-/// styled families — there is no generated long tail anymore, so
-/// "typeable" implies "spells its LaTeX" by construction (the mod
-/// test measures the gap at zero).
+/// styled families, so "typeable" implies "spells its LaTeX" by
+/// construction (the mod test measures the gap at zero).
 pub struct AtomSpec {
     pub latex: &'static str,
     pub kind: AtomKind,
@@ -287,7 +286,7 @@ pub static ATOMS: phf::Map<char, AtomSpec> = phf::phf_map! {
     '⨀' => big("bigodot"),
     '⨅' => big("bigsqcap"),
     '⨆' => big("bigsqcup"),
-    // ∑-class big operators (band-promotable; see AtomKind::BigOp).
+    // ∑-class big operators (core tier).
     '∑' => big("sum"),
     '∏' => big("prod"),
     '∐' => big("coprod"),
@@ -310,9 +309,9 @@ pub fn atom_of(c: char) -> Option<&'static AtomSpec> {
 /// The input direction, spelled out: every `\name` that types a
 /// character, alternative spellings or-ed onto the canonical one
 /// (which comes first) in the same entry — the LaTeX names, the ASCII
-/// pictures (`\->`, `\:=`, `\|x|`) and the abbreviations alike, all
-/// absorbed from the once-generated ext table. Deliberately a
-/// hand-written mirror of `ATOMS` rather than derived from it, so each
+/// pictures (`\->`, `\:=`, `\|x|`) and the abbreviations alike.
+/// Deliberately a hand-written mirror of `ATOMS` rather than derived
+/// from it, so each
 /// direction reads on its own; a spelling claimed twice fails the
 /// build (phf), and the tests pin the two tables together (every
 /// canonical spelling present, every target spells its LaTeX).
@@ -561,7 +560,7 @@ pub static NAMES: phf::Map<&'static str, char> = phf::phf_map! {
     "bigodot" => '⨀',
     "bigsqcap" => '⨅',
     "bigsqcup" => '⨆',
-    // ∑-class big operators
+    // ∑-class big operators (core tier).
     "sum" | "S" => '∑',
     "prod" | "P" => '∏',
     "coprod" => '∐',
@@ -827,8 +826,8 @@ mod tests {
 
     /// The two hand-written tables mirror each other: every atom's
     /// canonical `latex` spelling is claimed by exactly one char and
-    /// types it back through `NAMES` itself (not the ext fallback) —
-    /// \le and \leq type the same ≤ but it always prints as \le — and
+    /// types it back through `NAMES` itself — \le and \leq type the
+    /// same ≤ but it always prints as \le — and
     /// every `NAMES` entry targets a curated atom. A spelling written
     /// twice is a phf build error, so uniqueness needs no test.
     #[test]

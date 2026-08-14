@@ -25,15 +25,10 @@ pub enum Node {
     /// ad-hoc one (`vol`); the dictionary only decides whether the name
     /// takes limits and how the ASCII run lexer splits it.
     Func(String),
-    /// Upright run. `math: true` is \mathrm — drawn bare when the
-    /// picture reads back unambiguously: >= 2 ASCII letters and not a
-    /// dictionary word, or a single letter glued to an alphabetic
-    /// neighbour (d𝑦, the roman differential); otherwise
-    /// 'single-quoted'. The quotes appear/disappear automatically as
-    /// the context changes. `math: false` is \text, always
-    /// "double-quoted". Interior spaces are drawn as ␣ inside quotes.
-    /// `\text{…}`: prose inside a formula, drawn in "double quotes"
-    /// (a literal `"` or `\` inside is escaped with a backslash).
+    /// `\text{…}`: prose inside a formula, always "double-quoted"
+    /// (a literal `"` or `\` inside is backslash-escaped; interior
+    /// spaces draw as ␣). Upright *math* runs are `Func`/`Roman`,
+    /// never `Text`.
     Text(String),
     /// A single upright letter — the differential `d` of `d𝑥`
     /// (`\mathrm{d}`). Longer upright runs are `Func` instead, so the
@@ -65,7 +60,7 @@ pub enum Node {
         num: Row,
         den: Row,
     },
-    /// index 2 = √, 3 = ∛, 4 = ∜ (the only radical glyphs Unicode has).
+    /// √ ∛ ∜ — the only radical glyphs Unicode has, hence the closed enum.
     Sqrt {
         arg: Row,
         index: crate::symbols::Radical,

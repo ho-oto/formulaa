@@ -108,10 +108,10 @@ fn tokenize(s: &str) -> Vec<Tok> {
 
 // ----- region scanning -----
 
-/// Index just past `t[..]` of the token that closes the region opened
-/// right before `t[0]` (a `{`, `\left` or `\begin`), or None. `open` /
-/// `close` classify the two token kinds; nesting of all three region
-/// kinds is tracked so a nested group cannot hide a `\right`.
+/// Index in `t` of the token that closes the region opened right
+/// before `t[0]` (a `{`, `\left` or `\begin`), or None. Nesting of
+/// all three region kinds is tracked, so a nested group cannot hide a
+/// `\right`.
 fn find_match(t: &[Tok], is_close: impl Fn(&Tok) -> bool) -> Option<usize> {
     let mut group = 0i32;
     let mut lr = 0i32;
@@ -399,11 +399,11 @@ impl Parser {
     /// A control sequence. `t` starts right after the command token.
     fn command<'a>(&self, name: &str, t: &'a [Tok], out: &mut Row) -> &'a [Tok] {
         match name {
-            // \not negates the following relation when Unicode has the
-            // negated codepoint; otherwise it is skipped (best effort).
+            // \not negates the following relation through the shared
+            // symbols::negated table; with no slashed codepoint the
+            // \not is dropped and the relation stays bare (best
+            // effort).
             "not" => {
-                // One shared table (symbols::negated); a relation with
-                // no slashed form keeps its bare self instead.
                 let negated = crate::symbols::negated;
                 let mut i = 0;
                 while t.get(i) == Some(&Tok::Space) {
@@ -500,9 +500,8 @@ impl Parser {
                 t
             }
             "cancel" => {
-                // No struck form exists (strike overlays were removed
-                // for display stability): best effort keeps the
-                // content and drops the line.
+                // No struck form exists (adr.md §67): keep the
+                // content, drop the line.
                 let (arg, t) = self.arg(t);
                 out.extend(arg);
                 t
@@ -844,8 +843,7 @@ impl Parser {
             mids: 0,
             segs: vec![vec![array]],
         };
-        // The environment table is the editor's (one row per env, both
-        // LaTeX directions and the \pmatrix commands read it).
+        // GRID_ENVS lives in symbols::grids; the editor re-exports it.
         use crate::editor::{GRID_ENVS, GridWrap};
         match GRID_ENVS.get(name.as_str()).copied() {
             Some(GridWrap::Bare) => out.push(array),

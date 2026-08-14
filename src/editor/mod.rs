@@ -8,7 +8,6 @@ pub use crate::symbols::{GRID_ENVS, GridWrap};
 
 /// A cursor position: path into nested rows plus a column.
 pub type CursorPos = (Vec<(usize, Field)>, usize);
-/// A block-select target: (parent row path, node index).
 /// One ^B target: the row that holds it (as a cursor path) and the
 /// node range it covers. Ancestor nodes are one-node ranges; the last
 /// target is the whole top-level row, so walking outward ends on
@@ -104,9 +103,6 @@ pub struct Editor {
     /// disarms (the key layer takes it, like a one-shot anchor).
     pub(crate) unwrap_armed: Option<Vec<(usize, Field)>>,
 }
-
-// The display markers live in `glyphs::Mark` — the one place their
-// wire chars are spelled, so both front-ends decode alike.
 
 /// Vertical distance weight for free-cursor snapping (a row of
 /// distance costs as much as this many columns).
@@ -534,7 +530,6 @@ impl Editor {
     // ----- insertion -----
 
     pub fn insert_sym(&mut self, c: char) {
-        // Typing over an active selection replaces it.
         if self.selection().is_some() {
             self.take_selection();
         }
@@ -587,11 +582,9 @@ impl Editor {
                 self.push_undo(before);
             }
         }
-        // The minibuffer closes on a click. It used to swallow the
-        // click as well whenever a preview was open, because the
-        // preview opened rows the coordinate probe knew nothing about
-        // — the preview floats now, so the coordinates are sound and
-        // the click lands where it was aimed.
+        // The minibuffer closes on a click; the preview floats above
+        // the formula, so the probe's coordinates are sound and the
+        // click lands where it was aimed.
         if self.minibuffer.is_some() {
             self.minibuffer = None;
             self.clear_message();
@@ -1389,7 +1382,6 @@ impl Editor {
         self.col = 0;
     }
 
-    /// Innermost enclosing Array: (path index, node index, cell index).
     /// Whether the cursor sits inside a matrix — i.e. whether ^G
     /// (grid edit) would do anything here. The help line shows or
     /// hides the chord by this.
@@ -1397,6 +1389,7 @@ impl Editor {
         self.enclosing_array().is_some()
     }
 
+    /// Innermost enclosing Array: (path index, node index, cell index).
     pub(crate) fn enclosing_array(&self) -> Option<(usize, usize, usize)> {
         self.path
             .iter()
@@ -1409,8 +1402,9 @@ impl Editor {
             })
     }
 
-    /// Grid editing. `MutOp` computes (new rows, new cols, new cells, new
-    /// cursor cell) from the current grid and cursor cell.
+    /// Grid surgery plumbing: `op` mutates the cells in place and
+    /// returns (new rows, new cols, new cursor cell), or None to
+    /// refuse the edit.
     fn edit_array(
         &mut self,
         op: impl FnOnce(usize, usize, &mut Vec<Row>, usize) -> Option<(usize, usize, usize)>,

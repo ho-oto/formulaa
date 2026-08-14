@@ -1,8 +1,7 @@
 //! Accent marks, as an enum: the AST stores `Accent`, and everything
 //! about a mark — its command name, LaTeX spelling, side, and the
-//! glyph its picture shows — is answered here. The old mark *chars*
-//! (`^` `⇀` `¨` …) do not exist: they appear in no picture and no
-//! output, so they were an untyped spelling of exactly this enum.
+//! glyph its picture shows — is answered here. Mark chars appear in
+//! no picture and no output (adr.md §62).
 
 /// An accent mark. Over-marks stack above the base, under-marks below;
 /// the two sets are disjoint, which is what makes a mark-on-base
