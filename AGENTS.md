@@ -1,6 +1,6 @@
 # formulAA — guide for AI developers
 
-LyX-style TUI math editor plus AA⇄AST bidirectional converter.
+WYSIWYG TUI math editor plus AA⇄AST bidirectional converter.
 Rust / ratatui. The project is spelled **formulAA** in prose and titles;
 the crate, binary, and identifiers are `formulaa`.
 
@@ -62,7 +62,7 @@ test fails — vacuous tests have slipped through more than once.
 | `src/ast.rs` | the math AST (`Node`/`Row`/`Field`), cursor paths, `normalize` |
 | `src/render/` | AST → 2D block with baseline. `block.rs` is node-agnostic block algebra; `mod.rs` holds the per-node rules |
 | `src/parse.rs` | AA → AST: region+baseline recursive descent; canonical acceptance plus lenient input |
-| `src/editor/mod.rs` | the structure editor (LyX-style cursor; insert/move/delete/select; staged unwrap of `Delim`/`Norm`/`Sqrt`) |
+| `src/editor/mod.rs` | the structure editor (the cursor is a path into the tree; insert/move/delete/select; staged unwrap of `Delim`/`Norm`/`Sqrt`) |
 | `src/editor/modes.rs` | ^F free cursor · ^B block select · ^G grid edit (`GridSel`) · display decoration (`decorated`) |
 | `src/editor/command.rs` | **`Edit` enum + `resolve`/`apply`** (pure spelling resolution split from application), mode commands (`ModeCmd` — spellings for the ctrl chords, dispatched by the input layer), `\op` name box |
 | `src/complete.rs` | **Tab completion** (spelling enumeration, scoring, grouping by identical `Edit`, step rows, mode rows). **Touches no data sources** — derives everything from table keys and `resolve`/`preview_row`; removable as a unit |

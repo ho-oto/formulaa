@@ -1,6 +1,6 @@
 //! Structural editing model. The cursor is a path of (node index, field)
 //! pairs from the root row plus a column inside the innermost row —
-//! the same model LyX uses for math insets.
+//! the usual WYSIWYG model for math insets.
 
 use crate::ast::{Field, Node, Row, row_at, row_at_mut};
 use crate::glyphs::Mark;
@@ -869,8 +869,9 @@ impl Editor {
         // Bare big operator to the left of the cursor: promote it to a
         // band and enter the limit. Needed to reopen the limits of a
         // normalized formula — an empty-limit BigOp does not survive the
-        // canonical form (e.g. a --session restore), so a plain ∑ / lim
-        // atom must be liftable back from the UI.
+        // canonical form (a formula read back from its AA carries the
+        // bare atom), so a plain ∑ / lim atom must be liftable from the
+        // UI.
         if self.col > 0 {
             let col = self.col - 1;
             let promotable = match &self.cur_row()[col] {
@@ -941,7 +942,7 @@ impl Editor {
         }
     }
 
-    /// LyX-style Space: leave the innermost inset, landing just after it.
+    /// Leave the innermost inset, landing just after it.
     pub fn exit_inset(&mut self) {
         if let Some((i, _)) = self.path.pop() {
             self.col = i + 1;
@@ -1282,7 +1283,7 @@ impl Editor {
         }
     }
 
-    // ----- LyX-like keys -----
+    // ----- structure keys -----
 
     /// Insert a delimiter block and enter its first segment.
     pub fn insert_delim(&mut self, left: Delim, right: Delim, mids: usize) {
@@ -2166,8 +2167,9 @@ mod tests {
 
     #[test]
     fn vertical_promotes_a_bare_big_operator() {
-        // A --session restore normalizes an empty-limit band to a bare
-        // atom; ↑/↓ next to it must reopen the limits.
+        // An empty-limit band normalizes to a bare atom (which is what a
+        // formula read back from its AA carries); ↑/↓ next to it must
+        // reopen the limits.
         let mut ed = Editor::new();
         ed.root = vec![Node::Sym('∑')];
         ed.col = 1;

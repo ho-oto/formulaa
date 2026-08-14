@@ -295,7 +295,6 @@ pub fn normalize(row: &Row) -> Row {
             Node::BigOp { name, lower, upper } if lower.is_empty() && upper.is_empty() => {
                 pre.push(bare_upright(name))
             }
-            // A markless wide accent is just its base.
             Node::WideAccent {
                 overs,
                 unders,
@@ -459,15 +458,11 @@ pub fn strip_spacers(row: &Row) -> Row {
 
 fn normalize_node(node: &Node) -> Node {
     match node {
-        // A markless accent is just its base.
         Node::Accent {
             overs,
             unders,
             base,
-        } if overs.is_empty() && unders.is_empty() => {
-            let _ = (overs, unders);
-            Node::Sym(*base)
-        }
+        } if overs.is_empty() && unders.is_empty() => Node::Sym(*base),
         Node::Sym(_)
         | Node::Spacer
         | Node::Break

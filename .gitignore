@@ -1,7 +1,3 @@
 /target
 formulaa_debug/
 .vscode/
-
-# artifacts from before the rename (mascii -> formulAA)
-mascii_debug/
-.mascii-session

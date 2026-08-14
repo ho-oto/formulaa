@@ -724,17 +724,16 @@ fn tall_middle_braket() {
     // glyphs appear only in the one-line form.
     let aa = render_root(&normalize(&row), None, &RenderCtx::canonical()).to_text();
     assert_eq!(aa, " ╱ │ 𝐻 │ ╲\n╱ ψ│───│ψ ╲\n╲  │ 2 │  ╱\n ╲ │   │ ╱");
-    // The legacy single-column ╱⟨╲ form still parses when the content
-    // fits the vertex row…
-    assert!(parse("╱     ╲\n⟨𝑥 + 𝑦⟩\n╲     ╱").is_ok());
-    // …but taller content used to be SILENTLY DROPPED (the fraction's
-    // rows are outside the ⟨ column's extent); that is an error now.
-    let legacy = "╱     1 ╲\n⟨𝑥 + ───⟩\n╲     2 ╱";
-    assert!(
-        parse(legacy).is_err(),
-        "content outside the vertex row must not be dropped: {:?}",
-        parse(legacy)
-    );
+    // A ⟨ vertex between the arms is not a tall angle: the fold is the
+    // ╱╲ pair, and a picture that spells it otherwise is an error
+    // rather than a partial read (the content beside the vertex row
+    // has no rectangle of its own).
+    for old in [
+        "╱     ╲\n⟨𝑥 + 𝑦⟩\n╲     ╱",
+        "╱     1 ╲\n⟨𝑥 + ───⟩\n╲     2 ╱",
+    ] {
+        assert!(parse(old).is_err(), "read as an angle: {:?}", parse(old));
+    }
 }
 
 /// Multi-line formula: Breaks stack the lines with a lone-┈ continuation

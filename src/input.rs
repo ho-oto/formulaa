@@ -37,10 +37,10 @@ pub enum Effect {
 }
 
 impl Editor {
-    /// One keystroke of the shared LyX-style keymap. Wraps the dispatch
-    /// with undo bookkeeping: any key that changes the formula pushes
-    /// the pre-state (undo/redo themselves are handled here so they
-    /// never re-enter the history).
+    /// One keystroke of the shared keymap. Wraps the dispatch with undo
+    /// bookkeeping: any key that changes the formula pushes the
+    /// pre-state (undo/redo themselves are handled here so they never
+    /// re-enter the history).
     pub fn input(&mut self, key: Key, shift: bool, ctrl: bool) -> Effect {
         if ctrl && !self.mode_active() {
             match key {
@@ -528,7 +528,6 @@ impl Editor {
                 Key::Char('v') => self.paste(),
                 // Emacs pairing: ^A start, ^E end of the formula.
                 Key::Char('e') => self.document_end(),
-                // ^G: grid edit mode (inside a matrix).
                 Key::Char('g') => self.grid_mode_toggle(),
                 // ^D: delete forward, the Emacs pairing for Backspace
                 // (and the only forward delete on keyboards without a

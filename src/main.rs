@@ -199,7 +199,6 @@ fn handle_key(ed: &mut Editor, code: KeyCode, mods: KeyModifiers) -> bool {
 fn handle_effect(ed: &mut Editor, effect: Effect) -> bool {
     match effect {
         Effect::Quit => return true,
-        // Yank: canonical AA to the system clipboard.
         Effect::CopyAa => {
             let aa = formulaa::render::export_aa(&ed.root);
             match copy_to_clipboard(&aa) {

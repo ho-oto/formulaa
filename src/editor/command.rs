@@ -315,8 +315,6 @@ impl Editor {
             }),
             Edit::Grid { wrap, rows, cols } => match wrap {
                 GridWrap::Pair(l, r) => self.insert_grid(l, r, rows, cols),
-                // A bare grid is a self-delimiting lattice: an Array
-                // node, entered at its first cell like any template.
                 GridWrap::Norm => self.insert_norm_grid(rows, cols),
                 GridWrap::Bare => self.insert_and_enter(Node::Array {
                     rows,
@@ -532,10 +530,8 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
         "latex" => Some(Edit::OpenBox(BoxKind::Tex)),
         _ => {
             if let Some(index) = Radical::of_name(cmd) {
-                // The root signs (\sqrt \cbrt \qdrt) wrap a selection.
                 wrap(Node::Sqrt { arg: vec![], index })
             } else if let Some(op) = Arrow::of_name(cmd) {
-                // The stretchy labeled arrows (\xto and friends).
                 ins(Node::Arrow {
                     op,
                     over: vec![],
@@ -546,7 +542,6 @@ pub fn resolve(cmd: &str) -> Option<Edit> {
             } else if let Some((l, r, mids)) = lr_spec(cmd) {
                 delim(l, r, mids)
             } else if crate::symbols::func_takes_limits(cmd) {
-                // Limit-taking operators enter the lower limit (┈lim┈).
                 ins(Node::BigOp {
                     name: cmd.to_string(),
                     lower: vec![],

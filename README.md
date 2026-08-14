@@ -3,7 +3,7 @@
 **Plain-text math that round-trips.** formulAA is a 2D formula format —
 Unicode-first "ASCII art" that reads like typeset math — with one unusual
 property: every picture parses back to exactly the syntax tree that drew
-it. It ships with a LyX-style structure editor (TUI and browser) and a
+it. It ships with a WYSIWYG structure editor (TUI and browser) and a
 converter to LaTeX.
 
 ```plain
@@ -123,7 +123,7 @@ markers, so rows and columns are unambiguous even with empty cells:
 
 ## The editor
 
-`cargo run` opens a LyX-style structural editor in the terminal: you
+`cargo run` opens a WYSIWYG structure editor in the terminal: you
 edit the tree, and the picture follows.
 
 - Type naturally: letters become math italics, `//` makes a fraction,

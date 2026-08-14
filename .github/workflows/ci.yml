@@ -6,11 +6,6 @@ on:
   schedule:
     - cron: "17 18 * * *"
 
-# Actions are pinned to commit SHAs, not tags: a tag is a moving
-# pointer the action's owner can repoint at any time, and these run
-# with a token in a repository we push to. The comment says which
-# release each SHA is, so a bump is a readable diff.
-#
 # dtolnay/rust-toolchain takes its channel from the `toolchain` input
 # (defaulting to stable), so pinning the ref does not change which
 # toolchain is installed — it is spelled out anyway, because the ref no

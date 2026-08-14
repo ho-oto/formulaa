@@ -138,14 +138,12 @@ impl Editor {
         self.clear_message();
     }
 
-    /// Ctrl+E: jump to the very end of the formula.
     pub fn document_end(&mut self) {
         self.select_anchor = None;
         self.path.clear();
         self.col = self.root.len();
     }
 
-    /// Ctrl+A: jump to the very start of the whole formula.
     pub fn document_start(&mut self) {
         self.select_anchor = None;
         self.path.clear();
@@ -833,7 +831,6 @@ impl Editor {
         }
     }
 
-    /// Delete in lane mode: remove the selected lane(s).
     pub fn lane_delete_sel(&mut self) {
         let Some((cols, lo, hi)) = self.lane_range() else {
             return;

@@ -9,5 +9,4 @@ pub mod parse;
 pub mod render;
 pub mod symbols;
 
-// The serializer keeps its historical crate-root path (formulaa::latex).
 pub use output::latex;

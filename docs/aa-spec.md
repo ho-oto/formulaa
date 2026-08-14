@@ -98,8 +98,8 @@ column after trimming**:
    contents).
 2. Strip accent marks growing down from the top and up from the bottom;
    what remains is the base's row.
-3. Otherwise branch on the first glyph: brace/angle verticals with a
-   vertex (`⎨`, `⟨`) → the vertex row; `╱` with `╲` directly below it →
+3. Otherwise branch on the first glyph: a brace vertical with its
+   vertex (`⎨`) → the vertex row; `╱` with `╲` directly below it →
    an angle fold, the upper row; paren/bracket/bar/null columns
    (`⎛ ⎡ ⎢ ┆`) → the extent's center row if the interior is a fused
    grid, else recurse into the interior; lattice edges (`┌ ├ └`) → the

@@ -571,7 +571,6 @@ fn delim_shape(node: &Node) -> DelimShape<'_> {
 }
 
 fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx) -> Block {
-    // Cursor for a specific field of this node.
     let cur = |f: Field| -> Option<CursorRef> {
         match cursor {
             Some((cf, c)) if cf == f => Some(c),

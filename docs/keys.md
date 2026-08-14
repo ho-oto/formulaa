@@ -1,7 +1,7 @@
 # Keys
 
-The TUI (`formulAA`) is a LyX-style structural editor: the cursor is
-always an edit position inside the formula tree. The same keymap runs
+The TUI (`formulAA`) is a WYSIWYG structure editor: the cursor is always
+an edit position inside the formula tree. The same keymap runs
 in the wasm-based editor extensions. `\commands` (including completion
 and the mode spellings for stolen ctrl chords) are in
 [commands.md](commands.md).

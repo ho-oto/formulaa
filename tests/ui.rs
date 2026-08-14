@@ -277,7 +277,7 @@ fn ctrl_e_jumps_to_the_end_outside_grids() {
     assert_eq!((ed.path.len(), ed.col), (0, 0));
     type_script(&mut ed, "C-e");
     assert_eq!((ed.path.len(), ed.col), (0, 3), "formula end");
-    // ^E is the end jump even inside a grid cell (grid mode is ^O).
+    // ^E is the end jump even inside a grid cell (grid mode is ^G).
     let mut ed = Editor::new();
     type_script(&mut ed, r"\bmatrix22 x C-g");
     assert!(ed.grid.is_some());
@@ -482,7 +482,7 @@ fn enter_on_empty_formula_does_not_crash() {
 
 #[test]
 fn grid_edit_mode() {
-    // ^O: cell-unit cursor; Enter leaves the mode to edit that cell.
+    // ^G: cell-unit cursor; Enter leaves the mode to edit that cell.
     let mut ed = Editor::new();
     type_script(
         &mut ed,
@@ -516,7 +516,7 @@ fn grid_edit_mode() {
         "undo restored the row: {}",
         latex(&ed)
     );
-    // ^O outside a grid only reports.
+    // ^G outside a grid only reports.
     let mut ed = Editor::new();
     type_script(&mut ed, "x C-g d");
     assert_eq!(latex(&ed), "xd");
@@ -611,7 +611,7 @@ fn lane_selection_copies_its_cells() {
 
 #[test]
 fn cell_clip_pastes_over_cells_even_outside_grid_mode() {
-    // With the cursor in a grid cell but ^O off, a cell clipboard
+    // With the cursor in a grid cell but ^G off, a cell clipboard
     // still pastes as an overwrite — never a nested matrix.
     let mut ed = Editor::new();
     type_script(&mut ed, r"\bmatrix22 a Down b C-g S-Up C-c Esc Right C-v");
@@ -749,7 +749,7 @@ fn enter_at_top_level_breaks_the_line() {
 #[test]
 fn enter_inside_an_inset_is_inert() {
     // Enter only breaks lines at the top level; inside a grid cell it
-    // does nothing (rows are added in ^T grid mode or with \addrow).
+    // does nothing (rows are added in ^G grid mode or with \addrow).
     let mut ed = Editor::new();
     type_script(&mut ed, r"\pmatrix22 a Enter");
     let pic = aa(&ed);
@@ -1967,9 +1967,9 @@ fn container_commands_wrap_the_selection() {
 }
 
 /// The mode commands: minibuffer spellings for the ctrl chords, so a
-/// terminal that steals ^F/^B/^T/^C/^Q still has every mode. They
+/// terminal that steals ^F/^B/^G/^C/^Q still has every mode. They
 /// run on commit like any command, and the ordinary edits keep their
-/// meaning beside them (\t is a mode, \ta and \tau stay edits).
+/// meaning beside them (\g is a mode, \ga and \gamma stay edits).
 #[test]
 fn mode_commands_run_from_the_minibuffer() {
     // \free enters free-cursor mode; \f is the short form.
@@ -1980,7 +1980,7 @@ fn mode_commands_run_from_the_minibuffer() {
     type_script(&mut ed, r"x \f");
     assert!(ed.free.is_some());
 
-    // \b starts block select, \t toggles grid edit inside a matrix.
+    // \b starts block select, \g toggles grid edit inside a matrix.
     let mut ed = Editor::new();
     type_script(&mut ed, r"x ^ 2 \b");
     assert!(ed.block.is_some(), "block select did not start");

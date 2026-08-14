@@ -2,7 +2,7 @@
 name = "formulaa"
 version = "0.1.0"
 edition = "2024"
-description = "LyX-like interactive TUI math editor rendering Unicode/ASCII-art formulas"
+description = "WYSIWYG TUI math editor rendering Unicode/ASCII-art formulas"
 license = "MIT"
 
 [features]
@@ -12,8 +12,6 @@ default = ["tui"]
 tui = ["dep:ratatui", "dep:arboard"]
 
 [dependencies]
-# Compile-time perfect hash for the generated symbol table: no ordering
-# invariant to break by hand, and duplicate names fail the build.
 phf = { version = "0.14", features = ["macros"] }
 ratatui = { version = "0.30", optional = true }
 arboard = { version = "3", optional = true }

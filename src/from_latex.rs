@@ -339,7 +339,6 @@ impl Parser {
         match &t[0] {
             Tok::Open => match find_match(&t[1..], |k| *k == Tok::Close) {
                 Some(i) => {
-                    // A group is transparent: parse and splice.
                     out.extend(self.sub().row(&t[1..1 + i]));
                     &t[i + 2..]
                 }
@@ -348,7 +347,6 @@ impl Parser {
                     &t[t.len()..]
                 }
             },
-            // A stray closer: skip (best effort).
             Tok::Close => &t[1..],
             Tok::Ch(c) => self.plain_char(*c, t, out),
             Tok::Cmd(name) => self.command(name, &t[1..], out),

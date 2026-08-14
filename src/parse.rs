@@ -598,15 +598,14 @@ fn find_baseline(g: &Grid, rect: Rect) -> Result<usize> {
                 .ok_or(())
                 .or_else(|_| err("brace column without ⎨", first, c))
         }
-        // Angle: the ⟨ vertex (one-line form) or the diagonal turn
-        // pair — ╱ directly above ╲ in the leftmost column. The upper
-        // turn row is the baseline.
+        // Angle: the diagonal turn pair — ╱ directly above ╲ in the
+        // leftmost column. The upper turn row is the baseline.
         ARM_RISE | ARM_FALL => occupied
             .iter()
-            .find(|&&r| g.at(r, c) == '⟨' || angle_open_turn(g, r, c))
+            .find(|&&r| angle_open_turn(g, r, c))
             .copied()
             .ok_or(())
-            .or_else(|_| err("angle column without a vertex or turn", first, c)),
+            .or_else(|_| err("angle column without a turn", first, c)),
         // Lattice left-edge column: the grid centers on its extent.
         // A ┌ directly above a radical stem is the sqrt overline corner
         // (a lattice ┌ has a blank gap below instead): dive into the

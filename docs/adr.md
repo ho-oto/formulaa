@@ -429,6 +429,15 @@ by a corpus plus randomized property tests.
     same-row targets used to displace each other, cutting the ring
     short of the trailing atoms.
 
+81. **The legacy angle form dropped** (2026-08) — a tall angle is the
+    `╱╲` fold and nothing else: the baseline scan no longer takes a `⟨`
+    vertex sitting between the arms, the form the renderer stopped
+    writing in §49. Nothing emits that picture, so the branch only
+    bought reading files older than the format; the spec's baseline
+    recovery (§4) names brace vertices only. The prose calls the editor
+    WYSIWYG rather than LyX-style — the model is the common one, not
+    that program's.
+
 ## Test strategy
 
 - `tests/roundtrip.rs`: a corpus of real formulas (Cardano,
