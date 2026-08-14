@@ -3,7 +3,7 @@
 
 Most monospace fonts miss large parts of the Unicode math repertoire
 (mathematical alphanumerics, big operators, bracket pieces …), and when a
-terminal falls back to a proportional font the 2D layout of mascii output
+terminal falls back to a proportional font the 2D layout of formulAA output
 breaks. JuliaMono (https://juliamono.netlify.app/) covers nearly all of it.
 
 This script copies every glyph in the chosen math ranges that the base font
@@ -42,7 +42,7 @@ try:
 except ImportError:
     sys.exit("fontTools is required: pip install fonttools")
 
-# Curated ranges: everything mascii's canonical AA form can emit, plus the
+# Curated ranges: everything formulAA's canonical AA form can emit, plus the
 # broader math blocks so user symbols (\bbR, arrows, …) render too.
 MATH_RANGES = [
     (0x00A8, 0x00AF),    # ¨ ¯ (accent marks)
@@ -127,7 +127,7 @@ def rebuild_cmap(font: TTFont, mapping: dict) -> None:
 def rename_font(font: TTFont, family: str) -> None:
     name = font["name"]
     ps = family.replace(" ", "")
-    for nid, value in ((1, family), (3, f"{ps}:mascii-merged"), (4, family),
+    for nid, value in ((1, family), (3, f"{ps}:formulaa-merged"), (4, family),
                        (6, ps), (16, family)):
         name.removeNames(nameID=nid)
         name.setName(value, nid, 3, 1, 0x409)  # windows

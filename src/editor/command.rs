@@ -14,6 +14,9 @@ impl Editor {
         self.op_entry = Some((kind, String::new()));
         self.op_cmd = self.executing.clone();
         self.op_cursor = 0;
+        // A stale \-escape must not leak into a fresh box (a click-away
+        // commit skips the key dispatch that would have cleared it).
+        self.op_escape = false;
     }
 
     /// The byte offset of char index `i` in the open box's content.
@@ -430,7 +433,7 @@ pub enum Edit {
 }
 
 /// The mode and system commands: minibuffer spellings for what
-/// normally lives on a ctrl chord (^F, ^B, ^T, ^C, ^Q), so the
+/// normally lives on a ctrl chord (^F, ^B, ^G, ^C, ^Q), so the
 /// editor still works in a terminal that steals those chords. They
 /// are not `Edit`s — they move a mode, the clipboard, or the app
 /// itself — so `resolve` never sees them; the input layer runs them.

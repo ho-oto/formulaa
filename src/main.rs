@@ -16,25 +16,34 @@ use formulaa::render::{RenderCtx, render_root};
 use formulaa::{ast, latex, parse};
 
 const USAGE: &str = "\
-usage: formulaa [--debug]       interactive TUI editor
+usage: formulaa [--debug] [--print]   interactive TUI editor
        formulaa aa2tex   [FILE] AA formula (file or stdin) -> LaTeX
        formulaa tex2aa   [FILE] LaTeX math (file or stdin) -> AA, best effort
        formulaa fmt      [FILE] AA formula -> canonical AA (normalize)
 
 --debug: on a roundtrip failure, keep the state and dump a report to
-formulaa_debug/ (default: refuse the edit)";
+formulaa_debug/ (default: refuse the edit)
+--print: print the formula's canonical AA to stdout on exit";
 
 fn main() -> std::io::Result<()> {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let debug = args.iter().any(|a| a == "--debug");
-    args.retain(|a| a != "--debug");
+    let print_on_exit = args.iter().any(|a| a == "--print");
+    args.retain(|a| a != "--debug" && a != "--print");
     match args.first().map(String::as_str) {
         Some(m @ ("aa2tex" | "tex2aa" | "fmt")) => {
             return convert(m, args.get(1).map(String::as_str));
         }
-        Some(_) => {
+        Some("-h" | "--help") => {
             println!("{}", USAGE);
             return Ok(());
+        }
+        // An unknown argument is an error: usage on stderr, nonzero
+        // exit, so a typoed pipeline fails instead of consuming the
+        // banner as output.
+        Some(a) => {
+            eprintln!("unknown argument: {}\n{}", a, USAGE);
+            std::process::exit(2);
         }
         None => {}
     }
@@ -97,7 +106,13 @@ fn main() -> std::io::Result<()> {
                             }
                             guard.check(&mut ed);
                         }
-                        None => ed.click(cx, cy),
+                        None => {
+                            ed.click(cx, cy);
+                            // A click can commit an open box (a real
+                            // edit), so it faces the guard like any
+                            // keystroke.
+                            guard.check(&mut ed);
+                        }
                     }
                 }
             }
@@ -108,6 +123,9 @@ fn main() -> std::io::Result<()> {
 
     let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
+    if print_on_exit && !ed.root.is_empty() {
+        println!("{}", formulaa::render::export_aa(&ed.root));
+    }
     result
 }
 

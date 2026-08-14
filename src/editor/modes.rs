@@ -1,5 +1,5 @@
 //! Interactive modes layered over the structural editor: the free
-//! cursor (^F), grid editing (^O) and the display decoration they
+//! cursor (^F), grid editing (^G) and the display decoration they
 //! paint through. None of these change the formula — they move the
 //! cursor or hand a selection to the editor — which is why they live
 //! apart from the editing operations.
@@ -512,7 +512,7 @@ impl Editor {
         (root, Some((path, col)))
     }
 
-    /// ^O: the frame corners, the cell/lane selection pair, and the gap ghost (the one decoration with real width).
+    /// ^G: the frame corners, the cell/lane selection pair, and the gap ghost (the one decoration with real width).
     fn decorate_grid(&self) -> (Row, Option<CursorPos>) {
         let mut root = self.root.clone();
         let gs = self.grid.expect("grid mode");
@@ -677,6 +677,13 @@ impl Editor {
     /// once. An empty cell has nothing to select and just exits.
     pub fn grid_commit_cell(&mut self) {
         self.grid = None;
+        // The highlighted thing is the cell, not wherever the cursor
+        // is parked inside it — climb to the cell row first (as
+        // grid_move does).
+        if let Some((k, i, c)) = self.enclosing_array() {
+            self.path.truncate(k);
+            self.path.push((i, Field::Cell(c)));
+        }
         let n = self.cur_row().len();
         if n > 0 {
             self.select_anchor = Some(0);
@@ -686,7 +693,7 @@ impl Editor {
         }
     }
 
-    /// Toggle grid edit mode (^T; only meaningful inside a matrix).
+    /// Toggle grid edit mode (^G; only meaningful inside a matrix).
     pub fn grid_mode_toggle(&mut self) {
         if self.grid.is_some() {
             self.grid = None;
@@ -896,10 +903,12 @@ impl Editor {
     }
 
     pub fn undo(&mut self) {
-        // The pending unwrap belongs to the tree that is being
-        // replaced: `input` returns before the key layer's one-shot
-        // take, so it would otherwise survive onto a different tree.
+        // The pending unwrap and armed mid belong to the tree that is
+        // being replaced: `input` returns before the key layer's
+        // one-shot take, so they would otherwise survive onto a
+        // different tree.
         self.unwrap_armed = None;
+        self.mid_armed = None;
         let Some((root, path, col)) = self.undo.pop() else {
             return;
         };
@@ -916,10 +925,12 @@ impl Editor {
     }
 
     pub fn redo(&mut self) {
-        // The pending unwrap belongs to the tree that is being
-        // replaced: `input` returns before the key layer's one-shot
-        // take, so it would otherwise survive onto a different tree.
+        // The pending unwrap and armed mid belong to the tree that is
+        // being replaced: `input` returns before the key layer's
+        // one-shot take, so they would otherwise survive onto a
+        // different tree.
         self.unwrap_armed = None;
+        self.mid_armed = None;
         let Some((root, path, col)) = self.redo.pop() else {
             return;
         };

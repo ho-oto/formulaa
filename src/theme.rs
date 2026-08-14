@@ -89,7 +89,7 @@ pub const GRID_INSERT_BG: Color = GREEN;
 /// The edited matrix's lattice frame while grid mode is active — the
 /// "you are in grid mode" signal.
 pub const GRID_FRAME_FG: Color = GREEN;
-/// The caret while a name box (\op \rm \text \tex) is open — green,
+/// The caret while a name box (\op \rm \text \latex) is open — green,
 /// so the modal layer shows at the cursor itself.
 pub const BOX_CURSOR_FG: Color = WHITE;
 pub const BOX_CURSOR_BG: Color = GREEN;

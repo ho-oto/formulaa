@@ -114,8 +114,7 @@ impl Completion {
 /// The list's base size: enough to be worth scanning, few enough to
 /// stay a popup. Not a hard cap — a hint family keeps all its rows
 /// and the ordinary matches keep their MAX_TAIL, so a query like
-/// `\lr` (twelve tokens) runs to MAX_ITEMS + MAX_TAIL rows, and the
-/// popup scrolls.
+/// `\lr` (sixteen step rows) runs past it and the popup scrolls.
 pub const MAX_ITEMS: usize = 12;
 
 /// Continuation hints (`\lr(`, `\frak{a…z}`) arrive as a family — a
@@ -566,7 +565,7 @@ fn grid_hints(query: &str) -> Vec<(u32, Item)> {
         .collect()
 }
 
-/// The mode commands (^F, ^B, ^T, ^Y, ^Q) have minibuffer spellings
+/// The mode commands (^F, ^B, ^G, ^Y, ^Q) have minibuffer spellings
 /// for terminals that steal those chords; the popup lists them like
 /// anything else, told apart by the symbol column: `[^F]`, drawn
 /// bold — a chord where the edits show a glyph. (A row tint was
@@ -622,12 +621,14 @@ pub fn complete(query: &str) -> Vec<Item> {
         .chain(grid_hints(query))
         .collect();
     hits.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.names.cmp(&b.1.names)));
-    // Two budgets rather than one: the hints keep their whole family,
-    // and the matches keep a tail. Only when the hints are few does
-    // the list stay the plain MAX_ITEMS it looks like.
+    // Two budgets rather than one: the hints keep their whole family
+    // uncapped — a truncated family teaches that the dropped sibling
+    // spellings don't exist — and the matches keep a tail. Only when
+    // the hints are few does the list stay the plain MAX_ITEMS it
+    // looks like.
     let hint_count = hits.iter().filter(|(_, i)| i.is_step()).count();
     let mut room = (
-        MAX_ITEMS,
+        usize::MAX,
         MAX_TAIL.max(MAX_ITEMS.saturating_sub(hint_count)),
     );
     let mut items: Vec<Item> = hits
@@ -1039,5 +1040,23 @@ mod tests {
             "{:?}",
             rows
         );
+    }
+
+    /// The hint budget must not truncate a family: `\\lr` offers every
+    /// named opener, or a missing sibling reads as a spelling that
+    /// does not exist (`lr\\lceil` offered, `lr\\lfloor` absent).
+    #[test]
+    fn a_hint_family_is_never_truncated() {
+        let rows = complete("lr");
+        for want in [
+            "none", "vert", "lceil", "lfloor", "langle", "lbrace", "lbrack", "lparen",
+        ] {
+            assert!(
+                rows.iter()
+                    .any(|i| i.step_to().is_some_and(|s| s == format!("lr\\{want}"))),
+                "lr\\{want} missing: {:?}",
+                rows.iter().filter_map(|i| i.step_to()).collect::<Vec<_>>()
+            );
+        }
     }
 }

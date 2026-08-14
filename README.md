@@ -152,7 +152,8 @@ CLI-task based (see the roadmap in [docs/adr.md](docs/adr.md)).
 ## CLI
 
 ```sh
-formulaa                       # the TUI editor (^Y copies the AA)
+formulaa                       # the TUI editor (^Y copies the AA;
+                             #   --print writes it to stdout on exit)
 formulaa aa2tex formula.txt    # AA → LaTeX (stdin works too)
 formulaa tex2aa formula.tex    # LaTeX → AA, best effort (KaTeX/MathJax dialect)
 formulaa fmt    formula.txt    # normalize hand-written AA to canonical form

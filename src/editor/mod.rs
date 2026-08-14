@@ -34,7 +34,7 @@ pub struct Editor {
     /// Some(text) while the `\command` minibuffer is open.
     pub minibuffer: Option<String>,
     /// Some((kind, content)) while an in-place name box (\op \op* \rm
-    /// \text \tex) is open.
+    /// \text \latex) is open.
     pub op_entry: Option<(BoxKind, String)>,
     /// The spelling currently being executed (set around `apply`), so
     /// an error can answer in the alias the user actually typed.
@@ -54,7 +54,7 @@ pub struct Editor {
     /// Pending backslash escape inside the \text box (the next key is
     /// typed literally, so \" enters a quote).
     pub(crate) op_escape: bool,
-    /// Grid edit mode (^T inside a matrix): cell-unit selection, with
+    /// Grid edit mode (^G inside a matrix): cell-unit selection, with
     /// column/row lane sub-modes (see `GridSel`).
     pub grid: Option<GridSel>,
     /// Undo/redo stacks of snapshots. Pushed by `input` whenever a key
@@ -129,11 +129,11 @@ pub enum BoxKind {
     Rm,
     /// \text: one "double-quoted" text run.
     Text,
-    /// \tex / \latex: LaTeX math, read best-effort into nodes.
+    /// \latex: LaTeX math, read best-effort into nodes.
     Tex,
 }
 
-/// Grid edit mode (^O): what the mode's cursor is on.
+/// Grid edit mode (^G): what the mode's cursor is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GridSel {
     /// Cell-unit cursor (the cell the edit cursor is parked in), with
@@ -214,16 +214,19 @@ struct Frame {
 impl Frame {
     fn map(&self, p: &[(usize, Field)], c: usize) -> (Vec<(usize, Field)>, usize) {
         let (mut p2, c2) = ghost_adjust(&self.ghosts, p, c);
-        self.gap_fix(&mut p2);
+        self.gap_fix(p, &mut p2);
         (p2, c2)
     }
 
-    fn gap_fix(&self, p: &mut [(usize, Field)]) {
+    /// Shift the Cell index past the previewed gap lane. The match runs
+    /// on the *raw* path — `gs.parent` is raw, and a ghost above the
+    /// grid may already have bumped the adjusted coordinates.
+    fn gap_fix(&self, raw: &[(usize, Field)], p: &mut [(usize, Field)]) {
         let Some(gs) = &self.gap else { return };
-        if p.len() > gs.k
-            && p[..gs.k] == gs.parent[..]
-            && p[gs.k].0 == gs.i
-            && let Field::Cell(cell) = p[gs.k].1
+        if raw.len() > gs.k
+            && raw[..gs.k] == gs.parent[..]
+            && raw[gs.k].0 == gs.i
+            && let Field::Cell(cell) = raw[gs.k].1
         {
             p[gs.k].1 = Field::Cell(modes_gap_shift(cell, gs.cmode, gs.g, gs.rows, gs.cols));
         }
@@ -571,11 +574,18 @@ impl Editor {
         // user can no longer see.
         self.completion = None;
         self.unwrap_armed = None;
+        self.mid_armed = None;
         // Clicking away from an open name box commits it, like the
         // edge-exit does — the box must not follow the cursor to the
-        // clicked position.
+        // clicked position. The commit is an edit like any other, so
+        // it gets its own history step (the key layer's snapshot
+        // bookkeeping never sees a mouse event).
         if self.op_entry.is_some() {
+            let before = (self.root.clone(), self.path.clone(), self.col);
             self.op_commit();
+            if self.root != before.0 {
+                self.push_undo(before);
+            }
         }
         // The minibuffer closes on a click. It used to swallow the
         // click as well whenever a preview was open, because the
@@ -695,8 +705,9 @@ impl Editor {
         let mut ghosts: Vec<&Vec<(usize, Field)>> = self.ghost.iter().collect();
         ghosts.sort_by_key(|p| std::cmp::Reverse(p.len()));
         for p in ghosts {
+            let raw = p.clone();
             let mut p = p.clone();
-            frame.gap_fix(&mut p);
+            frame.gap_fix(&raw, &mut p);
             row_at_mut(root, &p).insert(0, Node::Sym(Mark::SlotGhost.ch()));
         }
         frame
@@ -1379,7 +1390,7 @@ impl Editor {
     }
 
     /// Innermost enclosing Array: (path index, node index, cell index).
-    /// Whether the cursor sits inside a matrix — i.e. whether ^T
+    /// Whether the cursor sits inside a matrix — i.e. whether ^G
     /// (grid edit) would do anything here. The help line shows or
     /// hides the chord by this.
     pub fn in_grid(&self) -> bool {
@@ -1576,7 +1587,6 @@ impl Editor {
         let Some((r0, j0, r1, j1)) = self.grid_rect() else {
             return;
         };
-        self.copy_flash = true;
         self.edit_array(|rows, cols, cells, c| {
             for r in r0..=r1.min(rows - 1) {
                 for j in j0..=j1.min(cols - 1) {
@@ -1612,6 +1622,7 @@ impl Editor {
             cols: cw,
             cells: out,
         };
+        self.copy_flash = true;
     }
 
     /// Cut = copy + clear.

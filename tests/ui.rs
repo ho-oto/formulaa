@@ -2271,3 +2271,99 @@ fn whole_formula_ring_encloses_everything() {
     assert_eq!(closes.len(), 2, "{seq:?}");
     assert!(closes[0] < seq.len() - 1, "the boxes collapsed: {seq:?}");
 }
+
+/// Review findings, 2026-08: the armed-│ one-shot must not survive a
+/// click or an undo (both bypass the key layer's take), ^D must honor
+/// it like the other deletes, and a chord must never type into the
+/// minibuffer.
+#[test]
+fn armed_mid_one_shot_covers_every_exit() {
+    // ^D completes the armed gesture.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\braket a Right b Home S-Left C-d");
+    assert_eq!(latex(&ed), "\\left\\langle ab\\right\\rangle ");
+
+    // A click disarms: the later Backspace must not merge.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\braket a Right b Home S-Left");
+    ed.click(0, 0);
+    type_script(&mut ed, "Backspace");
+    assert!(
+        latex(&ed).contains("middle"),
+        "a stale armed mid merged after a click: {}",
+        latex(&ed)
+    );
+
+    // Undo disarms: the arming belonged to the replaced tree.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\braket a Right b Home S-Left C-z Backspace");
+    assert!(
+        latex(&ed).contains("middle"),
+        "a stale armed mid merged after undo: {}",
+        latex(&ed)
+    );
+}
+
+/// A ctrl chord with the minibuffer open is not typing: ^V must not
+/// append a v to the query.
+#[test]
+fn chords_do_not_type_into_the_minibuffer() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\ a C-v C-z C-y");
+    assert_eq!(ed.minibuffer.as_deref(), Some("a"));
+}
+
+/// A click-away commit of an open box is an edit like any other: it
+/// gets its own undo step instead of fusing into the previous
+/// keystroke's history entry.
+#[test]
+fn click_commit_gets_its_own_undo_step() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"abc \text h i");
+    ed.click(0, 0); // commits the box
+    assert!(latex(&ed).contains("text"), "{}", latex(&ed));
+    type_script(&mut ed, "C-z");
+    assert_eq!(latex(&ed), "abc", "undo fused the commit with older edits");
+}
+
+/// Enter in grid mode selects the highlighted CELL even when the edit
+/// cursor is parked deeper inside it: with the cursor in a frac's
+/// denominator, ^G Enter hands the whole cell over, so typing
+/// replaces the cell, not the frac's inner row.
+#[test]
+fn grid_commit_selects_the_cell_not_the_inner_row() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\bmatrix22 1 // 2 C-g Enter x");
+    let tex = latex(&ed);
+    assert!(!tex.contains("frac"), "the inner row was selected: {tex}");
+    assert!(tex.contains('x'), "{tex}");
+}
+
+/// The copy blip belongs to copies: ^C in grid mode raises it, a
+/// destructive clear (Backspace) does not.
+#[test]
+fn grid_copy_blips_and_clear_does_not() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\bmatrix22 a C-g C-c");
+    assert!(ed.copy_flash, "a cell copy got no acknowledgement");
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\bmatrix22 a C-g Backspace");
+    assert!(!ed.copy_flash, "a destructive clear blipped as a copy");
+}
+
+/// A pending \-escape in a \text box dies with the box: a click-away
+/// commit skips the key layer, and the leaked escape would swallow
+/// the next box's closing quote.
+#[test]
+fn a_stale_text_escape_does_not_leak_into_the_next_box() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"\text a");
+    ed.input(Key::Char('\\'), false, false); // escape pending
+    ed.click(30, 0); // commits the box without a key dispatch
+    type_script(&mut ed, r"\text");
+    ed.input(Key::Char('"'), false, false); // must close the box
+    assert!(
+        ed.op_entry.is_none(),
+        "the stale escape swallowed the closing quote"
+    );
+}

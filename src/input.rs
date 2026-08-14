@@ -76,7 +76,7 @@ impl Editor {
         if let Some(e) = self.block_keys(key, shift, ctrl) {
             return e;
         }
-        if let Some(e) = self.minibuffer_keys(key) {
+        if let Some(e) = self.minibuffer_keys(key, ctrl) {
             return e;
         }
         if let Some(e) = self.op_box_keys(key, ctrl) {
@@ -149,7 +149,7 @@ impl Editor {
     /// Minibuffer (`\command`) mode captures most keys. Tab opens the
     /// completion popup; while it is open the arrows pick a row and
     /// Enter takes it, so the list behaves like any editor's.
-    fn minibuffer_keys(&mut self, key: Key) -> Option<Effect> {
+    fn minibuffer_keys(&mut self, key: Key, ctrl: bool) -> Option<Effect> {
         self.minibuffer.is_some().then(|| {
             // Every other key layer clears the status line first; this
             // one used to keep a "no completion for \x" notice up while
@@ -285,7 +285,11 @@ impl Editor {
                 }
                 // Graphic chars (not just alphanumerics): the symbol
                 // table has names like "->", "+-", "oo".
-                Key::Char(c) if c.is_ascii_graphic() => {
+                // A ctrl chord is not typing: it falls to the
+                // catch-all and is swallowed (^V once appended a
+                // literal v to the query, and ^Z/^Y did nothing but
+                // corrupt it).
+                Key::Char(c) if !ctrl && c.is_ascii_graphic() => {
                     self.minibuffer.as_mut().unwrap().push(c);
                     self.refresh_completion();
                 }
@@ -395,7 +399,7 @@ impl Editor {
         Some(Effect::None)
     }
 
-    /// Grid edit mode (^O): a key layer for matrix surgery. The ctrl
+    /// Grid edit mode (^G): a key layer for matrix surgery. The ctrl
     /// chords are handled ahead of it (grid mode swallows bare c/r for
     /// its column/row submodes), and the mode ends when the cursor
     /// leaves the grid (click, …).
@@ -532,8 +536,12 @@ impl Editor {
                 // ^D: delete forward, the Emacs pairing for Backspace
                 // (and the only forward delete on keyboards without a
                 // Delete key).
-                Key::Char('d') if !self.unwrap_armed_outside(&armed_at) => {
-                    self.delete_forward(armed)
+                Key::Char('d') => {
+                    if let Some(m) = mid_at {
+                        self.merge_mid(m);
+                    } else if !self.unwrap_armed_outside(&armed_at) {
+                        self.delete_forward(armed)
+                    }
                 }
                 _ => {}
             }
@@ -670,7 +678,7 @@ impl Editor {
             Key::Char('/') => self.slash(),
             Key::Tab => self.exit_inset(),
             // Enter at the top level: a formula line break. Inside an
-            // inset it does nothing (grid rows are added in ^T grid
+            // inset it does nothing (grid rows are added in ^G grid
             // mode or with \addrow).
             Key::Enter => {
                 if self.path.is_empty() {

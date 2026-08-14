@@ -80,17 +80,24 @@ fn help_spans(text: &str) -> Line<'static> {
         if e > 0 {
             spans.push(Span::styled(" ¦ ", base));
         }
+        // A label may span several words ("grid cell select:"):
+        // everything through the first ':' token stays plain, and the
+        // key run starts after it.
+        let toks: Vec<&str> = entry.split(' ').collect();
+        let label_end = toks
+            .iter()
+            .position(|t| t.ends_with(':'))
+            .map_or(0, |i| i + 1);
         let mut keys_done = false;
-        for (t, tok) in entry.split(' ').enumerate() {
+        for (t, tok) in toks.iter().enumerate() {
             if t > 0 {
                 spans.push(Span::styled(" ", base));
             }
-            let is_label = tok.ends_with(':');
-            let is_key = !is_label && !tok.chars().all(|c| c.is_ascii_lowercase());
+            let is_key = t >= label_end && !tok.chars().all(|c| c.is_ascii_lowercase());
             if is_key && !keys_done {
                 spans.push(Span::styled(tok.to_string(), bold));
             } else {
-                if !is_label {
+                if t >= label_end {
                     keys_done = true;
                 }
                 spans.push(Span::styled(tok.to_string(), base));
@@ -358,7 +365,7 @@ enum CaretStyle {
 /// Turn the zero-width display annotations of a rendered block into
 /// colored boxes and the caret cell. Marks carry (row, col, char):
 /// selection mark pairs paint a background box (theme::SELECTION_BG),
-/// grid cell/lane pairs their own colors, and the ^T frame recolors
+/// grid cell/lane pairs their own colors, and the ^G frame recolors
 /// the edited grid's border.
 fn marker_boxes(
     block: &formulaa::render::Block,
@@ -447,7 +454,20 @@ fn marker_boxes(
         }
     }
     for (y, mut row_marks) in by_row {
-        row_marks.sort_unstable();
+        // Coincident ^B opens (an ancestor ring starting at the same
+        // cell as an inner ring) must stack outer-first so each close
+        // pops its own rank; everything else keeps plain (x, char)
+        // order.
+        row_marks.sort_unstable_by(|a, b| {
+            let open_rank = |c: char| match Mark::decode(c) {
+                Some(Mark::BlockOpen { rank }) => Some(rank),
+                _ => None,
+            };
+            (a.0.cmp(&b.0)).then_with(|| match (open_rank(a.1), open_rank(b.1)) {
+                (Some(ra), Some(rb)) => rb.cmp(&ra),
+                _ => a.1.cmp(&b.1),
+            })
+        });
         let mut stack: Vec<(usize, Mark)> = Vec::new();
         for (x, c) in row_marks {
             let Some(mark) = Mark::decode(c) else {
@@ -711,7 +731,7 @@ fn overlay_minibuffer(
     d: &mut Decor,
     view: Viewport,
 ) -> Option<(usize, usize, usize, usize, usize)> {
-    // The in-place name box (\op \rm \text \tex) overlays exactly
+    // The in-place name box (\op \rm \text \latex) overlays exactly
     // like the minibuffer: content cells at the cursor, caret at the
     // box's own cursor. Drawing it as cells (not AST nodes) keeps the
     // run free of the reparse-quoting rules — no stray '…' quotes.
@@ -728,7 +748,7 @@ fn overlay_minibuffer(
             buf.chars().collect()
         };
         // The box shows as [content]: bracket fenders drawn as green
-        // glyphs (no ground — same look as the ^T grid frame), content
+        // glyphs (no ground — same look as the ^G grid frame), content
         // on the box ground.
         let end = cx + content.len() + 2;
         d.widen(cy, end);
@@ -786,13 +806,20 @@ fn overlay_minibuffer(
         // drawn as one: the same ground, the same blank column each
         // side, on the same side of the caret. A box that jumped as
         // Tab was pressed read as two features.
-        let at = match place_below(&view, cy) {
-            true => cy + 1,
-            false => cy.saturating_sub(block.height()),
-        };
+        let below = place_below(&view, cy);
         let box_w = block.lines.iter().map(Vec::len).max().unwrap_or(0) + 2;
         for (dy, bline) in block.lines.iter().enumerate() {
-            let y = at + dy;
+            let y = if below {
+                cy + 1 + dy
+            } else {
+                // Upward: bottom-anchored just above the caret row;
+                // rows that do not fit are dropped rather than
+                // spilling over the typed \name.
+                match (cy + dy).checked_sub(block.height()) {
+                    Some(y) => y,
+                    None => continue,
+                }
+            };
             d.ensure_row(y);
             d.widen(y, cx + box_w - 1);
             for dx in 0..box_w {
@@ -926,7 +953,7 @@ fn pop_matching(
 }
 
 /// Display sentinels for the open name box's [ ] fenders: drawn as
-/// green glyphs (the ^T frame color), never as ordinary text.
+/// green glyphs (the ^G frame color), never as ordinary text.
 const FENDER_L: char = '\u{F8F0}';
 const FENDER_R: char = '\u{F8F1}';
 
@@ -991,14 +1018,23 @@ fn decorate_line(d: &Decor, y: usize, caret: CaretStyle, scroll_x: usize) -> Vec
     let mut spans = Vec::new();
     let mut buf = String::new();
     let mut buf_bg: Option<Color> = None;
-    let flush = |buf: &mut String, buf_bg: Option<Color>, spans: &mut Vec<Span<'static>>| {
+    let blip = d.blip;
+    let flush = move |buf: &mut String, buf_bg: Option<Color>, spans: &mut Vec<Span<'static>>| {
         if !buf.is_empty() {
             let s = std::mem::take(buf);
             spans.push(match buf_bg {
                 // A themed ground fixes its glyph color too: the
                 // terminal's own foreground (black, on a light theme)
                 // has no contrast guarantee against it.
-                Some(color) => Span::styled(s, Style::default().bg(color).fg(theme::GROUND_FG)),
+                Some(color) => {
+                    let mut style = Style::default().bg(color).fg(theme::GROUND_FG);
+                    // Grid-mode selections have no flash cells, so the
+                    // copy blip inverts their ground here instead.
+                    if blip && color == theme::SELECTION_BG {
+                        style = style.add_modifier(Modifier::REVERSED);
+                    }
+                    Span::styled(s, style)
+                }
                 None => Span::raw(s),
             });
         }
@@ -2386,5 +2422,145 @@ mod tests {
                     .collect()
             })
             .collect()
+    }
+
+    /// Coincident ^B opens (the ancestor ring and the whole-row ring
+    /// both starting at column 0) pair each close with its own rank:
+    /// the frac is the flashing selection, the row around it is the
+    /// steady ring — not the whole row painted purple.
+    #[test]
+    fn coincident_block_opens_pair_with_their_own_close() {
+        use ratatui::style::Modifier;
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut ed = Editor::new();
+        type_script_keys(&mut ed, "\\frac");
+        ed.input(Key::Enter, false, false); // frac at index 0, cursor in numerator
+        type_script_keys(&mut ed, "1");
+        ed.input(Key::Down, false, false);
+        type_script_keys(&mut ed, "2");
+        ed.input(Key::Tab, false, false);
+        type_script_keys(&mut ed, "+y");
+        for _ in 0..3 {
+            ed.input(Key::Left, false, false); // back inside the frac
+        }
+        assert!(!ed.path.is_empty(), "the cursor did not re-enter the frac");
+        ed.input(Key::Char('b'), false, true); // ^B
+        assert!(ed.block.is_some());
+        let mut view = View::default();
+        let mut term = Terminal::new(TestBackend::new(30, 8)).unwrap();
+        term.draw(|f| {
+            draw(f, &ed, &mut view);
+        })
+        .unwrap();
+        let buf = term.backend().buffer().clone();
+        let mut y_cell = None;
+        let mut purple = 0;
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                let c = &buf[(x, y)];
+                if c.symbol() == "\u{1d466}" {
+                    y_cell = Some(c.clone());
+                }
+                if c.bg == theme::SELECTION_BG {
+                    purple += 1;
+                }
+            }
+        }
+        assert!(purple > 0, "no purple selection at all");
+        let y_cell = y_cell.unwrap_or_else(|| {
+            let screen: Vec<String> = (0..buf.area.height)
+                .map(|y| {
+                    (0..buf.area.width)
+                        .map(|x| buf[(x, y)].symbol().to_string())
+                        .collect()
+                })
+                .collect();
+            panic!("no y on screen:\n{}", screen.join("\n"))
+        });
+        assert_ne!(
+            y_cell.bg,
+            theme::SELECTION_BG,
+            "the whole row is painted as the selection (ranks swapped)"
+        );
+        assert!(
+            y_cell.style().add_modifier.contains(Modifier::REVERSED),
+            "y is not inside the step ring"
+        );
+    }
+
+    /// A multi-word mode label ("grid cell select:") stays plain and
+    /// the keys after it still bold.
+    #[test]
+    fn multi_word_mode_labels_keep_key_bolding() {
+        use ratatui::style::Modifier;
+        let line = help_spans("grid cell select: c/| column select ¦ r/- row select");
+        let bold_of = |tok: &str| {
+            line.spans
+                .iter()
+                .find(|s| s.content == tok)
+                .unwrap_or_else(|| panic!("no span {tok:?}"))
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        };
+        assert!(bold_of("c/|"), "key after a multi-word label lost its bold");
+        assert!(bold_of("r/-"));
+        assert!(!bold_of("grid"));
+        assert!(!bold_of("select:"));
+    }
+
+    /// The command preview opening upward is clamped above the caret
+    /// row: on a tiny terminal it must not paint over the typed \name.
+    #[test]
+    fn preview_never_covers_the_typed_command() {
+        let mut ed = Editor::new();
+        type_script_keys(&mut ed, "\\frac");
+        ed.input(Key::Enter, false, false);
+        ed.input(Key::Down, false, false); // caret in the denominator: bottom row
+        type_script_keys(&mut ed, "\\frac");
+        let screen = shot_at(&ed, 30, 6);
+        assert!(
+            screen.iter().any(|l| l.contains("frac")),
+            "the preview covered the typed \\frac:\n{}",
+            screen.join("\n")
+        );
+    }
+
+    /// The copy blip reaches grid-mode selections too: their ground is
+    /// painted straight as bg (no flash cells), so the blip inverts it
+    /// at the paint layer.
+    #[test]
+    fn grid_selection_inverts_during_the_copy_blip() {
+        use ratatui::style::Modifier;
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut ed = Editor::new();
+        for c in "\\bmatrix22".chars() {
+            ed.input(Key::Char(c), false, false);
+        }
+        ed.input(Key::Enter, false, false);
+        ed.input(Key::Char('x'), false, false);
+        ed.input(Key::Char('g'), false, true); // ^G
+        ed.input(Key::Right, true, false); // widen the rectangle
+        let mut view = View {
+            copy_blip: true,
+            ..Default::default()
+        };
+        let mut term = Terminal::new(TestBackend::new(30, 8)).unwrap();
+        term.draw(|f| {
+            draw(f, &ed, &mut view);
+        })
+        .unwrap();
+        let buf = term.backend().buffer().clone();
+        let inverted = (0..buf.area.height)
+            .flat_map(|y| (0..buf.area.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let c = &buf[(x, y)];
+                // Not the caret (bold): only the plain ground runs.
+                c.bg == theme::SELECTION_BG
+                    && c.style().add_modifier.contains(Modifier::REVERSED)
+                    && !c.style().add_modifier.contains(Modifier::BOLD)
+            })
+            .count();
+        assert!(inverted > 0, "the blip never reached the grid selection");
     }
 }
