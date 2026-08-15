@@ -519,7 +519,7 @@ fn main() {
     println!("`tests/roundtrip.rs`. Regenerate with");
     println!("`cargo run --example catalog > docs/examples.md`.\n");
     println!("Every formula satisfies `parse(render(normalize(x))) == normalize(x)`");
-    println!("and `render(parse(aa)) == aa` (the AA feeds straight into `formulaa aa2tex`).\n");
+    println!("and `render(parse(aa)) == aa` (the AA feeds straight into `formulaa --aa2latex`).\n");
     println!("## MDN's three famous mathematical formulas\n");
     cardano_formula();
     cauchy_schwarz_inequality();

@@ -3,7 +3,7 @@
 //!
 //! 1. Everything the serializer emits reads back to the tree it came
 //!    from: `normalize(row_from_latex(row_to_latex(x))) ==
-//!    normalize(strip_spacers(normalize(x)))` — the roundtrip harness
+//!    normalize(absorb_spacers(normalize(x)))` — the roundtrip harness
 //!    pins this over the corpus and the random trees.
 //! 2. Foreign LaTeX (the KaTeX / MathJax dialect) is read best-effort:
 //!    an unknown command or an unrepresentable construct is skipped,

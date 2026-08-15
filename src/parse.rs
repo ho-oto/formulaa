@@ -1107,6 +1107,7 @@ fn parse_region(g: &Grid, rect: Rect, baseline: Option<usize>) -> Result<Row> {
             }
         }
     }
+    crate::render::absorb_row(&mut out);
     Ok(out)
 }
 
@@ -1195,13 +1196,30 @@ fn parse_script_run(
         }
     }
     parts.sort_by_key(|&(l, _, _)| l);
-    for (_, is_sup, r) in parts {
-        let arg = parse_region(g, r, None)?;
-        out.push(if is_sup {
-            Node::Sup { arg }
-        } else {
-            Node::Sub { arg }
-        });
+    // A column with nothing on either side is the writer's own blank:
+    // one `Spacer` each, in place among the script parts. (Blanks the
+    // reading needs anyway are taken back out by `absorb_spacers`.)
+    let mut items: Vec<(usize, Option<(bool, Rect)>)> =
+        parts.iter().map(|&(l, s, r)| (l, Some((s, r)))).collect();
+    for c in from..=to {
+        let inside_part = parts.iter().any(|&(_, _, r)| r.l <= c && c <= r.r);
+        if !inside_part && col_blank(g, rect, c) {
+            items.push((c, None));
+        }
+    }
+    items.sort_by_key(|&(c, _)| c);
+    for (_, part) in items {
+        match part {
+            Some((is_sup, r)) => {
+                let arg = parse_region(g, r, None)?;
+                out.push(if is_sup {
+                    Node::Sup { arg }
+                } else {
+                    Node::Sub { arg }
+                });
+            }
+            None => out.push(Node::Spacer),
+        }
     }
     Ok(())
 }

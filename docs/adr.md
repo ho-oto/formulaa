@@ -110,8 +110,9 @@ by a corpus plus randomized property tests.
 21. **Lattice markers and formatting spacers** — bare arrays
     self-delimit with junction glyphs (`┌┬┐ ├┼┤ └┴┘`), erasing all
     meaning from whitespace *width*; the Space key became
-    `Node::Spacer` (renders one column, vanishes on reparse), relaxing
-    the contract to `parse∘render == strip_spacers∘normalize`.
+    `Node::Spacer` (renders one column), relaxing the contract to
+    `parse∘render == strip_spacers∘normalize` — until §85 made the
+    parser read those columns back.
 
 22. **Grids are lattices everywhere; whitespace-count rules abolished**
     — blank-separated grids removed; `[ ]` lost every special case.
@@ -449,6 +450,53 @@ by a corpus plus randomized property tests.
     refusal that names its failure kind, next to the picture on
     screen, is what a bug report needed from it anyway.
 
+83. **The editor reads and writes files** (2026-08) — `^O` printing the
+    AA to stdout was a workaround for an editor that could not open
+    anything: it started empty every time, and what it drew left only
+    through the clipboard. Now `formulaa formula.aa` opens the file (a
+    name that does not exist yet is simply where the first save goes)
+    and `formulaa -` reads the formula from stdin. A file that does not
+    parse is fatal — stderr says where, and the editor does not stand
+    in for a document it cannot read back. `^O` saves, `^W` saves and
+    quits, and `^Q`/Esc ask before dropping unsaved work; without a
+    name the save asks for one. Both questions are answered on the
+    status line: the editor holds them (`Editor::ask`) so the key
+    meanings stay in `input.rs`, and the host only reads the answer off
+    the `Effect`. Printing to stdout is gone with its reason, and the
+    interface draws on stdout like every other full-screen editor.
+    Reading the document from stdin and taking the keyboard from the
+    terminal is the ordinary shape (`vim -`, `nano -`); here it needs
+    crossterm's `use-dev-tty`, because its default reader takes keys
+    from stdin and will not start once stdin is a spent pipe.
+
+84. **The subcommands become flags** (2026-08) — the positional
+    argument is the file to edit now, so `fmt` and friends would read
+    as file names. They are `--format`, `--aa2latex` and `--latex2aa`
+    (with `--aa2tex` / `--tex2aa` as aliases; `latex` is the spelling
+    the rest of the vocabulary uses, §60). Parsing them by hand next to
+    `--`, `-` and the positional was no longer worth it, so **clap**
+    joins the `tui` feature — the library and its wasm build stay free
+    of it.
+
+85. **The picture keeps its spacing** (2026-08) — blank columns between
+    siblings used to be separators and nothing else: the parser made no
+    `Spacer`, so the editor could write a space it could not read back,
+    and opening a hand-spaced file and saving it tightened the formula.
+    Now every blank column between siblings comes back as a `Spacer`,
+    bar the ones a picture cannot show: where the reading separates the
+    two anyway, a lone blank *is* that separator (`render::absorb_row`,
+    the same fuse predicate the renderer uses, asked of the row in
+    context — a row-initial script's `⬚` base and `Roman` glue change
+    the answer). The contract tightens from
+    `parse∘render == strip_spacers∘normalize` to
+    `parse∘render == absorb_spacers∘normalize` (§21 relaxed it; this
+    takes most of it back), and the renderer no longer adds its own
+    blank beside a spacer — the spacer already is one. Fallout worth
+    naming: the LaTeX serializer braces a band before a following
+    script, and that scan had to learn to look *through* spacers, which
+    write nothing in LaTeX (`\operatorname*{f}_{x}^{y}` would otherwise
+    read back as the band's own upper limit).
+
 ## Test strategy
 
 - `tests/roundtrip.rs`: a corpus of real formulas (Cardano,
@@ -491,7 +539,7 @@ by a corpus plus randomized property tests.
 their own wasm crate and depend on this repo by git; bindings are
 duplicated deliberately (repo independence over sharing). Both are
 prototypes (code-reviewed, not yet field-tested). Zed has no extension
-UI API yet — use CLI tasks (`formulaa aa2tex` / `formulaa fmt` over
+UI API yet — use CLI tasks (`formulaa --aa2latex` / `--format` over
 `$ZED_SELECTED_TEXT`) or the TUI in its terminal. Staging toward the
 inline ideal:
 

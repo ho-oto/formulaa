@@ -188,6 +188,225 @@ fn glue_alpha(n: &Node, right_edge: bool) -> bool {
     }
 }
 
+/// Per-block info driving the separator rules ([`fuses`]).
+#[derive(Clone, Copy, Default)]
+struct Info {
+    script: bool,
+    /// A formatting space. Its own blank column already separates the
+    /// neighbours, so no fuse rule needs to add another.
+    spacer: bool,
+    /// A bare dotted roman run (i.i.d.): its dots would absorb an
+    /// adjacent letter run or period into one token, so the fuse rules
+    /// keep a space after it.
+    dot_run: bool,
+    /// Wide accents carry off-baseline ┈ band rows with no closing
+    /// glyph; a tall neighbour touching that row would be munched into
+    /// the band scan, so they keep a space on both sides.
+    wide_accent: bool,
+    /// Zero-width display annotation: invisible to the fuse rules.
+    marker: bool,
+}
+
+impl Info {
+    fn of(node: &Node) -> Self {
+        Info {
+            wide_accent: has_wide_accent(node),
+            dot_run: matches!(node, Node::Func(t) if t.contains('.')),
+            marker: is_marker_node(node),
+            script: matches!(node, Node::Sup { .. } | Node::Sub { .. }),
+            spacer: matches!(node, Node::Spacer),
+        }
+    }
+}
+
+/// One side of a sibling boundary, as the separator rules see it.
+struct Side<'a> {
+    info: Info,
+    /// The block's baseline cell on that boundary.
+    edge: Option<char>,
+    /// Rows (relative to the baseline) whose edge cell on that boundary
+    /// holds `─`.
+    bars: &'a [isize],
+}
+
+/// Rows (relative to the baseline) where a block's edge column holds
+/// `─`: the sqrt overline scans its ─ run greedily off the baseline (a
+/// sup's fraction bar can align with it), so two ─ cells touching
+/// across a sibling boundary on any row get a separating space (the
+/// baseline case is also covered by the fuse rules).
+fn bar_edge_rows(b: &Block, right: bool) -> Vec<isize> {
+    let w = b.width();
+    b.lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, l)| {
+            let c = if right {
+                (l.len() == w).then(|| l.last().copied()).flatten()
+            } else {
+                l.first().copied()
+            };
+            (c == Some(FRAC_BAR)).then_some(i as isize - b.baseline as isize)
+        })
+        .collect()
+}
+
+/// Would these two siblings fuse into one token if they touched? Space
+/// *presence* (never count) is what changes a reading:
+///  - between two identical bar glyphs (── / ┈┈ / ══ would merge)
+///  - between a bar edge and a `>` head that would cap it (─ then >,
+///    ═ then >) and between a `<` head and a body that would absorb it
+///  - between upright letter runs, or a dotted run and a letter
+///  - around a wide accent's open-ended band
+fn fuses(l: Side, r: Side) -> bool {
+    // A formatting space is a blank column of its own: whatever the
+    // neighbours are, they are already apart.
+    if l.info.spacer || r.info.spacer {
+        return false;
+    }
+    let fuse = match (l.edge, r.edge) {
+        (Some(a), Some(b)) => {
+            // A band edge fuses with *anything* adjacent (the general
+            // ┈piece┈ grammar munches non-space runs).
+            a == OP_BAND
+                || b == OP_BAND
+                || (a.is_ascii_alphabetic() && b.is_ascii_alphabetic())
+                // A period directly before a letter would be absorbed
+                // into the run (exp.i.i.d.); digits keep decimals
+                // tight (3.14).
+                || (a == '.' && b.is_ascii_alphabetic())
+                || (a == b && (a == FRAC_BAR || a == DOUBLE_BODY))
+                || (a == FRAC_BAR && b == HEAD_RIGHT)
+                || (a == DOUBLE_BODY && b == HEAD_RIGHT)
+                || (a == HEAD_LEFT && (b == FRAC_BAR || b == DOUBLE_BODY))
+        }
+        _ => false,
+    };
+    let dotted = l.info.dot_run && r.edge.is_some_and(|b| b.is_ascii_alphabetic() || b == '.');
+    let bar_touch = !l.bars.is_empty() && r.bars.iter().any(|row| l.bars.contains(row));
+    fuse || dotted || l.info.wide_accent || r.info.wide_accent || bar_touch
+}
+
+/// Take out the spacers a picture cannot show: a lone blank between
+/// two siblings the reading separates anyway *is* that separator, so
+/// the parser cannot return it and the roundtrip contract is stated
+/// against a tree without it. Every other blank column stands
+/// (`𝑎  +  𝑏` keeps both pairs).
+pub(crate) fn absorb_row(row: &mut Row) {
+    let mut i = 0;
+    while i < row.len() {
+        if !matches!(row[i], Node::Spacer) {
+            i += 1;
+            continue;
+        }
+        let run = row[i..].iter().take_while(|n| **n == Node::Spacer).count();
+        let between = i > 0 && i + run < row.len();
+        if run == 1 && between {
+            let mut without = row.clone();
+            without.remove(i);
+            if forced_gap(&without, i) {
+                row.remove(i);
+                continue;
+            }
+        }
+        i += run;
+    }
+}
+
+/// [`absorb_row`] over a whole tree — the form a picture can hold.
+pub fn absorb_spacers(row: &Row) -> Row {
+    let mut out: Row = row
+        .iter()
+        .map(|n| {
+            let mut n = n.clone();
+            for f in n.fields() {
+                let inner = absorb_spacers(n.field(f));
+                *n.field_mut(f) = inner;
+            }
+            n
+        })
+        .collect();
+    absorb_row(&mut out);
+    out
+}
+
+/// Would the picture of `row` put a blank column of its own before
+/// node `at`? The parser asks this of the row it just read, to tell a
+/// blank that carries a `Spacer` from one the reading needs anyway.
+/// The answer is contextual — a row-initial script grows a `⬚` base, a
+/// `Roman` glues to its neighbours — so the whole row is laid out.
+fn forced_gap(row: &Row, at: usize) -> bool {
+    let ctx = RenderCtx::canonical();
+    let mut prev: Option<(Info, Option<char>, Vec<isize>)> = None;
+    for (i, (block, info)) in row_blocks(row, None, &ctx).into_iter().enumerate() {
+        if info.marker {
+            continue;
+        }
+        if i == at {
+            return match prev {
+                Some((pi, edge, bars)) => fuses(
+                    Side {
+                        info: pi,
+                        edge,
+                        bars: &bars,
+                    },
+                    Side {
+                        info,
+                        edge: block.baseline_edge(true),
+                        bars: &bar_edge_rows(&block, false),
+                    },
+                ),
+                None => false,
+            };
+        }
+        let edge = block.baseline_edge(false);
+        let bars = bar_edge_rows(&block, true);
+        prev = Some((info, edge, bars));
+    }
+    false
+}
+
+/// Each sibling's block, with the info the separator rules read. The
+/// two decisions that need the row (a row-initial script's `⬚` base, a
+/// `Roman`'s glue to its neighbours) are made here, so anything asking
+/// about a boundary sees exactly what the render will draw.
+fn row_blocks(row: &Row, cursor: Option<CursorRef>, ctx: &RenderCtx) -> Vec<(Block, Info)> {
+    let mut blocks: Vec<(Block, Info)> = Vec::with_capacity(row.len() + 1);
+    for (i, node) in row.iter().enumerate() {
+        let child_cursor = match cursor {
+            Some((path, col)) => match path.first() {
+                Some(&(pi, pf)) if pi == i => Some((pf, (&path[1..], col))),
+                _ => None,
+            },
+            None => None,
+        };
+        let info = Info::of(node);
+        let mut block = match node {
+            Node::Roman(c) => {
+                let glue = row[..i]
+                    .iter()
+                    .rev()
+                    .find(|n| !is_marker_node(n))
+                    .is_some_and(|n| glue_alpha(n, true))
+                    || row[i + 1..]
+                        .iter()
+                        .find(|n| !is_marker_node(n))
+                        .is_some_and(|n| glue_alpha(n, false));
+                roman_block(*c, glue)
+            }
+            _ => render_node(node, child_cursor, ctx),
+        };
+        // A script at the start of a row gets an explicit ⬚ base, so the
+        // picture differs from the row without the script wrapper
+        // (markers are invisible to "start of a row").
+        let first_real = row.iter().position(|n| !is_marker_node(n)).unwrap_or(0);
+        if i == first_real && info.script {
+            block = hcat(&[Block::from_chars(vec![PLACEHOLDER]), block]);
+        }
+        blocks.push((block, info));
+    }
+    blocks
+}
+
 pub fn render_row(
     row: &Row,
     cursor: Option<CursorRef>,
@@ -220,61 +439,7 @@ pub fn render_row(
         return b;
     }
 
-    // Per-block info driving the spacer rules below.
-    #[derive(Clone, Copy, Default)]
-    struct Info {
-        script: bool,
-        /// A bare dotted roman run (i.i.d.): its dots would absorb an
-        /// adjacent letter run or period into one token, so the fuse
-        /// rules keep a space after it.
-        dot_run: bool,
-        /// Wide accents carry off-baseline ┈ band rows with no closing
-        /// glyph; a tall neighbour touching that row would be munched
-        /// into the band scan, so they keep a space on both sides.
-        wide_accent: bool,
-        /// Zero-width display annotation: invisible to the fuse rules.
-        marker: bool,
-    }
-
-    let mut blocks: Vec<(Block, Info)> = Vec::with_capacity(row.len() + 1);
-    for (i, node) in row.iter().enumerate() {
-        let child_cursor = match cursor {
-            Some((path, col)) => match path.first() {
-                Some(&(pi, pf)) if pi == i => Some((pf, (&path[1..], col))),
-                _ => None,
-            },
-            None => None,
-        };
-        let info = Info {
-            wide_accent: has_wide_accent(node),
-            dot_run: matches!(node, Node::Func(t) if t.contains('.')),
-            marker: is_marker_node(node),
-            script: matches!(node, Node::Sup { .. } | Node::Sub { .. }),
-        };
-        let mut block = match node {
-            Node::Roman(c) => {
-                let glue = row[..i]
-                    .iter()
-                    .rev()
-                    .find(|n| !is_marker_node(n))
-                    .is_some_and(|n| glue_alpha(n, true))
-                    || row[i + 1..]
-                        .iter()
-                        .find(|n| !is_marker_node(n))
-                        .is_some_and(|n| glue_alpha(n, false));
-                roman_block(*c, glue)
-            }
-            _ => render_node(node, child_cursor, ctx),
-        };
-        // A script at the start of a row gets an explicit ⬚ base, so the
-        // picture differs from the row without the script wrapper
-        // (markers are invisible to "start of a row").
-        let first_real = row.iter().position(|n| !is_marker_node(n)).unwrap_or(0);
-        if i == first_real && info.script {
-            block = hcat(&[Block::from_chars(vec![PLACEHOLDER]), block]);
-        }
-        blocks.push((block, info));
-    }
+    let mut blocks = row_blocks(row, cursor, ctx);
     // A FRAME or DELIMS pair wraps a node whose own frame the display
     // recolors (grid mode; a delimiter armed for unwrapping). The
     // render owns the geometry, so the pair converts to the node's
@@ -318,33 +483,6 @@ pub fn render_row(
         );
     }
 
-    // Single-space separators between siblings, inserted only where
-    // adjacent glyphs would otherwise fuse into one token — space
-    // *presence* (never count) is what changes a reading:
-    //  - between two identical bar glyphs (── / ┈┈ / ══ would merge)
-    //  - between a bar edge and a > head that would cap it (─ then >,
-    //    ═ then >) and between a < head and a body that would absorb it
-    //    (< then ─ or ═)
-    // Rows (relative to the baseline) where a block's edge column holds
-    // '─': the sqrt overline scans its ─ run greedily off the baseline
-    // (a sup's fraction bar can align with it), so two ─ cells touching
-    // across a sibling boundary on any row get a separating space (the
-    // baseline case is also covered by the fuse rules above).
-    let bar_edge_rows = |b: &Block, right: bool| -> Vec<isize> {
-        let w = b.width();
-        b.lines
-            .iter()
-            .enumerate()
-            .filter_map(|(i, l)| {
-                let c = if right {
-                    (l.len() == w).then(|| l.last().copied()).flatten()
-                } else {
-                    l.first().copied()
-                };
-                (c == Some(FRAC_BAR)).then_some(i as isize - b.baseline as isize)
-            })
-            .collect()
-    };
     let mut spaced: Vec<Block> = Vec::with_capacity(blocks.len() * 2);
     let mut prev: Option<Info> = None;
     let mut last_edge: Option<char> = None;
@@ -358,40 +496,18 @@ pub fn render_row(
             continue;
         }
         let need = match prev {
-            Some(p) => {
-                let edges = (last_edge, block.baseline_edge(true));
-                let fuse = match edges {
-                    (Some(a), Some(b)) => {
-                        // A band edge fuses with *anything* adjacent (the
-                        // general ┈piece┈ grammar munches non-space runs).
-                        a == OP_BAND
-                            || b == OP_BAND
-                            // Adjacent upright letter runs (Func / bare
-                            // Text) would fuse into one token.
-                            || (a.is_ascii_alphabetic() && b.is_ascii_alphabetic())
-                            // A period directly before a letter would be
-                            // absorbed into the run (exp.i.i.d.); digits
-                            // keep decimals tight (3.14).
-                            || (a == '.' && b.is_ascii_alphabetic())
-                            || (a == b && (a == FRAC_BAR || a == DOUBLE_BODY))
-                            || (a == FRAC_BAR && b == HEAD_RIGHT)
-                            || (a == DOUBLE_BODY && b == HEAD_RIGHT)
-                            || (a == HEAD_LEFT && (b == FRAC_BAR || b == DOUBLE_BODY))
-                    }
-                    _ => false,
-                };
-                // A dotted run would lexically absorb a following letter
-                // or period (i.i.d. + ab → i.i.d.ab).
-                let dotted = p.dot_run
-                    && block
-                        .baseline_edge(true)
-                        .is_some_and(|b| b.is_ascii_alphabetic() || b == '.');
-                let bar_touch = !last_bars.is_empty()
-                    && bar_edge_rows(&block, false)
-                        .iter()
-                        .any(|r| last_bars.contains(r));
-                fuse || dotted || p.wide_accent || info.wide_accent || bar_touch
-            }
+            Some(p) => fuses(
+                Side {
+                    info: p,
+                    edge: last_edge,
+                    bars: &last_bars,
+                },
+                Side {
+                    info,
+                    edge: block.baseline_edge(true),
+                    bars: &bar_edge_rows(&block, false),
+                },
+            ),
             _ => false,
         };
         if need {

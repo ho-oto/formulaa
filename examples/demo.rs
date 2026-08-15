@@ -17,7 +17,7 @@ fn show(title: &str, row: &Row) {
 fn main() {
     // 1. AA -> AST. Input may be hand-written — plain ASCII letters
     //    for the math italics, loose spacing; the render below answers
-    //    in canonical form, which is what `formulaa fmt` writes.
+    //    in canonical form, which is what `formulaa --format` writes.
     let row = parse::parse("x²+2x+1 = (x+1)²").expect("hand-written AA");
     show("parsed from hand-written AA", &row);
 
@@ -33,7 +33,7 @@ fn main() {
     assert_eq!(parse::parse(&redrawn).unwrap(), normalize(&row));
 
     // 3. The other road: LaTeX -> AST -> picture (best effort for
-    //    outside dialects; everything `aa2tex` emits comes back whole).
+    //    outside dialects; everything `--aa2latex` emits comes back whole).
     let row = from_latex::row_from_latex(r"\frac{-b\pm\sqrt{b^2-4ac}}{2a}");
     show("parsed from LaTeX", &normalize(&row));
 }

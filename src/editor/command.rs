@@ -442,9 +442,10 @@ pub enum ModeCmd {
     /// means; the editor-internal ^C/^X have selection semantics of
     /// their own.
     CopyAa,
-    /// Write the canonical AA to the host's output and leave (^O) —
-    /// the pipe-friendly twin of the clipboard copy.
-    PrintAa,
+    /// Save the formula (^O), asking for a name if it has none.
+    Write,
+    /// Save and leave (^W).
+    WriteQuit,
     Quit,
 }
 
@@ -468,12 +469,13 @@ pub const MODE_COMMANDS: &[(&[&str], ModeCmd, &str, &str)] = &[
     // Only the full word: \c beside ^C (the *internal* copy) would
     // read as the same thing, and it is not.
     (&["clipboard"], ModeCmd::CopyAa, "^Y", "AA to clipboard"),
+    (&["w", "W", "write", "save"], ModeCmd::Write, "^O", "save"),
     // Spelled out for the same reason as \quit: it ends the session.
     (
-        &["stdout"],
-        ModeCmd::PrintAa,
-        "^O",
-        "AA to stdout, then quit",
+        &["wq", "writequit"],
+        ModeCmd::WriteQuit,
+        "^W",
+        "save and quit",
     ),
     // Quit alone has no one-letter spelling: \q is one typo from
     // quitting, and nothing else here is that irreversible.

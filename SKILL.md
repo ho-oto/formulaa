@@ -16,11 +16,11 @@ AA.
 ## Verification commands (always use them when available)
 
 ```sh
-echo '<AA>' | formulaa fmt      # parse and canonicalize (an error means invalid)
-echo '<AA>' | formulaa aa2tex   # convert to LaTeX to confirm the meaning
+echo '<AA>' | formulaa --format    # parse and canonicalize (an error means invalid)
+echo '<AA>' | formulaa --aa2latex  # convert to LaTeX to confirm the meaning
 ```
 
-Your AA is correct when `formulaa fmt` accepts it and the output matches
+Your AA is correct when `formulaa --format` accepts it and the output matches
 your intent. Hand-written input is **lenient**: a lone ASCII letter is
 an italic variable (`x+1` → 𝑥+1), but a **run of 2+ letters is
 upright** (`asiny` → \operatorname{asiny}, `sin` → \sin), so write a
@@ -162,7 +162,8 @@ Combining overlays like U+0338 are rejected (explicit error). Write
 
 ### Spaces
 
-Real spaces are formatting and vanish on parse. To put a space into the
+Real spaces are formatting: they survive a parse as formatting, but
+carry no meaning. To put a space into the
 LaTeX output use the visible atom `␣` U+2423 (`\space`; a LaTeX control space).
 
 ### Upright text — bare runs, `'…'`, `"…"`
@@ -227,7 +228,8 @@ LaTeX `\\`. There is no alignment.
 
 - Never write an empty script (a `⬚`-only exponent) — it doesn't exist
   in canonical form.
-- Use `␣` for visible spacing (real spaces are eaten by `fmt`).
+- Use `␣` where the space is part of the formula; a real space is
+  formatting (kept, but it means nothing to LaTeX).
 - Always band (`┈`) the limits of ∑/∫ — bare stacking is ambiguous with
   nesting and errors out.
 - Never overlap content directly above/below a baseline token (other
@@ -235,7 +237,7 @@ LaTeX `\\`. There is no alignment.
 
 ## Examples
 
-(Real spaces added for readability; `formulaa fmt` tightens them.)
+(Real spaces added for readability; `formulaa --format` tightens them.)
 
 Quadratic formula:
 

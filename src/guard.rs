@@ -30,8 +30,9 @@ impl RoundtripGuard {
         }
         let ctx = RenderCtx::canonical();
         let aa = render_root(&row, None, &ctx).to_text();
-        // Formatting spacers survive in the AA but vanish on reparse.
-        let row = ast::normalize(&ast::strip_spacers(&row));
+        // The blank columns come back as spacers, bar the ones a
+        // reading needs anyway (`render::absorb_spacers`).
+        let row = ast::normalize(&formulaa::render::absorb_spacers(&row));
         let kind = match parse::parse(&aa) {
             Err(e) => format!("parse error: {}", e),
             Ok(p) if p != row => "AST mismatch".into(),

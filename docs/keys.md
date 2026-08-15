@@ -46,7 +46,7 @@ and the mode spellings for stolen ctrl chords) are in
 
 | Key | Action |
 | --- | --- |
-| `Backspace` / `Delete` (`Ctrl+D`) | delete left / right |
+| `Backspace` (`Ctrl+H`) / `Delete` (`Ctrl+D`) | delete left / right |
 | …with a selection | delete the selection |
 | …behind an accented atom | peels the outermost mark first (the inverse of typing); the bare atom deletes last |
 | …touching a non-empty structure from outside | first press selects it whole, second deletes it (entering to edit is what the arrows are for) |
@@ -58,14 +58,19 @@ Pairs with `│` mids and brackets whose sole content is a matrix don't
 unwrap (there is no single "contents"); empty pairs delete in one
 press.
 
-## Undo, output, quitting
+## Undo, saving, quitting
+
+`formulaa formula.aa` opens a file (a name that does not exist yet is
+where the first save lands) and `formulaa -` reads the formula from
+stdin.
 
 | Key | Action |
 | --- | --- |
 | `Ctrl+Z` / `Ctrl+R` | undo / redo |
+| `Ctrl+O` | save (`\write`); without a file name yet, the status line asks for one |
+| `Ctrl+W` | save and quit (`\wq`) |
 | `Ctrl+Y` | copy the canonical AA to the system clipboard |
-| `Ctrl+O` | write the canonical AA to stdout and quit (`\stdout`) |
-| `Esc` | dismiss mode → clear selection → quit |
+| `Esc` / `Ctrl+Q` | dismiss mode → clear selection → quit; unsaved edits are asked about first (`[Y/n]` on the status line, `Esc` stays) |
 
 An edit that would break the AA roundtrip is refused on the spot and
 the message line says why — if you meet one, the picture plus the keys

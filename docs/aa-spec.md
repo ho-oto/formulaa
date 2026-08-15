@@ -17,18 +17,22 @@ A formula is simultaneously a picture and a syntax tree. For every tree
 `x`:
 
 ```plain
-parse(render(normalize(x))) == normalize(strip_spacers(normalize(x)))
+parse(render(normalize(x))) == normalize(absorb_spacers(normalize(x)))
 ```
 
 `render(parse(aa)) == aa` is **not** required. The AA is source code:
 the parser accepts more than the canonical form (lenient hand-written
-input, §9), every accepted picture has exactly one reading, and `fmt`
+input, §9), every accepted picture has exactly one reading, and `--format`
 rewrites any accepted picture into the canonical form. Two further
 requirements:
 
 - `normalize` is idempotent (§8).
-- No rule may depend on *how many* spaces separate two things. Space
-  carries meaning only by presence or absence.
+- No *structural* rule may depend on how many spaces separate two
+  things: the reading is the same whatever the width of a gap. The gap
+  itself is formatting and is kept — one `Spacer` per blank column,
+  bar the blanks a picture cannot show (`absorb_spacers`): where the
+  reading separates two siblings anyway, a lone blank *is* that
+  separator and carries nothing extra.
 
 ## 1. The grid model
 
@@ -75,8 +79,8 @@ requirements:
    They never appear in canonical AA and a parser may reject them.
 
 `␣` U+2423 is an ordinary atom (a *semantic* space; LaTeX renders it as a control space). A real
-space column is either a sibling separator or a formatting spacer that
-vanishes on reparse.
+space column is either a sibling separator the reading needs or a
+formatting spacer, which is kept (§9).
 
 ## 3. Multi-line formulas
 
@@ -306,11 +310,13 @@ The parser returns only normal forms; the renderer assumes them:
 
 ## 9. Lenient input and hard errors
 
-Accepted beyond canonical (and rewritten by `fmt`):
+Accepted beyond canonical (and rewritten by `formulaa --format`):
 
 - Plain ASCII letters for italic variables (`x+1`); `*` for `∗`;
   math-italic code points read as their plain letters; tabs as one
-  space; free whitespace between siblings.
+  space. Whitespace between siblings is free — and kept: it reads back
+  as formatting spacers, so hand-aligned spacing survives a
+  `--format`.
 
 Rejected loudly, never silently dropped:
 

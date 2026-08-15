@@ -880,6 +880,7 @@ impl Editor {
             || self.block.is_some()
             || self.minibuffer.is_some()
             || self.op_entry.is_some()
+            || self.ask.is_some()
     }
 
     pub(crate) fn push_undo(&mut self, state: Snapshot) {

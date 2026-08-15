@@ -2,7 +2,7 @@
 //! physics and statistics, plus a randomized property test.
 //!
 //! Invariant: for any AST x,
-//!     parse(render(normalize(x))) == normalize(strip_spacers(normalize(x)))
+//!     parse(render(normalize(x))) == normalize(absorb_spacers(normalize(x)))
 //! (render(parse(aa)) == aa is NOT required — AA is source code and the
 //! accepted set is wider than the canonical form; fmt tightens it.)
 //!
@@ -13,7 +13,7 @@
 use formulaa::ast::{Node, Row, normalize, strip_spacers};
 use formulaa::latex::row_to_latex;
 use formulaa::parse::parse;
-use formulaa::render::{RenderCtx, render_root};
+use formulaa::render::{RenderCtx, absorb_spacers, render_root};
 use formulaa::symbols::Radical;
 use formulaa::symbols::{Accent, Arrow};
 
@@ -121,9 +121,10 @@ fn roundtrip(name: &str, row: &Row) {
     let row = normalize(row);
     let ctx = RenderCtx::canonical();
     let aa = render_root(&row, None, &ctx).to_text();
-    // Formatting spacers survive in the AA but are invisible to the
-    // parser, so the roundtrip target is the spacer-free normal form.
-    let expected = normalize(&strip_spacers(&row));
+    // The picture keeps its blank columns and the parser reads them
+    // back as spacers — except where the reading separates the two
+    // siblings anyway, which no blank can be told apart from.
+    let expected = normalize(&absorb_spacers(&row));
     // normalize must be a fixpoint of itself on every tree the
     // generator can produce, not just the hand-picked cases.
     assert_eq!(
@@ -157,13 +158,17 @@ fn roundtrip(name: &str, row: &Row) {
         assert!(!row_to_latex(&expected).is_empty());
     }
     // The LaTeX we emit reads back to the tree it came from (the
-    // second road: AST -> LaTeX -> AST), spacers excepted.
+    // second road: AST -> LaTeX -> AST). Formatting spacers are the
+    // one thing LaTeX has nowhere to put, so they are stripped from
+    // both sides.
     let tex = row_to_latex(&expected);
     let from_tex = normalize(&formulaa::from_latex::row_from_latex(&tex));
     assert_eq!(
-        from_tex, expected,
+        from_tex,
+        normalize(&strip_spacers(&expected)),
         "[{}] LaTeX roundtrip mismatch\n--- LaTeX ---\n{}",
-        name, tex
+        name,
+        tex
     );
     // The export form (⬚ slot marks blanked when safe) reads back to
     // the same tree — over the whole corpus and the random trees.
@@ -1428,7 +1433,8 @@ fn stacked_accents() {
     roundtrip("sqrt-then-bar", &row);
 }
 
-/// Formatting spacers: blank columns in the AA that vanish on reparse.
+/// Formatting spacers: blank columns in the AA, read back as the
+/// spacers that drew them.
 #[test]
 fn formatting_spacers() {
     let sp = || Node::Spacer;
@@ -1452,6 +1458,30 @@ fn formatting_spacers() {
         n(sp()),
     ]);
     roundtrip("spacers-scripts", &row);
+}
+
+/// Hand-written spacing is the writer's, and the tools give it back:
+/// what `--format` prints keeps every blank the reading does not need,
+/// so opening a file and saving it does not tighten it.
+#[test]
+fn spacing_survives_the_roundtrip() {
+    for aa in ["𝑎 + 𝑏", "𝑎  +  𝑏", "𝑓(𝑥) = 𝑎𝑥 + 𝑏", "𝑥² + 2𝑥 + 1"]
+    {
+        let row = parse(aa).unwrap_or_else(|e| panic!("parse failed: {} ({})", e, aa));
+        let back = render_root(&row, None, &RenderCtx::canonical()).to_text();
+        assert_eq!(back, aa, "spacing was rewritten");
+    }
+    // The exception, and the only one: a blank the reading needs
+    // anyway carries no spacer of its own — the two upright runs are
+    // one token without it.
+    let glued = cat(&[n(func("sin")), n(Node::Spacer), n(func("cos"))]);
+    let aa = render_root(&normalize(&glued), None, &RenderCtx::canonical()).to_text();
+    assert_eq!(aa, "sin cos");
+    assert_eq!(
+        parse(&aa).unwrap(),
+        vec![Node::Func("sin".into()), Node::Func("cos".into())],
+        "the separating blank came back as a spacer too"
+    );
 }
 
 /// Continued fraction (deep vertical nesting).
@@ -1764,6 +1794,9 @@ fn property_random_asts_roundtrip() {
             row.push(Node::Break);
             let d = 1 + rng.below(3);
             row.extend(gen_row(&mut rng, d, 4));
+        }
+        if i == 4201 {
+            eprintln!("RAW-4201 {:?}", row);
         }
         roundtrip(&format!("random-{}", i), &row);
     }

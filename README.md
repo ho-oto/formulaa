@@ -13,7 +13,7 @@ converter to LaTeX.
             2𝑎            𝑛=1    𝑛²     6         ⎣ sin θ   cos θ  ⎦
 ```
 
-Everything above is plain text. Pipe it into `formulaa aa2tex` and you get
+Everything above is plain text. Pipe it into `formulaa --aa2latex` and you get
 compilable LaTeX; open it in the editor and you can keep editing it
 structurally.
 
@@ -34,12 +34,12 @@ formulAA turns the picture itself into the source code:
   syntax tree `x`, `parse(render(x)) == x` (up to normalization). The
   editor re-checks this after every keystroke and refuses any edit whose
   picture would stop parsing.
-- **Re-editing is first-class.** Paste a formula from a month-old design
-  doc into the editor, move a factor out of a square root with the
-  arrow keys, paste it back. No LaTeX source to dig up.
+- **Re-editing is first-class.** Open a month-old formula in the
+  editor, move a factor out of a square root with the arrow keys, save
+  it back. No LaTeX source to dig up.
 
 In other words: like source code, the format has a grammar, a canonical
-style, and a formatter (`formulaa fmt`) that normalizes anything it
+style, and a formatter (`formulaa --format`) that normalizes anything it
 accepts. Hand-typed input can be sloppy (`x+1`, `E=m c²`); the canonical
 form is what the tools emit.
 
@@ -152,14 +152,15 @@ CLI-task based (see the roadmap in [docs/adr.md](docs/adr.md)).
 ## CLI
 
 ```sh
-formulaa                       # the TUI editor (^Y copies the AA;
-                             #   ^O writes it to stdout and quits)
-formulaa aa2tex formula.txt    # AA → LaTeX (stdin works too)
-formulaa tex2aa formula.tex    # LaTeX → AA, best effort (KaTeX/MathJax dialect)
-formulaa fmt    formula.txt    # normalize hand-written AA to canonical form
+formulaa formula.aa            # edit a formula file (^O saves, ^W saves and quits,
+                               #   ^Y copies the AA; a missing file is created)
+cat formula.aa | formulaa -    # …or take it from stdin
+formulaa --aa2latex formula.aa # AA → LaTeX (stdin works too)
+formulaa --latex2aa formula.tex # LaTeX → AA, best effort (KaTeX/MathJax dialect)
+formulaa --format formula.aa   # normalize hand-written AA to canonical form
 ```
 
-LaTeX round-trips: everything `aa2tex` emits reads back to the exact
+LaTeX round-trips: everything `--aa2latex` emits reads back to the exact
 same tree, and `\latex` in the editor opens a box you can paste LaTeX
 into (unknown commands are skipped, never an error).
 
@@ -168,7 +169,7 @@ into (unknown commands are skipped, never an error).
 Because the format is plain text with a strict grammar, language models
 can read and write it directly. [`SKILL.md`](SKILL.md) is a
 self-contained guide that teaches an agent the format, including the
-verification loop (`formulaa fmt` to check, `formulaa aa2tex` to confirm the
+verification loop (`formulaa --format` to check, `formulaa --aa2latex` to confirm the
 meaning) — useful for embedding re-editable math in Markdown documents
 that both humans and agents maintain.
 

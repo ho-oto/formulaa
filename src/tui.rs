@@ -15,7 +15,7 @@ use formulaa::render::{RenderCtx, render_root};
 
 use crate::theme;
 
-const HELP: &str = "⌃F free move ¦ ⌃B block select ¦ \\ command ¦ // frac ¦ ^ sup ¦ _ sub ¦ ⌃Y to clipboard ¦ ⌃O to stdout (quits) ¦ Esc/⌃Q quit";
+const HELP: &str = "⌃F free move ¦ ⌃B block select ¦ \\ command ¦ // frac ¦ ^ sup ¦ _ sub ¦ ⌃Y to clipboard ¦ ⌃O save ¦ ⌃W save and quit ¦ Esc/⌃Q quit";
 
 /// Context-sensitive last line: a mode's own manual while one is
 /// active, else the generic key list (plus ⌃G when the cursor sits in
@@ -106,8 +106,10 @@ fn help_spans(text: &str) -> Line<'static> {
     Line::from(spans)
 }
 
-#[derive(Default)]
 pub struct View {
+    /// The canvas border's title: the file being edited (`*` while it
+    /// differs from what is on disk), or the program's name.
+    pub title: String,
     pub scroll_x: usize,
     pub scroll_y: usize,
     /// While true, selection grounds draw inverted — the one-frame
@@ -119,6 +121,18 @@ pub struct View {
     pub popup: Option<(usize, usize, usize, usize, usize)>,
 }
 
+impl Default for View {
+    fn default() -> Self {
+        View {
+            title: "formulAA".into(),
+            scroll_x: 0,
+            scroll_y: 0,
+            copy_blip: false,
+            popup: None,
+        }
+    }
+}
+
 /// Draw the whole UI; returns the screen coordinates of the formula's
 /// top-left cell (for mouse hit-testing).
 pub fn draw(f: &mut Frame, ed: &Editor, view: &mut View) -> (u16, u16) {
@@ -127,9 +141,24 @@ pub fn draw(f: &mut Frame, ed: &Editor, view: &mut View) -> (u16, u16) {
 
     let origin = draw_canvas(f, canvas_area, ed, view);
 
-    // One bottom line: messages overlay the usage line when present
-    // (the minibuffer itself shows in-place at the cursor).
-    let bottom = if !ed.message.is_empty() {
+    // One bottom line: a question outranks a message, which outranks
+    // the usage line (the minibuffer itself shows in-place at the
+    // cursor).
+    let bottom = if let Some(ask) = &ed.ask {
+        let (label, answer) = match ask {
+            formulaa::editor::Ask::Path(buf) => ("write to: ", buf.as_str()),
+            formulaa::editor::Ask::SaveFirst => ("unsaved changes — save first? [Y/n] ", ""),
+        };
+        Line::from(vec![
+            Span::styled(
+                format!(" {}", label),
+                Style::default().fg(theme::MESSAGE_FG),
+            ),
+            Span::raw(answer.to_string()),
+            // The block is the caret: the question is where typing goes.
+            Span::styled("▌", Style::default().fg(theme::MESSAGE_FG)),
+        ])
+    } else if !ed.message.is_empty() {
         let fg = if ed.message_error {
             theme::MESSAGE_ERR_FG
         } else {
@@ -150,7 +179,7 @@ pub fn draw(f: &mut Frame, ed: &Editor, view: &mut View) -> (u16, u16) {
 fn draw_canvas(f: &mut Frame, area: Rect, ed: &Editor, view: &mut View) -> (u16, u16) {
     let border = UiBlock::default()
         .borders(Borders::ALL)
-        .title(" formulAA ")
+        .title(format!(" {} ", view.title))
         .border_style(Style::default().fg(theme::BORDER_FG));
     let inner = border.inner(area);
     f.render_widget(border, area);

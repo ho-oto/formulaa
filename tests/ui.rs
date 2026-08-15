@@ -9,8 +9,8 @@
 //!   - named keys: Left Right Up Down Home End Tab Enter Backspace
 //!     Delete Esc Space, with `S-` (shift) / `C-` (ctrl) prefixes
 
-use formulaa::ast::{normalize, strip_spacers};
-use formulaa::editor::Editor;
+use formulaa::ast::normalize;
+use formulaa::editor::{Ask, Editor};
 use formulaa::input::{Effect, Key};
 use formulaa::latex::row_to_latex;
 use formulaa::parse::parse;
@@ -251,9 +251,89 @@ fn ctrl_keys_return_host_effects() {
     let mut ed = Editor::new();
     assert_eq!(ed.input(Key::Char('q'), false, true), Effect::Quit);
     assert_eq!(ed.input(Key::Char('y'), false, true), Effect::CopyAa);
-    assert_eq!(ed.input(Key::Char('o'), false, true), Effect::PrintAa);
+    assert_eq!(ed.input(Key::Char('o'), false, true), Effect::Write);
+    assert_eq!(ed.input(Key::Char('w'), false, true), Effect::WriteQuit);
     // Plain typing never asks the host for anything.
     assert_eq!(ed.input(Key::Char('q'), false, false), Effect::None);
+}
+
+/// ^H is Backspace — aliased ahead of the key layers, so the modes
+/// that read text get it as readily as the formula does.
+#[test]
+fn ctrl_h_deletes_left_everywhere() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, "a b C-h");
+    assert_eq!(latex(&ed), "a");
+    type_script(&mut ed, r"\ a l C-h");
+    assert_eq!(ed.minibuffer.as_deref(), Some("a"));
+    let mut ed = Editor::new();
+    ed.ask_path("");
+    type_script(&mut ed, "x y C-h");
+    assert_eq!(ed.ask, Some(Ask::Path("x".into())));
+}
+
+/// The status-line questions: the host opens one, the key layer runs
+/// it, and the answer comes back as an effect. Nothing else may act
+/// while a question stands — a chord typed into a file name would
+/// otherwise both edit the formula and land in the name.
+#[test]
+fn status_line_questions_answer_the_host() {
+    let mut ed = Editor::new();
+    type_script(&mut ed, "a");
+    ed.ask_path("");
+    let fx = type_script(&mut ed, "f o o . a a");
+    assert!(fx.iter().all(|e| *e == Effect::None), "{:?}", fx);
+    assert_eq!(ed.ask, Some(Ask::Path("foo.aa".into())), "not collected");
+    assert_eq!(latex(&ed), "a", "the name reached the formula");
+    assert_eq!(
+        ed.input(Key::Enter, false, false),
+        Effect::WriteTo("foo.aa".into())
+    );
+    assert_eq!(ed.ask, None, "the question outlived its answer");
+
+    // Esc drops the question and leaves the save undone.
+    let mut ed = Editor::new();
+    ed.ask_path("");
+    type_script(&mut ed, "x Esc");
+    assert_eq!(ed.ask, None);
+    assert_eq!(latex(&ed), "", "the typing leaked into the formula");
+
+    // A ctrl chord is spent on the question, not on the editor.
+    let mut ed = Editor::new();
+    ed.ask_path("");
+    assert_eq!(ed.input(Key::Char('q'), false, true), Effect::None);
+    assert_eq!(ed.ask, Some(Ask::Path(String::new())), "\\q leaked");
+
+    // The unsaved-work question is a y/n, with Enter taking the [Y/n]
+    // default.
+    for (script, want) in [
+        ("y", Effect::WriteQuit),
+        ("n", Effect::Discard),
+        ("Enter", Effect::WriteQuit),
+    ] {
+        let mut ed = Editor::new();
+        ed.ask_save_first();
+        let fx = type_script(&mut ed, script);
+        assert!(fx.contains(&want), "{}: {:?}", script, fx);
+        assert_eq!(ed.ask, None);
+    }
+    // …and Esc keeps the editor where it was.
+    let mut ed = Editor::new();
+    ed.ask_save_first();
+    let fx = type_script(&mut ed, "Esc");
+    assert!(fx.iter().all(|e| *e == Effect::None), "{:?}", fx);
+    assert_eq!(ed.ask, None);
+
+    // Anything else is spent on the question, which simply stands:
+    // a key that is not an answer must not become one, and must not
+    // reach the formula or the chords either.
+    let mut ed = Editor::new();
+    type_script(&mut ed, "a");
+    ed.ask_save_first();
+    let fx = type_script(&mut ed, "x Space Tab Down C-y");
+    assert!(fx.iter().all(|e| *e == Effect::None), "{:?}", fx);
+    assert_eq!(ed.ask, Some(Ask::SaveFirst), "the question was answered");
+    assert_eq!(latex(&ed), "a", "a key leaked into the formula");
 }
 
 #[test]
@@ -1214,7 +1294,7 @@ fn assert_roundtrip(ed: &Editor, history: &[String]) {
         return;
     }
     let aa = render_root(&row, None, &RenderCtx::canonical()).to_text();
-    let expected = normalize(&strip_spacers(&row));
+    let expected = normalize(&formulaa::render::absorb_spacers(&row));
     let parsed = parse(&aa).unwrap_or_else(|e| {
         panic!(
             "parse failed: {}\n--- AA ---\n{}\n--- keys ---\n{}",
@@ -1999,14 +2079,14 @@ fn mode_commands_run_from_the_minibuffer() {
     let fx = type_script(&mut ed, r"ab \c");
     assert!(!fx.contains(&Effect::CopyAa), "\\c still copies");
 
-    // \stdout hands the AA to the host's output and leaves; like
-    // \quit it is spelled out, since it ends the session.
+    // \write saves; \wq saves and leaves. Both only *ask* the host —
+    // the editor knows nothing about files.
     let mut ed = Editor::new();
-    let fx = type_script(&mut ed, r"ab \stdout");
-    assert!(fx.contains(&Effect::PrintAa), "{:?}", fx);
+    let fx = type_script(&mut ed, r"ab \write");
+    assert!(fx.contains(&Effect::Write), "{:?}", fx);
     let mut ed = Editor::new();
-    let fx = type_script(&mut ed, r"ab \o");
-    assert!(!fx.contains(&Effect::PrintAa), "\\o still prints");
+    let fx = type_script(&mut ed, r"ab \wq");
+    assert!(fx.contains(&Effect::WriteQuit), "{:?}", fx);
 
     // \quit quits: the effect reaches the host. The one-letter \q
     // does not — a quit one typo away is the wrong price for brevity.

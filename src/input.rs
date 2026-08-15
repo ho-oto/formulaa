@@ -5,7 +5,7 @@
 //! drift apart.
 
 use crate::ast::Node;
-use crate::editor::{BoxKind, Edit, Editor};
+use crate::editor::{Ask, BoxKind, Edit, Editor};
 use crate::symbols::{ColDelim, Delim};
 
 /// One keystroke, host-neutral. `Char` carries printable input
@@ -28,14 +28,22 @@ pub enum Key {
 
 /// Side effects the library cannot perform itself; the host handles
 /// them after dispatch (file IO, clipboard, exiting the app).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Effect {
     None,
+    /// The user asked to leave. Unsaved work is the host's to notice —
+    /// it can answer by asking (`Editor::ask_save_first`) instead.
     Quit,
+    /// Leave, edits and all: the answer to that question was "no".
+    Discard,
+    /// Save the formula where it came from.
+    Write,
+    /// Save it under this name (the path question was answered).
+    WriteTo(String),
+    /// Save, then leave.
+    WriteQuit,
     /// Put the canonical AA on the host's clipboard.
     CopyAa,
-    /// Write the canonical AA to the host's output, then quit.
-    PrintAa,
 }
 
 impl Editor {
@@ -44,6 +52,13 @@ impl Editor {
     /// pre-state (undo/redo themselves are handled here so they never
     /// re-enter the history).
     pub fn input(&mut self, key: Key, shift: bool, ctrl: bool) -> Effect {
+        // ^H is Backspace, the Emacs pairing for ^D's forward delete.
+        // Aliased ahead of the layers, so every one of them sees the
+        // key it already handles.
+        let (key, ctrl) = match (key, ctrl) {
+            (Key::Char('h'), true) => (Key::Backspace, false),
+            pressed => pressed,
+        };
         if ctrl && !self.mode_active() {
             match key {
                 Key::Char('z') => {
@@ -72,6 +87,9 @@ impl Editor {
     /// the key (Some) or lets it fall through (None). Adding a mode =
     /// adding one handler here.
     fn dispatch(&mut self, key: Key, shift: bool, ctrl: bool) -> Effect {
+        if let Some(e) = self.ask_keys(key, ctrl) {
+            return e;
+        }
         if let Some(e) = self.free_keys(key, ctrl) {
             return e;
         }
@@ -88,6 +106,39 @@ impl Editor {
             return e;
         }
         self.base_keys(key, shift, ctrl)
+    }
+
+    /// The status-line question, outermost of all: while one stands
+    /// nothing else may act, and every key it does not use is spent on
+    /// it (a stray chord must not leak into a file name). Esc drops the
+    /// question, leaving whatever prompted it undone.
+    fn ask_keys(&mut self, key: Key, ctrl: bool) -> Option<Effect> {
+        let ask = self.ask.take()?;
+        let (next, effect) = match (ask, key) {
+            (_, Key::Esc) => (None, Effect::None),
+            (Ask::Path(mut buf), Key::Char(c)) if !ctrl && !c.is_control() => {
+                buf.push(c);
+                (Some(Ask::Path(buf)), Effect::None)
+            }
+            (Ask::Path(mut buf), Key::Backspace) => {
+                buf.pop();
+                (Some(Ask::Path(buf)), Effect::None)
+            }
+            (Ask::Path(buf), Key::Enter) => match buf.trim() {
+                // A name is the whole answer: an empty one cannot be
+                // corrected into anything, so it just closes.
+                "" => (None, Effect::None),
+                name => (None, Effect::WriteTo(name.to_string())),
+            },
+            // Enter takes the default the prompt spells ([Y/n]).
+            (Ask::SaveFirst, Key::Char('y' | 'Y') | Key::Enter) if !ctrl => {
+                (None, Effect::WriteQuit)
+            }
+            (Ask::SaveFirst, Key::Char('n' | 'N')) if !ctrl => (None, Effect::Discard),
+            (ask, _) => (Some(ask), Effect::None),
+        };
+        self.ask = next;
+        Some(effect)
     }
 
     /// Block-select mode: arrows walk the ancestor chain (↑/→ wider,
@@ -142,7 +193,8 @@ impl Editor {
             Some(ModeCmd::BlockSelect) => self.start_block_select(),
             Some(ModeCmd::GridEdit) => self.grid_mode_toggle(),
             Some(ModeCmd::CopyAa) => return Effect::CopyAa,
-            Some(ModeCmd::PrintAa) => return Effect::PrintAa,
+            Some(ModeCmd::Write) => return Effect::Write,
+            Some(ModeCmd::WriteQuit) => return Effect::WriteQuit,
             Some(ModeCmd::Quit) => return Effect::Quit,
             None => self.execute(cmd),
         }
@@ -519,7 +571,8 @@ impl Editor {
             match key {
                 Key::Char('q') => return Effect::Quit,
                 Key::Char('y') => return Effect::CopyAa,
-                Key::Char('o') => return Effect::PrintAa,
+                Key::Char('o') => return Effect::Write,
+                Key::Char('w') => return Effect::WriteQuit,
                 Key::Char('a') => self.document_start(),
                 Key::Char('f') => self.start_free(),
                 Key::Char('b') => self.start_block_select(),

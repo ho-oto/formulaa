@@ -5,7 +5,7 @@ Side-by-side listing of the roundtrip-verified formulas in
 `cargo run --example catalog > docs/examples.md`.
 
 Every formula satisfies `parse(render(normalize(x))) == normalize(x)`
-and `render(parse(aa)) == aa` (the AA feeds straight into `formulaa aa2tex`).
+and `render(parse(aa)) == aa` (the AA feeds straight into `formulaa --aa2latex`).
 
 ## MDN's three famous mathematical formulas
 

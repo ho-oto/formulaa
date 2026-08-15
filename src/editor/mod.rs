@@ -102,6 +102,21 @@ pub struct Editor {
     /// is highlighted and the next press removes it; every other key
     /// disarms (the key layer takes it, like a one-shot anchor).
     pub(crate) unwrap_armed: Option<Vec<(usize, Field)>>,
+    /// A question the host put on the bottom line (a file name to write
+    /// to, or whether to keep unsaved work). Only the host knows what
+    /// it will do with the answer; the key layer only collects it.
+    pub ask: Option<Ask>,
+}
+
+/// A one-line question on the status line. The host opens one
+/// (`ask_path` / `ask_save_first`), the key layer runs it, and the
+/// answer comes back as an [`Effect`](crate::input::Effect).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ask {
+    /// Where to write: free text, committed with Enter.
+    Path(String),
+    /// Unsaved work is about to be dropped: y/n.
+    SaveFirst,
 }
 
 /// Vertical distance weight for free-cursor snapping (a row of
@@ -498,7 +513,23 @@ impl Editor {
             clip: Clip::Nodes(Vec::new()),
             completion: None,
             unwrap_armed: None,
+            ask: None,
         }
+    }
+
+    /// Ask for a path on the status line, prefilled with `at` (the file
+    /// being edited, if there is one). Enter answers with
+    /// `Effect::WriteTo`.
+    pub fn ask_path(&mut self, at: &str) {
+        self.clear_message();
+        self.ask = Some(Ask::Path(at.to_string()));
+    }
+
+    /// Ask whether to save before dropping the edits: `y` answers
+    /// `Effect::WriteQuit`, `n` answers `Effect::Discard`.
+    pub fn ask_save_first(&mut self) {
+        self.clear_message();
+        self.ask = Some(Ask::SaveFirst);
     }
 
     /// Set an informational status message.

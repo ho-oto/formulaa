@@ -19,7 +19,9 @@ pub fn row_to_latex(row: &Row) -> String {
         // double-superscript error before any reader sees it. Both
         // reduce to: brace a band before ANY script, and a brace node
         // before a script on its label side.
-        let next_script = match row.get(i + 1) {
+        // Formatting spacers write nothing, so a script behind one is
+        // still the next thing LaTeX sees.
+        let next_script = match row[i + 1..].iter().find(|n| **n != Node::Spacer) {
             Some(Node::Sup { .. }) => Some(true),
             Some(Node::Sub { .. }) => Some(false),
             _ => None,

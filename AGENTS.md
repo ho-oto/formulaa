@@ -14,7 +14,7 @@ cargo fmt                       # always format before committing
 cargo run                       # the TUI editor
 cargo run --example demo        # the library's three entry points, no TUI
 cargo run -q --example catalog > docs/examples.md   # regenerate the corpus catalog
-echo '...' | cargo run -q -- aa2tex    # AA → LaTeX (fmt likewise)
+echo '...' | cargo run -q -- --aa2latex   # AA → LaTeX (--format likewise)
 npx markdownlint-cli2 "**/*.md" "!target"   # docs lint (config: .markdownlint.yaml)
 ```
 
@@ -31,7 +31,9 @@ test fails — vacuous tests have slipped through more than once.
 1. **`src/render` and `src/parse.rs` are the two sides of the spec
    (docs/aa-spec.md).** Never change one without the other; verify with
    `cargo test` against the contract:
-   `parse(render(normalize(x))) == normalize(strip_spacers(normalize(x)))`.
+   `parse(render(normalize(x))) == normalize(absorb_spacers(normalize(x)))`
+   (`render::absorb_spacers` drops only the blanks a picture cannot
+   show: a lone spacer where the reading separates the siblings anyway).
    (`render(parse(aa)) == aa` is *not* required — AA is source code,
    acceptance is wider than canonical, `fmt` normalizes.)
 2. A new drawing glyph goes into docs/aa-spec.md's reserved table *and*
@@ -70,8 +72,8 @@ test fails — vacuous tests have slipped through more than once.
 | `src/symbols/` | **home of every table** (one concern per file, re-exported flat): `atoms` (vocabulary + gates: `ATOMS`, `NAMES`, `NEGATIONS`/`UNNEGATIONS`, `is_atom` — every accepted atom has a LaTeX spelling, gap=0 tested), `funcs`, `accents` (incl. one-line `preview` glyphs), `radicals`, `delims`, `arrows`, `grids`, `scripts`, `alphabets` |
 | `src/glyphs.rs` | structural glyph constants + display markers (the `Mark` enum is the only spelling of the private-use area) |
 | `src/theme.rs` | TUI colors, two layers: a named-ANSI palette (the only place a `Color` literal may appear) and role constants assigned through it. The ground rule: fills are dark colors with white glyphs, everything else is reverse video |
-| `src/main.rs` | main loop + CLI subcommands, mouse → click / completion pick, the `Effect` handlers (clipboard, stdout, quit) |
-| `src/tui.rs` | drawing: layout, scrolling, marker/selection painting, popup/preview overlay, help line |
+| `src/main.rs` | CLI (clap: `[FILE]` plus the `--format`/`--aa2latex`/`--latex2aa` conversions), main loop, mouse → click / completion pick, and the `Effect` handlers — **the file side lives here** (`File`: path, last-saved formula, save-then-quit) |
+| `src/tui.rs` | drawing: layout, scrolling, marker/selection painting, popup/preview overlay, help line, the status-line question |
 | `src/guard.rs` | per-edit roundtrip check: a breaking edit is undone and reported on the message line |
 | `tests/roundtrip.rs` | formula corpus + randomized property tests |
 | `tests/ui.rs` | key-driven UI tests (script DSL + random key sequences) |
@@ -107,7 +109,8 @@ test fails — vacuous tests have slipped through more than once.
   the side (`]` cannot open). `Node::Array` is a lattice everywhere
   (bare = full frame, fused = minimal markers). No rule depends on
   whitespace counts.
-- Space is a formatting spacer (vanishes on reparse), `\space` = ␣,
+- Space is a formatting spacer: it draws a blank column and the
+  parser reads it back (`\space` = ␣ is the semantic one),
   Tab exits insets, Enter breaks lines at top level. The top-level
   render entry is `render_root` (Break splitting + vstack) — don't call
   `render_row` on the root row directly.

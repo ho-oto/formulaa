@@ -11,8 +11,8 @@ pub enum Node {
     /// math-italic letters is applied only at render time.
     Sym(char),
     /// Formatting space (the Space key): renders as one blank column in
-    /// the AA, produces no LaTeX output, and vanishes on reparse —
-    /// the roundtrip contract is parse∘render == strip_spacers∘normalize.
+    /// the AA, produces no LaTeX output, and is read back from that
+    /// blank — bar the ones a picture cannot show (`absorb_spacers`).
     /// (Use the ␣ atom, \space, for a *semantic* space.)
     Spacer,
     /// Line break of a multi-line formula (top-level row only). Renders
