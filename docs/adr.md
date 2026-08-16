@@ -74,7 +74,14 @@ by a corpus plus randomized property tests.
 
 13. **Merged-font generator** (`tools/merge_math_font.py`) — copies
     missing math glyphs from JuliaMono into any monospace font with
-    advances forced to the base cell width.
+    advances forced to the base cell width. Verified 2026-08 against
+    the charset formulAA can actually emit (1122 code points): a stock
+    JetBrains Mono misses 756 of them, Cascadia Code 927, and the
+    merge closes the gap with the columns still aligned. Two fixes came
+    out of it — the curated ranges had missed the subscript letters
+    (`ᵢ ᵣ ᵤ ᵥ` live in Phonetic Extensions, `ⱼ` in Latin Extended-C),
+    and donors are now repeatable, because JuliaMono has no `￫` (the
+    drawn vec accent) and something like Cica must supply it.
 
 14. **Marker-atom display decorations** — jump labels and block
     highlights insert private-use `Sym`s into a display-only clone of

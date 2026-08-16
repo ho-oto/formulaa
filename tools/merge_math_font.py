@@ -14,19 +14,23 @@ the base font, so alignment is preserved.
 
 Requirements: pip install fonttools
 Usage:
-    python3 tools/merge_math_font.py BASE_FONT [-j JuliaMono-Regular.ttf]
+    python3 tools/merge_math_font.py BASE_FONT [-j DONOR ...]
         [-o output.ttf] [--font-number N] [--all-missing]
 
     BASE_FONT      .ttf/.ttc, TrueType outlines (glyf). For .ttc pick the
                    face with --font-number (default 0).
-    -j/--julia     path to JuliaMono-Regular.ttf (download from the
-                   JuliaMono releases page)
+    -j/--julia     donor font; repeatable, the first donor that has a
+                   codepoint wins (default: ./JuliaMono-Regular.ttf,
+                   from the JuliaMono releases page)
     --all-missing  copy every codepoint JuliaMono has that the base lacks,
                    not just the curated math ranges
 
 Limitations: CFF/OTF base fonts are not supported (glyf outlines only);
-JuliaMono's OpenType features (ligatures etc.) are not carried over —
-only base glyphs, which is all a terminal grid needs.
+the donor's OpenType features (ligatures etc.) are not carried over —
+only base glyphs, which is all a terminal grid needs. JuliaMono itself
+has no `￫` (U+FFEB), the drawn `\vec` accent; pass a second donor that
+does (`-j JuliaMono-Regular.ttf -j Cica-Regular.ttf`) for full
+coverage of what formulAA can emit.
 """
 
 import argparse
@@ -48,6 +52,9 @@ MATH_RANGES = [
     (0x00A8, 0x00AF),    # ¨ ¯ (accent marks)
     (0x02C6, 0x02DF),    # spacing modifier letters (ˇ ˘ ˙ ˚ ˜ …)
     (0x0370, 0x03FF),    # Greek
+    (0x1D00, 0x1D7F),    # phonetic extensions — where Unicode keeps the
+                         # subscript letters ᵢ ᵣ ᵤ ᵥ (0x2070 has only a few)
+    (0x2C60, 0x2C7F),    # Latin Extended-C (ⱼ, the subscript j)
     (0x2010, 0x205F),    # general punctuation (‗ ‾ ′ …)
     (0x2070, 0x209F),    # superscripts and subscripts
     (0x20D0, 0x20FF),    # combining marks for symbols
@@ -66,6 +73,7 @@ MATH_RANGES = [
     (0x2980, 0x29FF),    # misc mathematical symbols-B (⦶ …)
     (0x2A00, 0x2AFF),    # supplemental mathematical operators
     (0x2B00, 0x2BFF),    # misc symbols and arrows (⬚ …)
+    (0xFFE8, 0xFFEE),    # halfwidth forms (￫, the drawn vec accent)
     (0x1D400, 0x1D7FF),  # mathematical alphanumeric symbols (𝑥 𝐀 ℎ-block…)
 ]
 
@@ -137,8 +145,11 @@ def rename_font(font: TTFont, family: str) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("base", help="base monospace font (.ttf/.ttc, glyf outlines)")
-    ap.add_argument("-j", "--julia", default="JuliaMono-Regular.ttf",
-                    help="JuliaMono TTF path (default: ./JuliaMono-Regular.ttf)")
+    ap.add_argument("-j", "--julia", action="append", default=None,
+                    help="donor TTF; repeatable, first donor that has a "
+                         "codepoint wins (default: ./JuliaMono-Regular.ttf). "
+                         "JuliaMono has no ￫ (U+FFEB, the drawn vec accent) "
+                         "— add a font that does, e.g. Cica, to cover it")
     ap.add_argument("-o", "--output", default=None,
                     help="output path (default: <base stem>-Math.ttf)")
     ap.add_argument("--font-number", type=int, default=0,
@@ -151,24 +162,26 @@ def main() -> None:
 
     base = TTFont(args.base, fontNumber=args.font_number
                   if args.base.lower().endswith(".ttc") else -1)
-    julia = TTFont(args.julia)
+    donors = [TTFont(p) for p in (args.julia or ["JuliaMono-Regular.ttf"])]
 
     if "glyf" not in base:
         sys.exit("base font has no glyf table (CFF/OTF is not supported)")
 
     base_cmap = base.getBestCmap()
-    julia_cmap = julia.getBestCmap()
+    # Codepoint -> the first donor that draws it.
+    donor_of = {}
+    for d in reversed(donors):
+        donor_of.update(dict.fromkeys(d.getBestCmap(), d))
     base_adv = mono_advance(base)
-    julia_adv = mono_advance(julia)
 
     if args.all_missing:
-        candidates = set(julia_cmap)
+        candidates = set(donor_of)
     else:
         candidates = {
             cp
             for lo, hi in MATH_RANGES
             for cp in range(lo, hi + 1)
-            if cp in julia_cmap
+            if cp in donor_of
         }
     todo = sorted(candidates - set(base_cmap))
     if not todo:
@@ -176,12 +189,12 @@ def main() -> None:
 
     existing = set(base.getGlyphOrder())
     mapping = dict(base_cmap)
-    julia_hmtx = julia["hmtx"]
 
     added = 0
     for cp in todo:
-        src_name = julia_cmap[cp]
-        src_adv = julia_hmtx[src_name][0]
+        julia = donor_of[cp]
+        src_name = julia.getBestCmap()[cp]
+        src_adv = julia["hmtx"][src_name][0]
         if src_adv == 0:
             continue  # combining marks etc.: zero-width, skip
         target = cells_wide(cp) * base_adv
@@ -207,8 +220,9 @@ def main() -> None:
 
     out = args.output or f"{stem}-Math.ttf"
     base.save(out)
-    print(f"added {added} glyphs from JuliaMono "
-          f"(cell width {base_adv}, JuliaMono {julia_adv}) -> {out}")
+    names = ", ".join(p.rsplit("/", 1)[-1] for p in (args.julia or ["JuliaMono-Regular.ttf"]))
+    print(f"added {added} glyphs from {names} "
+          f"(cell width {base_adv}) -> {out}")
 
 
 if __name__ == "__main__":
