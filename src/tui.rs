@@ -171,8 +171,37 @@ pub fn draw(f: &mut Frame, ed: &Editor, view: &mut View) -> (u16, u16) {
     } else {
         help_spans(&help_line(ed))
     };
-    f.render_widget(bottom, help_area);
+    f.render_widget(clip(bottom, help_area.width as usize), help_area);
     origin
+}
+
+/// Fit a status line to the terminal, ending in `…` when it does not
+/// fit — a line cut mid-word reads as a glitch, an ellipsis as "there
+/// is more".
+fn clip(line: Line<'static>, width: usize) -> Line<'static> {
+    if line
+        .spans
+        .iter()
+        .map(|s| s.content.chars().count())
+        .sum::<usize>()
+        <= width
+    {
+        return line;
+    }
+    let (mut out, mut left) = (Vec::new(), width.saturating_sub(1));
+    for span in line.spans {
+        let n = span.content.chars().count();
+        if n <= left {
+            left -= n;
+            out.push(span);
+            continue;
+        }
+        let head: String = span.content.chars().take(left).collect();
+        out.push(Span::styled(head, span.style));
+        out.push(Span::styled("…", span.style));
+        return Line::from(out);
+    }
+    Line::from(out)
 }
 
 /// Returns the screen position of the formula's top-left cell.
@@ -2420,6 +2449,18 @@ mod tests {
         assert!(
             !buf[(fx, y)].style().add_modifier.contains(Modifier::BOLD),
             "'free' is bold"
+        );
+        // …and it says so when the terminal cuts it short.
+        assert!(
+            line.ends_with('…'),
+            "no ellipsis on a clipped line: {}",
+            line
+        );
+        let wide: String = shot_at(&Editor::new(), 200, 8).pop().unwrap();
+        assert!(
+            !wide.trim_end().ends_with('…'),
+            "ellipsis on a line that fits: {}",
+            wide
         );
     }
 

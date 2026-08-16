@@ -183,11 +183,14 @@ impl File {
     }
 
     fn title(&self, ed: &Editor) -> String {
-        let name = self.path.as_deref().map_or("formulAA", path_name);
-        match self.dirty(ed) {
-            true => format!("{} *", name),
-            false => name.to_string(),
+        let mut title = String::from("formulAA");
+        if let Some(path) = &self.path {
+            title.push_str(&format!(" — {}", path_name(path)));
         }
+        if self.dirty(ed) {
+            title.push_str(" *");
+        }
+        title
     }
 
     /// Save. False when nothing was written: either the name is still
