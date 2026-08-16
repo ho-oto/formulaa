@@ -17,6 +17,8 @@ Everything above is plain text. Pipe it into `formulaa --aa2latex` and you get
 compilable LaTeX; open it in the editor and you can keep editing it
 structurally.
 
+![Typing the quadratic formula in the editor, saving it, converting it to LaTeX, and reopening it to change a sign](demo/quadratic.gif)
+
 ## Why another math-in-text tool?
 
 Tools that *render* math as text art have existed for decades — pretty
@@ -123,8 +125,10 @@ markers, so rows and columns are unambiguous even with empty cells:
 
 ## The editor
 
-`cargo run` opens a WYSIWYG structure editor in the terminal: you
-edit the tree, and the picture follows.
+`formulaa formula.aa` opens a WYSIWYG structure editor in the terminal:
+you edit the tree, and the picture follows. `^O` saves, `^W` saves and
+quits, and a file that does not exist yet is simply where the first
+save goes.
 
 - Type naturally: letters become math italics, `//` makes a fraction,
   `^`/`_` open scripts, `(` `[` `{` auto-size, `\frac` `\sum` `\alpha`
@@ -134,14 +138,48 @@ edit the tree, and the picture follows.
 - Move *through* structure with the arrow keys; `↑`/`↓` enter limits and
   promote a bare `∑`/`lim` to its band form. Select with `Shift+←/→`,
   wrap the selection in `\frac`, `\sqrt`, parentheses, a norm…
-- Free 2D cursor (`^F`), block selection (`^B`), grid editing for
-  matrices (`^G`), undo/redo, mouse support.
 - After every edit the editor re-parses its own output; an edit that
   would break the round trip is refused on the spot, and the message
   line says what failed.
 
+Three keys make the difference on a formula that has grown past one
+line.
+
+### `^F` — the free cursor
+
+Arrows move over the *picture*, not the tree; Enter lands on the
+nearest edit position. Three wrong things in three corners of a normal
+distribution, fixed without walking there:
+
+![Fixing three mistakes in a normal distribution with the free cursor](demo/free-move.gif)
+
+It scales with the picture — here a Vandermonde determinant, where the
+targets are two matrix entries and the product's condition:
+
+![Correcting entries of a Vandermonde determinant](demo/free-move-matrix.gif)
+
+### `^B` — block select
+
+`^B` rings the structures around the cursor and `↑`/`↓` walk that ring,
+so a whole subexpression goes to the clipboard by shape rather than by
+counting characters. The DPO loss repeats the same policy ratio four
+times, and `^F` fixes the two letters that must differ:
+
+![Building the DPO loss by copying the ratio and its argument pair](demo/dpo.gif)
+
+### `^G` — grid edit
+
+Inside a matrix, `^G` gives a cell cursor; `c` and `r` switch to column
+and row lanes, where Enter on a gap inserts one and Backspace on a lane
+removes it. The plane rotation matrix becomes the rotation about the z
+axis:
+
+![Growing a 2x2 rotation matrix into a 3x3 one](demo/grid-edit.gif)
+
 Key reference: [docs/keys.md](docs/keys.md) · command reference:
-[docs/commands.md](docs/commands.md).
+[docs/commands.md](docs/commands.md). Every demo above is a
+[VHS](https://github.com/charmbracelet/vhs) tape in [`demo/`](demo) —
+`vhs demo/free-move.tape` re-records it.
 
 The same editor core compiles to WebAssembly; prototype integrations for
 VS Code and Obsidian live in their own repositories

@@ -15,7 +15,9 @@ categories = [
 ]
 # The agent guide and the CI config say nothing to someone depending on
 # the crate (and CLAUDE.md is a symlink to AGENTS.md).
-exclude = ["/.github/", "/.markdownlint.yaml", "/AGENTS.md", "/CLAUDE.md"]
+# …and the demo recordings, which are megabytes of GIF that a
+# dependency has no use for.
+exclude = ["/.github/", "/.markdownlint.yaml", "/AGENTS.md", "/CLAUDE.md", "/demo/"]
 
 [features]
 default = ["tui"]
