@@ -104,11 +104,6 @@ removes it.
 Keys: [docs/keys.md](docs/keys.md) · commands:
 [docs/commands.md](docs/commands.md).
 
-The editor core compiles to WebAssembly; prototype
-[VS Code](https://github.com/ho-oto/formulaa-vscode) and
-[Obsidian](https://github.com/ho-oto/formulaa-obsidian) integrations
-live in their own repositories.
-
 ## The core idea: what makes a picture parseable
 
 The format is designed backwards from the parser — four rules turn a
