@@ -71,7 +71,7 @@ requirements:
    | `┌┬┐ ├┼┤ └┴┘` | grid lattice markers (§5.5) |
    | `⬚` | the explicit empty: empty slots, the base of a leading script |
    | `' "` | roman/text quoting (§5.8) — the prime atom is `′` U+2032, a different character |
-   | `_ ¯ ˜ ˷ ˰ ˯ ˳ ․ ￫` | accent drawing forms (§5.7) — `․` U+2024 and `￫` U+FFEB are distinct from the atoms `.` and `→` |
+   | `_ ¯ ˜ ˷ ˰ ˯ ˳ ․ ⇾` | accent drawing forms (§5.7) — `․` U+2024 and `⇾` U+21FE are distinct from the atoms `.` and `→` |
    | math-italic letters, `⁰¹²…`, `₀₁₂…` | the *rendered* faces of plain letters and inline scripts (§5.6) |
 
 3. **Display-only characters** — the editor's view layer uses `▌` and
@@ -235,7 +235,7 @@ so it must not be representable.
 
 Marks are drawn in *base-hugging* forms: bar `_` (above) / `¯` (below),
 hat `˰`, tilde `˷` above / `˜` below, check `˯`, ring `˳`, dot `․`,
-vec `￫`, ddot `․․` (the second dot overhangs one column to the right;
+vec `⇾`, ddot `․․` (the second dot overhangs one column to the right;
 the overhang column has a blank baseline and holds nothing else).
 
 **Wide accents** (multi-character bases, `\widehat{abc}`,
@@ -243,7 +243,7 @@ the overhang column has a blank baseline and holds nothing else).
 `┈` + mark material hugs it above (below), one column wider on each
 side, discovered from the blank baseline column it overhangs.
 Stretchable marks fill the width (`┈___┈` overline, `┈˷˷˷┈` widetilde);
-point marks sit alone in the center (`┈┈˰┈┈` widehat, `┈┈￫┈┈` vec).
+point marks sit alone in the center (`┈┈˰┈┈` widehat, `┈┈⇾┈┈` vec).
 Fill glyphs are side-exclusive (`˷` above, `˜` below), so baseline
 recovery knows which way to dive past the band. Bands stack for
 repeated accents. A one-character base with a single mark normalizes to

@@ -784,7 +784,7 @@ mod tests {
             | '˯'                   // U+02EF MODIFIER LETTER LOW DOWN ARROWHEAD: check
             | '˳'                   // U+02F3 MODIFIER LETTER LOW RING: ring
             | '․'                   // U+2024 ONE DOT LEADER: dot / ddot (․․)
-            | '￫' // U+FFEB HALFWIDTH RIGHTWARDS ARROW: vec
+            | '⇾' // U+21FE RIGHTWARDS OPEN-HEADED ARROW: vec
         ) || crate::symbols::scripts::unsuperscript_char(c).is_some()
             || crate::symbols::scripts::unsubscript_char(c).is_some()
     }
@@ -960,7 +960,7 @@ mod tests {
         }
         assert!(n > 500, "the atom set looks too small: {}", n);
         // The halfwidth arrow is a *drawn* accent glyph, not an atom.
-        assert!(!is_atom('￫'));
+        assert!(!is_atom('⇾'));
         for c in ['😀', '漢', '\u{0301}', '─', '┈'] {
             assert!(!is_atom(c), "{:?} must be rejected", c);
         }

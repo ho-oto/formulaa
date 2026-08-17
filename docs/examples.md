@@ -90,7 +90,7 @@ i\hbar \frac{\partial \Psi }{\partial t}=-\frac{\hbar ^{2}}{2m}\frac{\partial ^{
 ### gauss-law
 
 ```plain
- ￫  ￫  𝑄
+ ⇾  ⇾  𝑄
 ∮𝐸⋅𝑑𝐴=────
        ε₀
 ```

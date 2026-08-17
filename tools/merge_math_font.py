@@ -30,10 +30,9 @@ Usage (the dependency is declared inline, PEP 723):
 
 Limitations: CFF/OTF base fonts are not supported (glyf outlines only);
 the donor's OpenType features (ligatures etc.) are not carried over —
-only base glyphs, which is all a terminal grid needs. JuliaMono itself
-has no `￫` (U+FFEB), the drawn `\vec` accent; pass a second donor that
-does (`-j JuliaMono-Regular.ttf -j Cica-Regular.ttf`) for full
-coverage of what formulAA can emit.
+only base glyphs, which is all a terminal grid needs. JuliaMono covers
+everything formulAA can emit; `-j` is repeatable anyway, for a base
+font whose gaps JuliaMono shares.
 """
 
 import argparse
@@ -73,7 +72,6 @@ MATH_RANGES = [
     (0x2980, 0x29FF),    # misc mathematical symbols-B (⦶ …)
     (0x2A00, 0x2AFF),    # supplemental mathematical operators
     (0x2B00, 0x2BFF),    # misc symbols and arrows (⬚ …)
-    (0xFFE8, 0xFFEE),    # halfwidth forms (￫, the drawn vec accent)
     (0x1D400, 0x1D7FF),  # mathematical alphanumeric symbols (𝑥 𝐀 ℎ-block…)
 ]
 
@@ -147,9 +145,7 @@ def main() -> None:
     ap.add_argument("base", help="base monospace font (.ttf/.ttc, glyf outlines)")
     ap.add_argument("-j", "--julia", action="append", default=None,
                     help="donor TTF; repeatable, first donor that has a "
-                         "codepoint wins (default: ./JuliaMono-Regular.ttf). "
-                         "JuliaMono has no ￫ (U+FFEB, the drawn vec accent) "
-                         "— add a font that does, e.g. Cica, to cover it")
+                         "codepoint wins (default: ./JuliaMono-Regular.ttf)")
     ap.add_argument("-o", "--output", default=None,
                     help="output path (default: <base stem>-Math.ttf)")
     ap.add_argument("--font-number", type=int, default=0,

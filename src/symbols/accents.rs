@@ -93,7 +93,8 @@ impl Accent {
         match self {
             // Drawn glyphs: ˰ U+02F0 LOW UP ARROWHEAD, ˯ U+02EF LOW
             // DOWN ARROWHEAD, ˳ U+02F3 LOW RING, ․ U+2024 LEADER (not
-            // the '.' atom), ￫ halfwidth U+FFEB (not the → atom),
+            // the '.' atom), ⇾ U+21FE OPEN-HEADED (not the → atom, and
+            // no LaTeX name claims it),
             // ˷ U+02F7 LOW TILDE, ˜ U+02DC SMALL TILDE.
             Accent::Hat => &AccentInfo {
                 name: "hat",
@@ -124,7 +125,7 @@ impl Accent {
                 latex: "vec",
                 wide_latex: "overrightarrow",
                 under: false,
-                drawn: DrawnForm::Center('￫'),
+                drawn: DrawnForm::Center('⇾'),
                 preview: '→',
             },
             Accent::Dot => &AccentInfo {

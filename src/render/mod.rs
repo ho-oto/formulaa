@@ -745,7 +745,7 @@ fn render_node(node: &Node, cursor: Option<(Field, CursorRef)>, ctx: &RenderCtx)
             let band_row = |m: Accent| {
                 let mut r = vec![OP_BAND; w];
                 match m.drawn() {
-                    // Centered single glyphs (￫ ˰ ˯ ˳ ․).
+                    // Centered single glyphs (⇾ ˰ ˯ ˳ ․).
                     DrawnForm::Center(g) => r[w / 2] = g,
                     // Fills hug the base across the width: the overline
                     // draws low (_ like the √ overline), the underline

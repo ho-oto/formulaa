@@ -80,8 +80,8 @@ by a corpus plus randomized property tests.
     merge closes the gap with the columns still aligned. Two fixes came
     out of it — the curated ranges had missed the subscript letters
     (`ᵢ ᵣ ᵤ ᵥ` live in Phonetic Extensions, `ⱼ` in Latin Extended-C),
-    and donors are now repeatable, because JuliaMono has no `￫` (the
-    drawn vec accent) and something like Cica must supply it.
+    and donors are now repeatable (at the time JuliaMono had no glyph
+    for the drawn vec accent — §86 moved that mark to one it has).
 
 14. **Marker-atom display decorations** — jump labels and block
     highlights insert private-use `Sym`s into a display-only clone of
@@ -223,7 +223,7 @@ by a corpus plus randomized property tests.
     Four fuzz findings folded into the scan rules.
 
 48. **Mark fill glyphs** — every accent draws in a base-hugging form
-    (`_` bar, `˰` hat, `˷`/`˜` tilde pair, `․` dot, `￫` vec, `․․` ddot
+    (`_` bar, `˰` hat, `˷`/`˜` tilde pair, `․` dot, `⇾` vec (§86), `․․` ddot
     with a one-column overhang); fill glyphs are side-exclusive so
     baseline recovery knows which way to dive. Breve deleted.
 
@@ -233,7 +233,7 @@ by a corpus plus randomized property tests.
     dropped from the parser; `FUNCS` became a single `FuncSpec` table;
     `symbols/` and `output/` directories.
 
-50. **`┈￫┈` vec, `┌─` radical overline, `\^z` script commands.**
+50. **`┈￫┈` vec (now `┈⇾┈`, §86), `┌─` radical overline, `\^z` script commands.**
 
 51. **^B ancestor chain; `\abs` = `⎢⎥`; word operators; CLI cleanups.**
 
@@ -503,6 +503,16 @@ by a corpus plus randomized property tests.
     script, and that scan had to learn to look *through* spacers, which
     write nothing in LaTeX (`\operatorname*{f}_{x}^{y}` would otherwise
     read back as the band's own upper limit).
+
+86. **The vec accent is `⇾`, not `￫`** (2026-08) — the drawn mark for
+    `\vec` was U+FFEB, the halfwidth arrow: chosen because no one would
+    ever want it as an atom, but only three of eight coding fonts here
+    draw it and JuliaMono is not among them, so not even the merged
+    font (§13) could show a vector. U+21FE RIGHTWARDS OPEN-HEADED ARROW
+    fixes that — JuliaMono has it, so one donor is enough again — and
+    it keeps the original virtue: no LaTeX spelling claims it, where
+    `⇀` (`\rightharpoonup`) and `⇢` (`\dashrightarrow`) are both worth
+    leaving free to become atoms.
 
 ## Test strategy
 

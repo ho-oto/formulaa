@@ -137,21 +137,21 @@ pair. Whitespace inside cells is free — markers decide the boundaries:
 For multi-character bases, a **marked band row** hugs the base:
 
 ```plain
-┈┈˰┈┈     ┈┈￫┈     ┈___┈
+┈┈˰┈┈     ┈┈⇾┈     ┈___┈
  𝑎𝑏𝑐       𝐴𝐵       𝑧+1   ← \widehat / \vec / \overline
                            (below: ┈¯¯¯┈ = \underline, ┈˜˜˜┈ = \utilde;
                             the base stays bare)
 ```
 
 All marks draw in base-hugging forms: bar above is `_`, hat `˰`, tilde
-`˷`, check `˯`, ring `˳`, dot `․` U+2024 (not the atom `.`), vec `￫`
-U+FFEB (not the atom `→`), ddot `․․` (overhanging one column right,
+`˷`, check `˯`, ring `˳`, dot `․` U+2024 (not the atom `.`), vec `⇾`
+U+21FE (not the atom `→`), ddot `․․` (overhanging one column right,
 that column's baseline stays blank), underline is `¯` below, utilde `˜`
 below (the tildes swap between AST and drawing).
 
 ```plain
-￫       ￫        ˰
-E ⋅ d A          ￫    ← stacks grow outward: \hat{\vec{a}}
+⇾       ⇾        ˰
+E ⋅ d A          ⇾    ← stacks grow outward: \hat{\vec{a}}
                  𝑎
 ```
 
@@ -205,7 +205,7 @@ italicize to `𝑥`, so they stay distinct). Write `\sin x` as `sin x` or
 ## Reserved characters (never atoms)
 
 `─ ┈ ═ │ √∛∜ ( ) [ ] ⎛⎜⎝⎞⎟⎠ ⎡⎢⎣⎤⎥⎦ { } ⟨ ⟩ ⎧⎪⎨⎩⎫⎬⎭ ╱ ╲ ┆ ┊ ⬚ ▌
-┌ ┬ ┐ ├ ┼ ┤ └ ┴ ┘ ╭ ╮ ╰ ╯ ¯ ˜ ˷ _ ˰ ˯ ˳ ․ ￫ ' "`,
+┌ ┬ ┐ ├ ┼ ┤ └ ┴ ┘ ╭ ╮ ╰ ╯ ¯ ˜ ˷ _ ˰ ˯ ˳ ․ ⇾ ' "`,
 math-italic letters, inline script characters. Beyond those, only
 characters in the symbol tables are usable (α ≤ ∈ → ℝ ⊗ …); anything
 else — full-width characters, emoji — is a parse error (it would shear
