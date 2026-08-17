@@ -59,8 +59,8 @@ parseable](#the-core-idea-what-makes-a-picture-parseable) below.
 The cost is a handful of **reserved structural glyphs** — the fraction
 bar `─`, the operator band `┈`, delimiter columns `⎛ ⎜ ⎝`, grid junctions
 `┼` — which are never ordinary content and have to line up. That is what
-the TUI is for: it edits the tree and redraws the picture, and checks
-the round trip before each edit lands. Input and output are still plain
+the TUI is for: it edits the tree and redraws the picture, so you never
+place those glyphs yourself. Input and output are still plain
 text, so you can hand-edit the file in vim, paste it into a document, or
 have a language model write it ([`SKILL.md`](SKILL.md) teaches the
 format).
@@ -76,8 +76,6 @@ saves and quits.
   aliases like `\->` and `\oo`).
 - Arrows move *through* structure; `↑`/`↓` enter limits. `Shift+←/→`
   selects, and a structure key wraps the selection.
-- Every edit is re-parsed; one that would break the round trip is
-  refused on the spot, with a message saying why.
 
 Three keys matter once a formula grows past one line.
 
