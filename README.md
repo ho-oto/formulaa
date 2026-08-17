@@ -10,24 +10,22 @@
 
 ![Typing the quadratic formula in the editor, saving it, converting it to LaTeX, and reopening it to change a sign](demo/quadratic.gif)
 
-## A session
-
 ```sh
-$ formulaa gauss.aa              # WYSIWYG editing in the terminal; ^W writes and quits
-$ cat gauss.aa                   # the file is nothing but the picture
+$ formulaa gauss.aa              # edit it in the terminal; ^W writes and quits
+$ cat gauss.aa                   # the file holds nothing but the picture
  ∞    -𝑥²   ┌─
 ┈∫┈┈ 𝑒   𝑑𝑥=√π
  -∞
-$ formulaa --aa2latex gauss.aa   # …which a machine reads back exactly
+$ formulaa --aa2latex gauss.aa   # a machine reads it back exactly
 \int_{-\infty }^{\infty }e^{-x^{2}}dx=\sqrt{\pi }
-$ formulaa --aa2latex gauss.aa | formulaa --latex2aa   # and the loop closes
+$ formulaa --aa2latex gauss.aa | formulaa --latex2aa   # and back again
  ∞    -𝑥²   ┌─
 ┈∫┈┈ 𝑒   𝑑𝑥=√π
  -∞
 ```
 
-No hidden markup generated that picture: `gauss.aa` *is* the source.
-Keep it wherever plain text goes; convert when a machine needs it.
+There is no markup behind the picture — the picture is the source. Keep
+it wherever plain text goes, and convert it when a machine needs it.
 
 ## Why a picture as the source
 
@@ -36,49 +34,41 @@ that resists. LaTeX is machine-readable but you have to picture
 `\frac{-b\pm\sqrt{b^2-4ac}}{2a}` in your head. ASCII art reads at a
 glance but nothing can interpret it.
 
-Diagram tools settled this by making the drawing itself the single
-source of truth — [ditaa](https://github.com/stathissideris/ditaa)
+Diagram tools take the drawing itself as the source and render it from
+there — [ditaa](https://github.com/stathissideris/ditaa)
 (2004), [aafigure](https://pypi.org/project/aafigure/),
 [ASCIIToSVG](https://github.com/dhobsd/asciitosvg),
 [Markdeep](https://casual-effects.com/markdeep/) (2015),
 [svgbob](https://github.com/ivanceras/svgbob),
-[GoAT](https://github.com/blampe/goat). formulAA does that for math,
-pointing at LaTeX rather than SVG.
+[GoAT](https://github.com/blampe/goat). formulAA does the same for
+math, with LaTeX as the output instead of SVG.
 
 ## One picture, one reading
 
-Those tools read free-form drawings as best they can — fine for boxes
-and arrows, where a near miss is still a diagram. Math cannot afford it:
-`a` above `b` is a fraction, a limit, or a coincidence of layout, and
-guessing wrong silently changes the meaning. So formulAA does not accept
-drawings in general; it defines a format
-([docs/aa-spec.md](docs/aa-spec.md), self-contained enough to write
-another parser from) in which every accepted picture has exactly one
-reading — [the rules that buy
-that](#the-core-idea-what-makes-a-picture-parseable) are below.
+Those tools read free-form drawings as best they can. That is fine for
+boxes and arrows, where a near miss is still a diagram, but math cannot
+work that way: `a` above `b` is a fraction, a limit, or a coincidence of
+layout, and a wrong guess changes the meaning silently.
 
-The price is a handful of **reserved structural glyphs** — the fraction
+So formulAA does not accept drawings in general. It defines a format
+([docs/aa-spec.md](docs/aa-spec.md), self-contained enough to write
+another parser from) where every accepted picture has exactly one
+reading; the rules are summarized in [what makes a picture
+parseable](#the-core-idea-what-makes-a-picture-parseable) below.
+
+The cost is a handful of **reserved structural glyphs** — the fraction
 bar `─`, the operator band `┈`, delimiter columns `⎛ ⎜ ⎝`, grid junctions
 `┼` — which are never ordinary content and have to line up. That is what
-the TUI is for: it edits the tree and redraws the picture, checking the
-round trip before each edit lands. Its input and output are still plain
-text — hand-edit it in vim, paste it into a document, or have a model
-write it ([`SKILL.md`](SKILL.md) teaches the format).
-
-Hand-written AA need not be canonical, either; `--format` closes the gap
-the way `gofmt` does:
-
-```sh
-$ printf '   1\n─────────\n1 + x\n' | formulaa --format
-   1
-───────
- 1 + 𝑥
-```
+the TUI is for: it edits the tree and redraws the picture, and checks
+the round trip before each edit lands. Input and output are still plain
+text, so you can hand-edit the file in vim, paste it into a document, or
+have a language model write it ([`SKILL.md`](SKILL.md) teaches the
+format).
 
 ## The editor
 
-`formulaa formula.aa` opens the editor on a file — `^O` saves, `^W`
-saves and quits, a missing name is where the first save goes.
+`formulaa formula.aa` opens the editor on a file; `^O` saves and `^W`
+saves and quits.
 
 - Type naturally: letters become math italics, `//` makes a fraction,
   `^`/`_` open scripts, `(` `[` `{` auto-size, and a `\` minibuffer with
@@ -89,7 +79,7 @@ saves and quits, a missing name is where the first save goes.
 - Every edit is re-parsed; one that would break the round trip is
   refused on the spot, with a message saying why.
 
-Three keys make the difference once a formula outgrows one line.
+Three keys matter once a formula grows past one line.
 
 ### `^F` — the free cursor
 
@@ -149,8 +139,8 @@ drawing into a grammar:
 
 3. **Extent is spanned, never counted.** A bar is wider than both its
    arguments; a band sandwiches its operator. No rule depends on *how
-   many* spaces separate two things — which is what makes hand-editing
-   survivable.
+   many* spaces separate two things, so hand-editing cannot break the
+   picture by shifting something sideways.
 
 4. **One canonical spelling per tree.** The renderer's output is the
    normal form and the parser accepts a superset. Ambiguity that cannot
