@@ -82,18 +82,14 @@ Three keys matter once a formula grows past one line.
 ### `^F` — the free cursor
 
 Arrows move over the *picture*, not the tree; Enter lands on the nearest
-edit position. Two entries of a Vandermonde determinant and the
-product's condition, fixed without walking there:
+edit position.
 
 ![Correcting entries of a Vandermonde determinant](demo/free-move-matrix.gif)
 
 ### `^B` — block select
 
 `^B` rings the structures around the cursor and `↑`/`↓` walk it, so a
-subexpression is copied by shape, not by counting characters. The DPO
-loss repeats the same policy ratio four times: from the innermost `x`
-the ring grows one structure at a time — the argument pair, the parens,
-the whole numerator — and `^F` flies to the letters that must differ:
+subexpression is copied by shape rather than by counting characters.
 
 ![Building the DPO loss by copying the policy ratio](demo/dpo.gif)
 
@@ -101,7 +97,7 @@ the whole numerator — and `^F` flies to the letters that must differ:
 
 Inside a matrix, `^G` gives a cell cursor; `c` and `r` switch to column
 and row lanes, where Enter on a gap inserts one and Backspace on a lane
-removes it. A plane rotation becomes a rotation about the z axis:
+removes it.
 
 ![Growing a 2x2 rotation matrix into a 3x3 one](demo/grid-edit.gif)
 
