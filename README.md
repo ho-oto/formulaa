@@ -1,5 +1,7 @@
 # formulAA
 
+[![ci](https://github.com/ho-oto/formulaa/actions/workflows/ci.yml/badge.svg)](https://github.com/ho-oto/formulaa/actions/workflows/ci.yml)
+
 **Math as plain text you can actually edit.** Three pieces:
 
 - a **2D text format** for formulas — Unicode "ASCII art" with a formal
