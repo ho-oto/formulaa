@@ -247,6 +247,32 @@ LaTeX round-trips: everything `--aa2latex` emits reads back to the exact
 same tree, and `\latex` in the editor opens a box you can paste LaTeX
 into (unknown commands are skipped, never an error).
 
+## Fonts
+
+Every atom in the format is exactly one terminal cell wide, so the
+picture only holds together in a monospace font that actually *has* the
+glyphs — mathematical alphanumerics (`𝑥`, `𝒟`, `𝔼`), big operators,
+bracket pieces, box drawing. Most coding fonts do not: against the 1122
+code points formulAA can emit, a stock JetBrains Mono misses 756 and
+Cascadia Code 927, and a terminal that falls back to a proportional
+font shears every column.
+
+[JuliaMono](https://juliamono.netlify.app/) covers the whole vocabulary
+and is the simplest answer — set it as your terminal font and
+everything renders.
+
+To keep the font you already like, merge the missing glyphs into it:
+
+```sh
+uv run tools/merge_math_font.py ~/Library/Fonts/YourMono.ttf -j JuliaMono-Regular.ttf
+# -> YourMono-Math.ttf, metrics-compatible with the original
+```
+
+The script (PEP 723 — `uv` fetches fontTools itself) copies only what
+the base font lacks and rescales each outline to the base cell width,
+so the alignment is preserved. `-j` is repeatable if one donor is not
+enough.
+
 ## For AI agents
 
 Because the format is plain text with a strict grammar, language models
