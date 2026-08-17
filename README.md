@@ -68,7 +68,8 @@ format).
 ## The editor
 
 `formulaa formula.aa` opens the editor on a file; `^O` saves and `^W`
-saves and quits.
+saves and quits. Full reference: [keys](docs/keys.md) ·
+[commands](docs/commands.md).
 
 - Type naturally: letters become math italics, `//` makes a fraction,
   `^`/`_` open scripts, `(` `[` `{` auto-size, and a `\` minibuffer with
@@ -100,9 +101,6 @@ and row lanes, where Enter on a gap inserts one and Backspace on a lane
 removes it.
 
 ![Growing a 2x2 rotation matrix into a 3x3 one](demo/grid-edit.gif)
-
-Keys: [docs/keys.md](docs/keys.md) · commands:
-[docs/commands.md](docs/commands.md).
 
 ## The core idea: what makes a picture parseable
 
