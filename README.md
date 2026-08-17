@@ -102,8 +102,7 @@ removes it.
 ![Growing a 2x2 rotation matrix into a 3x3 one](demo/grid-edit.gif)
 
 Keys: [docs/keys.md](docs/keys.md) · commands:
-[docs/commands.md](docs/commands.md). Every demo is a
-[VHS](https://github.com/charmbracelet/vhs) tape in [`demo/`](demo).
+[docs/commands.md](docs/commands.md).
 
 The editor core compiles to WebAssembly; prototype
 [VS Code](https://github.com/ho-oto/formulaa-vscode) and
