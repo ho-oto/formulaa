@@ -163,8 +163,9 @@ targets are two matrix entries and the product's condition:
 `^B` rings the structures around the cursor and `↑`/`↓` walk that ring,
 so a whole subexpression goes to the clipboard by shape rather than by
 counting characters. The DPO loss repeats the same policy ratio four
-times: `^B` takes the numerator whole, then the entire fraction, and
-`^F` flies to the letters that must differ:
+times: from the innermost `x` the ring grows one structure at a time —
+the argument pair, the parens, the whole numerator — and `^F` flies to
+the letters that must differ:
 
 ![Building the DPO loss by copying the policy ratio](demo/dpo.gif)
 

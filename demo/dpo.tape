@@ -31,15 +31,20 @@ Sleep 900ms
 Enter
 Sleep 1500ms
 
-# ^F to the numerator, ^B to take it whole: the slot the cursor stands
-# in is the first step of the ring.
+# ^F lands on the innermost x; from there the ring grows one structure
+# at a time — the argument pair, the parens, the whole numerator.
 Ctrl+F
 Sleep 400ms
 Up 2
+Left 5
 Sleep 800ms
 Enter
 Sleep 400ms
 Ctrl+B
+Sleep 900ms
+Up
+Sleep 800ms
+Up
 Sleep 900ms
 Enter
 Ctrl+C
