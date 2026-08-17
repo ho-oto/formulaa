@@ -163,9 +163,10 @@ targets are two matrix entries and the product's condition:
 `^B` rings the structures around the cursor and `↑`/`↓` walk that ring,
 so a whole subexpression goes to the clipboard by shape rather than by
 counting characters. The DPO loss repeats the same policy ratio four
-times, and `^F` fixes the two letters that must differ:
+times: `^B` takes the numerator whole, then the entire fraction, and
+`^F` flies to the letters that must differ:
 
-![Building the DPO loss by copying the ratio and its argument pair](demo/dpo.gif)
+![Building the DPO loss by copying the policy ratio](demo/dpo.gif)
 
 ### `^G` — grid edit
 

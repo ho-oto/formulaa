@@ -2503,6 +2503,9 @@ mod tests {
         }
         assert!(!ed.path.is_empty(), "the cursor did not re-enter the frac");
         ed.input(Key::Char('b'), false, true); // ^B
+        // One step out: the fraction and the whole row, whose boxes
+        // open on the same cell — which is what this test is about.
+        ed.input(Key::Up, false, false);
         assert!(ed.block.is_some());
         let mut view = View::default();
         let mut term = Terminal::new(TestBackend::new(30, 8)).unwrap();

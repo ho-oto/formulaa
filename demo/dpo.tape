@@ -1,6 +1,6 @@
 # ^B + ^F together on the DPO loss, where the same policy ratio shows
-# up four times. ^B takes a structure whole (the ⟨y|x⟩ pair, then the
-# entire fraction) and ^F flies to the two letters that have to differ.
+# up four times. ^B takes a structure whole — the numerator, then the
+# entire fraction — and ^F flies to the letters that have to differ.
 #   cargo build --release && vhs demo/dpo.tape
 # (needs JuliaMono for the math italics and the tall delimiters.)
 Output demo/dpo.gif
@@ -31,11 +31,11 @@ Sleep 900ms
 Enter
 Sleep 1500ms
 
-# the argument pair in the numerator: ^F lands in it, ^B takes it whole
+# ^F to the numerator, ^B to take it whole: the slot the cursor stands
+# in is the first step of the ring.
 Ctrl+F
 Sleep 400ms
 Up 2
-Left 7
 Sleep 800ms
 Enter
 Sleep 400ms
@@ -43,28 +43,35 @@ Ctrl+B
 Sleep 900ms
 Enter
 Ctrl+C
-Sleep 700ms
+Sleep 800ms
 
-# the denominator is the reference policy with the same argument
+# the denominator is the same ratio with one letter changed
 Ctrl+F
 Sleep 300ms
 Down 3
 Sleep 700ms
 Enter
-Sleep 400ms
-Type "\pi"
-Enter
-Type "_"
-Type "\rmref"
-Enter
-Tab
-Sleep 400ms
+Sleep 300ms
 Ctrl+V
 Sleep 1200ms
+Ctrl+F
+Sleep 300ms
+Down
+Left 8
+Sleep 800ms
+Enter
+Sleep 300ms
+Ctrl+D
+Type "\rmref"
+Enter
+Sleep 1400ms
 
 # now the whole ratio, again, after a minus
+Tab
 Ctrl+B
-Sleep 900ms
+Sleep 700ms
+Up
+Sleep 800ms
 Enter
 Ctrl+C
 Sleep 500ms
