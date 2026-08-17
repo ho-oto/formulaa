@@ -82,13 +82,8 @@ Three keys matter once a formula grows past one line.
 ### `^F` — the free cursor
 
 Arrows move over the *picture*, not the tree; Enter lands on the nearest
-edit position. Three mistakes in three corners of a normal distribution,
-fixed without walking there:
-
-![Fixing three mistakes in a normal distribution with the free cursor](demo/free-move.gif)
-
-It scales with the picture — a Vandermonde determinant, two matrix
-entries and the product's condition:
+edit position. Two entries of a Vandermonde determinant and the
+product's condition, fixed without walking there:
 
 ![Correcting entries of a Vandermonde determinant](demo/free-move-matrix.gif)
 
