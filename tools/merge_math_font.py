@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["fonttools>=4.50"]
+# ///
 """Merge math-symbol glyphs from JuliaMono into another monospace font.
 
 Most monospace fonts miss large parts of the Unicode math repertoire
@@ -12,9 +16,8 @@ its advance width is exactly N terminal cells of the base font (N = 2 for
 East-Asian-wide chars, else 1). The result stays metrics-compatible with
 the base font, so alignment is preserved.
 
-Requirements: pip install fonttools
-Usage:
-    python3 tools/merge_math_font.py BASE_FONT [-j DONOR ...]
+Usage (the dependency is declared inline, PEP 723):
+    uv run tools/merge_math_font.py BASE_FONT [-j DONOR ...]
         [-o output.ttf] [--font-number N] [--all-missing]
 
     BASE_FONT      .ttf/.ttc, TrueType outlines (glyf). For .ttc pick the
@@ -38,13 +41,10 @@ import sys
 import unicodedata
 from collections import Counter
 
-try:
-    from fontTools.ttLib import TTFont
-    from fontTools.pens.ttGlyphPen import TTGlyphPen
-    from fontTools.pens.transformPen import TransformPen
-    from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
-except ImportError:
-    sys.exit("fontTools is required: pip install fonttools")
+from fontTools.pens.transformPen import TransformPen
+from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.ttLib import TTFont
+from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
 
 # Curated ranges: everything formulAA's canonical AA form can emit, plus the
 # broader math blocks so user symbols (\bbR, arrows, …) render too.
