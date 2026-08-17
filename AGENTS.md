@@ -77,7 +77,7 @@ test fails — vacuous tests have slipped through more than once.
 | `src/guard.rs` | per-edit roundtrip check: a breaking edit is undone and reported on the message line |
 | `tests/roundtrip.rs` | formula corpus + randomized property tests |
 | `tests/ui.rs` | key-driven UI tests (script DSL + random key sequences) |
-| `tools/merge_math_font.py` | merged-font generator — `uv run tools/merge_math_font.py BASE -j JuliaMono-Regular.ttf -j Cica-Regular.ttf` (deps are inline, PEP 723; two donors because JuliaMono has no `￫`) |
+| `tools/merge_math_font.py` | merged-font generator — `uv run tools/merge_math_font.py BASE -j JuliaMono-Regular.ttf` (deps are inline, PEP 723; JuliaMono covers the whole vocabulary) |
 | (wasm) | wasm bindings live in the **extension repositories** (formulaa-vscode / formulaa-obsidian); this repo is lib + CLI only |
 | `SKILL.md` | guide for AI agents reading/writing AA directly |
 | `docs/examples.md` | corpus catalog (regenerate via `examples/catalog.rs`) |
