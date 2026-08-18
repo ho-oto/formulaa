@@ -237,7 +237,7 @@ LaTeX `\\`. There is no alignment.
 
 ## Examples
 
-(Real spaces added for readability; `formulaa --format` tightens them.)
+(Real spaces are formatting spacers; the parser keeps them.)
 
 Quadratic formula:
 
