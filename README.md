@@ -1,6 +1,8 @@
 # formulAA
 
 [![ci](https://github.com/ho-oto/formulaa/actions/workflows/ci.yml/badge.svg)](https://github.com/ho-oto/formulaa/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/formulaa.svg)](https://crates.io/crates/formulaa)
+[![docs.rs](https://docs.rs/formulaa/badge.svg)](https://docs.rs/formulaa)
 
 **Math as plain text you can actually edit.** Three pieces:
 
@@ -175,6 +177,12 @@ rows and columns stay unambiguous even with empty cells:
 ⎢ ⋮   ⋮     ⋮    ⋱     ⋮   ⎥    1≤𝑖<𝑗≤𝑛
 ⎢   ┼    ┼     ┼   ┼       ⎥
 ⎣ 1   𝑥ₙ   𝑥ₙ²   ⋯   𝑥ₙⁿ⁻¹ ⎦
+```
+
+## Install
+
+```sh
+cargo install formulaa
 ```
 
 ## CLI
