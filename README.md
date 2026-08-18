@@ -6,7 +6,7 @@
 
 - a **2D text format** for formulas — Unicode "ASCII art" with a formal
   grammar ([docs/aa-spec.md](docs/aa-spec.md)): every picture has exactly
-  one reading, and parses back to the tree that drew it;
+  one reading and parses back to the syntax tree it was rendered from;
 - a **WYSIWYG structure editor** in the terminal for writing it;
 - **converters** to and from LaTeX, and a formatter.
 
@@ -14,27 +14,27 @@
 
 ```sh
 $ formulaa gauss.aa              # edit it in the terminal; ^W writes and quits
-$ cat gauss.aa                   # the file holds nothing but the picture
+$ cat gauss.aa                   # the file is just the picture
  ∞    -𝑥²   ┌─
 ┈∫┈┈ 𝑒   𝑑𝑥=√π
  -∞
-$ formulaa --aa2latex gauss.aa   # a machine reads it back exactly
+$ formulaa --aa2latex gauss.aa   # the picture converts to LaTeX
 \int_{-\infty }^{\infty }e^{-x^{2}}dx=\sqrt{\pi }
-$ formulaa --aa2latex gauss.aa | formulaa --latex2aa   # and back again
+$ formulaa --aa2latex gauss.aa | formulaa --latex2aa   # and converts back
  ∞    -𝑥²   ┌─
 ┈∫┈┈ 𝑒   𝑑𝑥=√π
  -∞
 ```
 
-There is no markup behind the picture — the picture is the source. Keep
-it wherever plain text goes, and convert it when a machine needs it.
+There is no separate source file behind the picture: the AA text is
+what gets stored, edited and converted. Put it anywhere plain text goes.
 
 ## Why a picture as the source
 
-Terminals, git, Markdown and prompts run on plain text; math is the part
-that resists. LaTeX is machine-readable but you have to picture
-`\frac{-b\pm\sqrt{b^2-4ac}}{2a}` in your head. ASCII art reads at a
-glance but nothing can interpret it.
+Terminals, git, Markdown and prompts all work on plain text, but math
+fits it badly. LaTeX is machine-readable, but a human has to picture
+`\frac{-b\pm\sqrt{b^2-4ac}}{2a}` in their head. ASCII art is readable at
+a glance, but no program can interpret it.
 
 Diagram tools take the drawing itself as the source and render it from
 there — [ditaa](https://github.com/stathissideris/ditaa)
@@ -47,25 +47,24 @@ math, with LaTeX as the output instead of SVG.
 
 ## One picture, one reading
 
-Those tools read free-form drawings as best they can. That is fine for
-boxes and arrows, where a near miss is still a diagram, but math cannot
-work that way: `a` above `b` is a fraction, a limit, or a coincidence of
-layout, and a wrong guess changes the meaning silently.
+Those tools interpret free-form drawings as best they can. That works
+for boxes and arrows, but not for math: `a` above `b` could be a
+fraction, a limit, or two unrelated lines, and a wrong guess silently
+changes the meaning.
 
-So formulAA does not accept drawings in general. It defines a format
-([docs/aa-spec.md](docs/aa-spec.md), self-contained enough to write
-another parser from) where every accepted picture has exactly one
-reading; the rules are summarized in [what makes a picture
+So formulAA does not interpret arbitrary drawings. It defines a format
+([docs/aa-spec.md](docs/aa-spec.md)) in which every accepted picture has
+exactly one reading; the rules are summarized in [what makes a picture
 parseable](#the-core-idea-what-makes-a-picture-parseable) below.
 
-The cost is a handful of **reserved structural glyphs** — the fraction
-bar `─`, the operator band `┈`, delimiter columns `⎛ ⎜ ⎝`, grid junctions
-`┼` — which are never ordinary content and have to line up. That is what
-the TUI is for: it edits the tree and redraws the picture, so you never
-place those glyphs yourself. Input and output are still plain
-text, so you can hand-edit the file in vim, paste it into a document, or
-have a language model write it ([`SKILL.md`](SKILL.md) teaches the
-format).
+This requires a few **reserved structural glyphs** — the fraction bar
+`─`, the operator band `┈`, delimiter columns `⎛ ⎜ ⎝`, grid junctions
+`┼` — which never appear as ordinary content and have to line up
+correctly. Keeping them aligned by hand would be tedious, so the editor
+does it: it edits the syntax tree and redraws the picture. The files
+themselves are still plain text — you can edit them in vim, paste them
+into a document, or have a language model write them
+([`SKILL.md`](SKILL.md) documents the format for that purpose).
 
 ## The editor
 
@@ -80,19 +79,20 @@ saves and quits. Full reference: [keys](docs/keys.md) ·
 - Arrows move *through* structure; `↑`/`↓` enter limits. `Shift+←/→`
   selects, and a structure key wraps the selection.
 
-Three keys matter once a formula grows past one line.
+Three modes help once a formula grows past one line.
 
 ### `^F` — the free cursor
 
-Arrows move over the *picture*, not the tree; Enter lands on the nearest
-edit position.
+Arrows move over the picture instead of through the tree; Enter lands
+on the nearest edit position.
 
 ![Correcting entries of a Vandermonde determinant](demo/free-move-matrix.gif)
 
 ### `^B` — block select
 
-`^B` rings the structures around the cursor and `↑`/`↓` walk it, so a
-subexpression is copied by shape rather than by counting characters.
+`^B` highlights the enclosing structures of the cursor, `↑`/`↓` widen
+and narrow the selection, so a whole subexpression can be copied in a
+few keys.
 
 ![Building the DPO loss by copying the policy ratio](demo/dpo.gif)
 
@@ -106,8 +106,8 @@ removes it.
 
 ## The core idea: what makes a picture parseable
 
-The format is designed backwards from the parser — four rules turn a
-drawing into a grammar:
+The format is designed around four rules that make parsing
+deterministic:
 
 1. **Every subexpression owns a rectangle and a baseline row.** Siblings
    sit in disjoint column ranges; vertical structure exists only inside
@@ -115,28 +115,29 @@ drawing into a grammar:
    recurse into the rectangles that structural glyphs claim.
 
 2. **Structure is drawn with glyphs that can never be atoms.** The bar
-   `─`, the band `┈`, delimiter columns `⎛ ⎜ ⎝`, the radical `√` — banned
-   from content, so their appearance is always a structural claim. Atoms
-   come from an allow-list of one-cell characters, so a stray wide or
-   combining character cannot shear the grid.
+   `─`, the band `┈`, delimiter columns `⎛ ⎜ ⎝`, the radical `√` are
+   banned from ordinary content, so when one appears it always marks
+   structure. Atoms come from an allow-list of one-cell characters, so
+   a wide or combining character cannot break the grid.
 
 3. **Extent is spanned, never counted.** A bar is wider than both its
    arguments; a band sandwiches its operator. No rule depends on *how
-   many* spaces separate two things, so hand-editing cannot break the
-   picture by shifting something sideways.
+   many* spaces separate two things, so shifting something sideways
+   while hand-editing does not change the reading.
 
 4. **One canonical spelling per tree.** The renderer's output is the
-   normal form and the parser accepts a superset. Ambiguity that cannot
-   be drawn cannot be represented: accents stack as flat lists, because
-   the picture cannot tell `\hat{\underline{x}}` from
-   `\underline{\hat{x}}`.
+   normal form and the parser accepts a superset. What the picture
+   cannot distinguish, the AST does not represent: accents stack as
+   flat lists, because the picture cannot tell `\hat{\underline{x}}`
+   from `\underline{\hat{x}}`.
 
-A formula is a picture *and* a syntax tree at all times.
+The result is that a formula is a picture and a syntax tree at the same
+time.
 
 ## Examples
 
-From the round-trip corpus ([more examples](docs/examples.md)) — each parses back
-to its exact tree and converts to the LaTeX shown.
+Taken from the test corpus ([more examples](docs/examples.md)); each
+parses back to its exact tree and converts to the LaTeX shown.
 
 The quadratic formula:
 
@@ -203,10 +204,10 @@ glyphs into another coding font if you would rather keep yours.
 
 ## For AI agents
 
-Plain text with a strict grammar is something a language model can write
-directly. [`SKILL.md`](SKILL.md) is a self-contained guide to the format
-plus its verification loop (`--format` to check, `--aa2latex` to confirm
-the meaning) — for embedding re-editable math in documents that humans
-and agents both maintain.
+Language models can read and write the format directly.
+[`SKILL.md`](SKILL.md) is a self-contained guide for them, including
+the verification loop (`--format` to check the syntax, `--aa2latex` to
+confirm the meaning). This makes AA a practical way to embed
+re-editable math in documents that humans and agents both maintain.
 
 MIT licensed.
