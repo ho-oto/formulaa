@@ -514,6 +514,18 @@ by a corpus plus randomized property tests.
     `⇀` (`\rightharpoonup`) and `⇢` (`\dashrightarrow`) are both worth
     leaving free to become atoms.
 
+87. **`^B` walks slots as well as nodes** (2026-08) — the ring used to
+    step only through ancestor *nodes*, so a numerator holding more
+    than one node could not be selected at all: from inside `π_θ(y|x)`
+    the first stop was the whole fraction, and copying just the
+    numerator meant a linear `Shift+←` sweep. The ring now alternates —
+    the slot the cursor stands in taken whole, then the structure
+    owning it, outward — which is also what the top level already did
+    (the root row is the outermost slot, and it was there for exactly
+    this reason). Two guards keep it honest: an empty slot is no
+    target, and a slot holding a single node is the same box as that
+    node seen from inside it, so consecutive duplicates collapse.
+
 ## Test strategy
 
 - `tests/roundtrip.rs`: a corpus of real formulas (Cardano,

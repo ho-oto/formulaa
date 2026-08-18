@@ -255,24 +255,28 @@ impl Editor {
     /// The cursor's enclosing structure nodes, innermost first: one
     /// (parent row path, node index) per ancestor.
     pub fn block_targets(&self) -> Vec<BlockRef> {
-        let mut targets: Vec<BlockRef> = (0..self.path.len())
-            .rev()
-            .map(|k| {
-                let i = self.path[k].0;
-                (self.path[..k].to_vec(), i..i + 1)
-            })
-            .collect();
-        // The outermost step is the whole formula — walking ↑ always
-        // ends on "select everything", and ^B at the top level starts
-        // there. Skipped when the outermost ancestor already IS the
-        // whole row (a single root node), which would paint the same
-        // box twice.
-        let all = 0..self.root.len();
-        if !self.root.is_empty()
-            && targets.last().map(|(p, r)| (p.as_slice(), r)) != Some((&[], &all))
-        {
-            targets.push((Vec::new(), all));
+        // Walking out alternates between a slot taken whole — the
+        // numerator, the limit, the cell the cursor stands in — and the
+        // structure that owns it. The slot is the one range no node
+        // names, and the outermost step is the root row for the same
+        // reason. Two consecutive steps can land on the same box (a
+        // slot holding one node, seen from inside that node), and an
+        // empty slot has nothing to offer: neither becomes a target.
+        fn push(out: &mut Vec<BlockRef>, t: BlockRef) {
+            if !t.1.is_empty() && out.last() != Some(&t) {
+                out.push(t);
+            }
         }
+        let mut targets: Vec<BlockRef> = Vec::new();
+        for k in (0..self.path.len()).rev() {
+            let slot = row_at(&self.root, &self.path[..k + 1]).len();
+            push(&mut targets, (self.path[..k + 1].to_vec(), 0..slot));
+            let i = self.path[k].0;
+            push(&mut targets, (self.path[..k].to_vec(), i..i + 1));
+        }
+        // Walking ↑ always ends on "select everything", and ^B at the
+        // top level starts there.
+        push(&mut targets, (Vec::new(), 0..self.root.len()));
         targets
     }
 

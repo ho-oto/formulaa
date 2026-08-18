@@ -9,6 +9,7 @@
 //!   - named keys: Left Right Up Down Home End Tab Enter Backspace
 //!     Delete Esc Space, with `S-` (shift) / `C-` (ctrl) prefixes
 
+use formulaa::ast::Field;
 use formulaa::ast::normalize;
 use formulaa::editor::{Ask, Editor};
 use formulaa::input::{Effect, Key};
@@ -1068,14 +1069,54 @@ fn content_inserts_replace_the_selection() {
     assert_eq!(latex(&ed), "a \\\\ c");
 }
 
+/// ^B starts on the slot the cursor stands in when that slot holds
+/// more than one node: a numerator, a limit, a cell taken whole is the
+/// one range no ancestor step can name. The step out is the structure
+/// that owns it.
+#[test]
+fn block_select_starts_with_the_slot_it_stands_in() {
+    let mut ed = Editor::new();
+    // 𝑎+𝑏 over 2: inside the numerator, ^B rings 𝑎+𝑏 …
+    type_script(&mut ed, r"// a + b Down 2 Up C-b Enter");
+    assert_eq!(ed.selection(), Some((0, 3)), "not the whole numerator");
+    assert_eq!(latex(&ed), "\\frac{a+b}{2}", "the formula moved");
+    // …and one step out is the fraction itself.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"// a + b Down 2 Up C-b Up Enter");
+    assert_eq!(ed.path, vec![], "the step out stayed inside");
+    assert_eq!(ed.selection(), Some((0, 1)), "not the fraction");
+    // A slot holding one node still offers itself — that box is the
+    // node inside it, which no ancestor step names.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"// a Down 2 Up C-b Enter");
+    assert_eq!(
+        ed.path,
+        vec![(0, Field::FracNum)],
+        "not the numerator's own slot"
+    );
+    assert_eq!(ed.selection(), Some((0, 1)));
+    // …but seen from *inside* that node the two coincide, and the ring
+    // paints no box twice: from inside the radical the steps are the
+    // radical, then the fraction, then the row.
+    let mut ed = Editor::new();
+    type_script(&mut ed, r"// \sqrt x Down 2 Up");
+    let boxes = ed.block_targets();
+    assert_eq!(
+        boxes.len(),
+        3,
+        "a coincident slot/node pair was painted twice: {:?}",
+        boxes
+    );
+}
+
 /// \mid is contextual: the divides atom ∣ in a plain row, the segment
 /// separator directly inside a delimiter block.
 #[test]
 fn block_select_mode_selects_a_structure() {
     let mut ed = Editor::new();
     // Cursor inside the fraction's denominator: ^B highlights the
-    // fraction (innermost parent); Enter selects it.
-    type_script(&mut ed, r"1 // 2 Down 3 C-b");
+    // denominator's contents, ↑ the fraction; Enter selects it.
+    type_script(&mut ed, r"1 // 2 Down 3 C-b Up");
     // The block marks must appear in the decorated view.
     let (root, cursor) = ed.decorated();
     assert!(cursor.is_some(), "cursor stays threaded during modes");
@@ -1099,7 +1140,7 @@ fn block_select_mode_selects_a_structure() {
     // Shift+←/→ inside the mode: select the highlighted block and move
     // straight into the linear selection.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"1 // 2 Down 3 C-b S-Left");
+    type_script(&mut ed, r"1 // 2 Down 3 C-b Up S-Left");
     assert!(ed.block.is_none(), "mode exits");
     assert_eq!(ed.selection(), Some((0, 2)));
     // Arrow walk: outward Array -> Delim; a second ^B cancels without
@@ -1108,8 +1149,12 @@ fn block_select_mode_selects_a_structure() {
     type_script(&mut ed, r"\pmatrix22 x");
     let (path, col) = (ed.path.clone(), ed.col);
     type_script(&mut ed, r"C-b");
-    assert_eq!(ed.block.as_ref().map(Vec::len), Some(2), "Array + Delim");
-    assert_eq!(ed.block_sel, 0, "innermost parent first");
+    assert_eq!(
+        ed.block.as_ref().map(Vec::len),
+        Some(3),
+        "cell + Array + Delim"
+    );
+    assert_eq!(ed.block_sel, 0, "the cell it stands in first");
     type_script(&mut ed, "Up");
     assert_eq!(ed.block_sel, 1);
     type_script(&mut ed, "Down");
@@ -1120,7 +1165,7 @@ fn block_select_mode_selects_a_structure() {
     // Enter on the outer ancestor selects the delimiter block, ready
     // for wrapping.
     let mut ed = Editor::new();
-    type_script(&mut ed, r"\pmatrix22 x C-b Up Enter \sqrt");
+    type_script(&mut ed, r"\pmatrix22 x C-b Up Up Enter \sqrt");
     assert_eq!(
         latex(&ed),
         "\\sqrt{\\begin{pmatrix} x &  \\\\  &  \\end{pmatrix}}"
@@ -2199,11 +2244,11 @@ fn block_select_reaches_the_whole_formula() {
     type_script(&mut ed, "x+ ( y C-b Up Up Up Enter");
     assert_eq!(ed.selection(), Some((0, 3)));
 
-    // A single root node: the outermost ancestor already is the whole
-    // formula, so no duplicate target is added.
+    // A single root node: its contents, then the node — and the root
+    // row, which is that same box, is not added twice.
     let mut ed = Editor::new();
     type_script(&mut ed, "( x C-b");
-    assert_eq!(ed.block.as_ref().map(Vec::len), Some(1));
+    assert_eq!(ed.block.as_ref().map(Vec::len), Some(2));
 
     // An empty formula: silent no-op.
     let mut ed = Editor::new();
